@@ -310,7 +310,7 @@ Implement one scraper per source file. Each must follow these rules:
 | `lmarena.py` | `chatbot_arena` | https://lmarena.ai/ | Playwright — Gradio app; wait for leaderboard table | Web search: `"chatbot arena leaderboard ELO scores"` + parse |
 | `mmmu.py` | `mmmu` | https://mmmu-benchmark.github.io/ | httpx first (GitHub Pages is static HTML) | Playwright fallback |
 | `ifeval.py` | `ifeval` | https://llm-stats.com/benchmarks/ifeval | httpx + BeautifulSoup (likely static render) | HuggingFace Space fallback |
-| `terminal_bench.py` | `terminal_bench` | https://www.tbench.ai/leaderboard/terminal-bench/2.0 | Playwright | Web search fallback |
+| `terminal_bench.py` | `terminal_bench` | https://www.tbench.ai/leaderboard/terminal-bench/2.0 | httpx + embedded payload parse; derive best verified single-model submission per model | Playwright fallback |
 | `ailuminate.py` | `ailuminate` | https://ailuminate.mlcommons.org/benchmarks/ | **Flag as manual only.** Return empty results. Log a warning: `"AILuminate requires manual score entry — use POST /api/scores/manual. Grade mapping: Poor=0, Fair=25, Good=50, VeryGood=75, Excellent=100"` |
 | `web_search.py` | Any | DuckDuckGo | Used as fallback by other scrapers. Takes a query string, returns top 3 result snippets. Caller parses for scores. |
 
@@ -500,9 +500,9 @@ SEED_SCORES = [
   { "model_id": "claude-sonnet-4-6", "benchmark_id": "swebench_verified","value": 79.6, "raw_value": "79.6%", "source_type": "secondary", "verified": False },
   { "model_id": "glm-5",             "benchmark_id": "swebench_verified","value": 77.8, "raw_value": "77.8%", "source_type": "secondary", "verified": False },
   # Terminal-Bench 2.0
-  { "model_id": "gemini-3-1-pro",    "benchmark_id": "terminal_bench",  "value": 78.4,  "raw_value": "78.4%", "source_type": "secondary", "verified": False },
-  { "model_id": "gpt-5-3-codex",     "benchmark_id": "terminal_bench",  "value": 77.3,  "raw_value": "77.3%", "source_type": "secondary", "verified": False },
-  { "model_id": "claude-opus-4-6",   "benchmark_id": "terminal_bench",  "value": 74.7,  "raw_value": "74.7%", "source_type": "secondary", "verified": False },
+  { "model_id": "gemini-3-1-pro",    "benchmark_id": "terminal_bench",  "value": 78.4,  "raw_value": "78.4%", "source_type": "secondary", "verified": True },
+  { "model_id": "gpt-5-3-codex",     "benchmark_id": "terminal_bench",  "value": 77.3,  "raw_value": "77.3%", "source_type": "secondary", "verified": True },
+  { "model_id": "claude-opus-4-6",   "benchmark_id": "terminal_bench",  "value": 74.7,  "raw_value": "74.7%", "source_type": "secondary", "verified": True },
   # IFEval
   { "model_id": "glm-5",             "benchmark_id": "ifeval",          "value": 88.0,  "raw_value": "88.0%", "source_type": "secondary", "verified": False },
   # Chatbot Arena ELO

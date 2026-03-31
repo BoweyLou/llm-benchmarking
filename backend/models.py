@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 SourceType = Literal["primary", "secondary", "manual"]
 UpdateStatus = Literal["running", "completed", "failed"]
-TriggeredBy = Literal["manual", "api", "scheduled", "bootstrap"]
+TriggeredBy = Literal["manual", "api", "scheduled", "bootstrap", "cli"]
 AuditStatus = Literal["passed", "warning", "failed"]
 AuditSeverity = Literal["blocker", "warning", "info"]
 

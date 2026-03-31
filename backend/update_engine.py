@@ -28,7 +28,7 @@ from .database import (
 from .audit_engine import get_audit_run, get_audit_summary, run_audit
 from .name_resolution import normalize_text, resolve_model_name
 from .seed_data import USE_CASES, seed_reference_data
-from .sources import get_phase_one_adapters
+from .sources import get_source_adapters
 from .sources.base import BaseSourceAdapter, RawSourceRecord, ScoreCandidate, SourceFetchResult
 
 ENGINE = get_engine()
@@ -135,6 +135,14 @@ def run_update_sync(benchmarks: Iterable[str] | None = None, triggered_by: str =
     log_id = _create_update_log(triggered_by)
     _run_update_job(log_id, selected_benchmarks or None, triggered_by)
     return log_id
+
+
+def run_update_now(benchmarks: Iterable[str] | None = None, triggered_by: str = "bootstrap") -> dict[str, Any]:
+    log_id = run_update_sync(benchmarks=benchmarks, triggered_by=triggered_by)
+    log = get_update_log(log_id)
+    if log is None:
+        raise RuntimeError(f"Update log {log_id} was not found after sync update.")
+    return log
 
 
 def get_update_log(log_id: int) -> dict[str, Any] | None:
@@ -354,7 +362,8 @@ async def _collect_adapter(adapter: BaseSourceAdapter) -> SourceFetchResult:
 
 
 def _selected_adapters(selected_benchmarks: set[str] | None) -> list[BaseSourceAdapter]:
-    adapters = get_phase_one_adapters()
+    include_phase_two = bool(selected_benchmarks and "terminal_bench" in selected_benchmarks)
+    adapters = get_source_adapters(include_phase_two=include_phase_two)
     if not selected_benchmarks:
         return adapters
     return [
@@ -789,5 +798,7 @@ __all__ = [
     "list_source_runs",
     "list_update_logs",
     "list_use_cases",
+    "run_update_now",
+    "run_update_sync",
     "schedule_update",
 ]

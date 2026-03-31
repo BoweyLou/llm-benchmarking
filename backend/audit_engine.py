@@ -26,6 +26,7 @@ MIN_EXPECTED_RECORDS = {
     "ifeval": 50,
     "mmmu": 120,
     "swebench": 10,
+    "terminal_bench": 50,
 }
 DRIFT_MIN_BASELINE_RECORDS = 20
 DRIFT_BLOCKER_DROP_THRESHOLD = -0.5

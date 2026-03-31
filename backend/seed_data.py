@@ -93,7 +93,7 @@ BENCHMARKS: list[dict[str, Any]] = [
         "higher_is_better": 1,
         "tier": 2,
         "scraper_id": "TerminalBenchAdapter",
-        "description": "Real workflow terminal tasks. Published at ICLR 2026.",
+        "description": "Real workflow terminal tasks. Current policy derives one score per model from the best verified single-model submission.",
         "active": 1,
     },
     {

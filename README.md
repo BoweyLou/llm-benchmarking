@@ -61,12 +61,18 @@ cd frontend
 npm run build
 ```
 
+Targeted backend update example:
+
+```bash
+python -m backend update --benchmarks terminal_bench
+```
+
 ## Current scope
 
 - Phase 1 benchmark ingestion for Artificial Analysis, Chatbot Arena, AILuminate, GPQA Diamond, IFEval, MMMU, and SWE-bench Verified
+- Phase 2 started with an opt-in Terminal-Bench adapter using the best verified single-model public submission per model
 - Audit checks after each update run
 - Family and exact-variant views in the frontend catalog
-- Phase 2 starts with Terminal-Bench investigation and ingestion policy design
 
 ## Key docs
 
