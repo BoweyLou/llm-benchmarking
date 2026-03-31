@@ -9,7 +9,23 @@ The current stack is:
 - SQLite for local storage
 - Source adapters for public benchmark ingestion
 
-## Run locally
+## Clean Clone Setup
+
+After cloning the repo:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
+cd frontend
+npm install
+cd ..
+python -m backend.bootstrap_db
+```
+
+That last command creates the SQLite schema and runs a full Phase 1 ingest so the cloned repo has data without needing the API server first.
+
+## Run Locally
 
 Backend:
 
@@ -26,13 +42,14 @@ npm install
 npm run dev
 ```
 
-The backend bootstraps its schema on startup. SQLite files are intentionally not committed.
+The backend bootstraps its schema on startup. SQLite files are intentionally not committed, and `python -m backend.bootstrap_db` is the supported first-run populate command.
 
 ## Current scope
 
 - Phase 1 benchmark ingestion for Artificial Analysis, Chatbot Arena, AILuminate, GPQA Diamond, IFEval, MMMU, and SWE-bench Verified
 - Audit checks after each update run
 - Family and exact-variant views in the frontend catalog
+- Phase 2 starts with Terminal-Bench investigation and ingestion policy design
 
 ## Key docs
 

@@ -118,19 +118,7 @@ def schedule_update(benchmarks: Iterable[str] | None = None, triggered_by: str =
     bootstrap()
     selected_benchmarks = {benchmark_id for benchmark_id in (benchmarks or [])}
 
-    with ENGINE.begin() as conn:
-        result = conn.execute(
-            insert(update_log_table).values(
-                started_at=utc_now_iso(),
-                completed_at=None,
-                triggered_by=triggered_by,
-                status="running",
-                scores_added=0,
-                scores_updated=0,
-                errors=json.dumps([]),
-            )
-        )
-        log_id = int(result.inserted_primary_key[0])
+    log_id = _create_update_log(triggered_by)
 
     worker = threading.Thread(
         target=_run_update_job,
@@ -138,6 +126,14 @@ def schedule_update(benchmarks: Iterable[str] | None = None, triggered_by: str =
         daemon=True,
     )
     worker.start()
+    return log_id
+
+
+def run_update_sync(benchmarks: Iterable[str] | None = None, triggered_by: str = "manual") -> int:
+    bootstrap()
+    selected_benchmarks = {benchmark_id for benchmark_id in (benchmarks or [])}
+    log_id = _create_update_log(triggered_by)
+    _run_update_job(log_id, selected_benchmarks or None, triggered_by)
     return log_id
 
 
@@ -334,6 +330,22 @@ def _run_update_job(log_id: int, selected_benchmarks: set[str] | None, triggered
                 errors=json.dumps(errors + (_audit_errors(audit_result) if audit_result else [])),
             )
         )
+
+
+def _create_update_log(triggered_by: str) -> int:
+    with ENGINE.begin() as conn:
+        result = conn.execute(
+            insert(update_log_table).values(
+                started_at=utc_now_iso(),
+                completed_at=None,
+                triggered_by=triggered_by,
+                status="running",
+                scores_added=0,
+                scores_updated=0,
+                errors=json.dumps([]),
+            )
+        )
+        return int(result.inserted_primary_key[0])
 
 
 async def _collect_adapter(adapter: BaseSourceAdapter) -> SourceFetchResult:
