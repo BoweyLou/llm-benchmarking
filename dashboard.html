@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM Intelligence Dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .fade-in { animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .score-bar { transition: width 0.4s ease; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useMemo, Fragment } = React;
+
+/* ================================================================
+   DATA SECTION
+   Claude updates this block when you trigger a refresh.
+   Last updated: 2026-03-31 | Version: 1.0
+   ================================================================ */
+const DATA = {
+  meta: {
+    last_updated: "2026-03-31",
+    version: "1.0",
+    update_instructions: "Open a Claude session and say: 'Update the LLM dashboard data with the latest benchmark scores from our research file'"
+  },
+
+  benchmarks: [
+    { id: "aa_intelligence", name: "AA Intelligence Index", short: "AA Intel",
+      source: "Artificial Analysis", url: "https://artificialanalysis.ai/leaderboards/models",
+      category: "General Quality", metric: "Index Score", higher_is_better: true, tier: 1,
+      description: "Composite quality index across multiple tasks. Best single number for overall capability. Independent of model providers." },
+    { id: "gpqa_diamond", name: "GPQA Diamond", short: "GPQA-D",
+      source: "Epoch AI", url: "https://epoch.ai/benchmarks/gpqa-diamond",
+      category: "Reasoning & Math", metric: "Accuracy %", higher_is_better: true, tier: 2,
+      description: "198 graduate-level science questions. Highly resistant to contamination. Good reasoning ceiling test." },
+    { id: "mmmu", name: "MMMU", short: "MMMU",
+      source: "MMMU team", url: "https://mmmu-benchmark.github.io/",
+      category: "Multimodal", metric: "Accuracy %", higher_is_better: true, tier: 2,
+      description: "11.5k college-level multimodal questions across 30 subjects. Standard frontier vision-language benchmark." },
+    { id: "swebench_verified", name: "SWE-bench Verified", short: "SWE-V",
+      source: "SWE-bench team", url: "https://www.swebench.com/",
+      category: "Coding", metric: "% Issues Resolved", higher_is_better: true, tier: 1,
+      description: "Real GitHub issue resolution. Best coding benchmark for production relevance." },
+    { id: "ifeval", name: "IFEval", short: "IFEval",
+      source: "Google Research", url: "https://github.com/google-research/google-research/tree/master/instruction_following_eval",
+      category: "Instruction Following", metric: "Prompt Accuracy %", higher_is_better: true, tier: 2,
+      description: "Machine-scoreable instruction constraints. Directly predictive of enterprise reliability." },
+    { id: "terminal_bench", name: "Terminal-Bench 2.0", short: "Term-B",
+      source: "tbench.ai", url: "https://tbench.ai",
+      category: "Agentic & Tool Use", metric: "% Tasks Resolved", higher_is_better: true, tier: 2,
+      description: "89 real workflow terminal tasks. ICLR 2026. Frontier models score <65%." },
+    { id: "ailuminate", name: "AILuminate", short: "Safety",
+      source: "MLCommons", url: "https://ailuminate.mlcommons.org/",
+      category: "Safety & Compliance", metric: "Risk Score (0–100)", higher_is_better: true, tier: 1,
+      description: "12 hazard categories. Private test sets. Backed by Google, Microsoft, KPMG. Growing regulatory reference." },
+    { id: "aa_speed", name: "Output Speed", short: "Speed",
+      source: "Artificial Analysis", url: "https://artificialanalysis.ai/leaderboards/models",
+      category: "Latency & Cost", metric: "Tokens/sec", higher_is_better: true, tier: 1,
+      description: "Output tokens per second. Critical for real-time and high-concurrency applications." },
+    { id: "aa_cost", name: "Cost (blended)", short: "Cost",
+      source: "Artificial Analysis", url: "https://artificialanalysis.ai/leaderboards/models",
+      category: "Latency & Cost", metric: "$/1M tokens", higher_is_better: false, tier: 1,
+      description: "Blended 3:1 input-output pricing. Key for high-volume enterprise deployments. Lower is better." },
+    { id: "chatbot_arena", name: "Chatbot Arena", short: "Arena ELO",
+      source: "LMSYS", url: "https://arena.lmsys.org/leaderboard/text",
+      category: "General Quality", metric: "ELO Score", higher_is_better: true, tier: 1,
+      description: "ELO from millions of blind human preference votes. Strong general quality signal." }
+  ],
+
+  use_cases: [
+    { id: "general_reasoning", label: "General Reasoning", icon: "🧠",
+      description: "Logic, multi-step problem solving, knowledge-intensive tasks",
+      benchmark_weights: { aa_intelligence: 0.40, gpqa_diamond: 0.35, chatbot_arena: 0.25 } },
+    { id: "coding", label: "Coding & Engineering", icon: "💻",
+      description: "Code generation, debugging, repo-level tasks, DevOps",
+      benchmark_weights: { swebench_verified: 0.55, aa_intelligence: 0.25, terminal_bench: 0.20 } },
+    { id: "agentic", label: "Agentic & Tool Use", icon: "🤖",
+      description: "Multi-step workflows, API calls, terminal and browser automation",
+      benchmark_weights: { terminal_bench: 0.50, swebench_verified: 0.25, aa_intelligence: 0.25 } },
+    { id: "safety_compliance", label: "Safety & Compliance", icon: "🛡️",
+      description: "Harmful output avoidance, hazard categories, regulatory readiness",
+      benchmark_weights: { ailuminate: 0.70, aa_intelligence: 0.30 } },
+    { id: "cost_efficiency", label: "Cost Efficiency", icon: "💰",
+      description: "Minimise spend while maintaining quality for high-volume use",
+      benchmark_weights: { aa_cost: 0.60, aa_speed: 0.25, aa_intelligence: 0.15 } },
+    { id: "multimodal", label: "Multimodal", icon: "🖼️",
+      description: "Vision-language, chart understanding, document image processing",
+      benchmark_weights: { mmmu: 0.65, aa_intelligence: 0.35 } },
+    { id: "instruction_following", label: "Instruction Following", icon: "📋",
+      description: "Strict adherence to constraints, formatting rules, complex prompt structures",
+      benchmark_weights: { ifeval: 0.75, chatbot_arena: 0.25 } },
+    { id: "speed", label: "Speed / Latency", icon: "⚡",
+      description: "Maximum throughput for real-time, streaming, or high-concurrency apps",
+      benchmark_weights: { aa_speed: 0.80, aa_intelligence: 0.20 } }
+  ],
+
+  models: [
+    { id: "gemini-3-1-pro", name: "Gemini 3.1 Pro Preview", provider: "Google",
+      type: "proprietary", release_date: "2026-Q1", context_window: "1M tokens",
+      scores: {
+        aa_intelligence:   { value: 57,   date: "2026-03", verified: true },
+        gpqa_diamond:      { value: 94.1, date: "2026-03", verified: true },
+        mmmu: null, swebench_verified: null, ifeval: null, terminal_bench: null,
+        ailuminate: null, aa_speed: null, aa_cost: null, chatbot_arena: null
+      }
+    },
+    { id: "gpt-5-4", name: "GPT-5.4 (xhigh)", provider: "OpenAI",
+      type: "proprietary", release_date: "2026-Q1", context_window: "128k tokens",
+      scores: {
+        aa_intelligence:   { value: 57,   date: "2026-03", verified: true },
+        gpqa_diamond:      { value: 92.0, date: "2026-03", verified: true },
+        mmmu:              { value: 79.1, date: "2026-03", verified: true },
+        swebench_verified: null, ifeval: null, terminal_bench: null,
+        ailuminate: null, aa_speed: null, aa_cost: null, chatbot_arena: null
+      }
+    },
+    { id: "gpt-5-3-codex", name: "GPT-5.3 Codex (xhigh)", provider: "OpenAI",
+      type: "proprietary", release_date: "2026-Q1", context_window: "128k tokens",
+      scores: {
+        aa_intelligence:   { value: 54,   date: "2026-03", verified: true },
+        gpqa_diamond:      { value: 91.5, date: "2026-03", verified: true },
+        mmmu: null, swebench_verified: null, ifeval: null, terminal_bench: null,
+        ailuminate: null, aa_speed: null, aa_cost: null, chatbot_arena: null
+      }
+    },
+    { id: "claude-opus-4-6", name: "Claude Opus 4.6", provider: "Anthropic",
+      type: "proprietary", release_date: "2025", context_window: "200k tokens",
+      scores: {
+        aa_intelligence:   { value: 53,   date: "2026-03", verified: true },
+        gpqa_diamond: null, mmmu: null, swebench_verified: null, ifeval: null,
+        terminal_bench: null, ailuminate: null, aa_speed: null, aa_cost: null, chatbot_arena: null
+      }
+    },
+    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", provider: "Anthropic",
+      type: "proprietary", release_date: "2025", context_window: "200k tokens",
+      scores: {
+        aa_intelligence:   { value: 52,   date: "2026-03", verified: true },
+        gpqa_diamond: null, mmmu: null, swebench_verified: null, ifeval: null,
+        terminal_bench: null, ailuminate: null, aa_speed: null, aa_cost: null, chatbot_arena: null
+      }
+    },
+    { id: "o4-mini-high", name: "o4 Mini High", provider: "OpenAI",
+      type: "proprietary", release_date: "2025", context_window: "128k tokens",
+      scores: {
+        aa_intelligence: null, gpqa_diamond: null,
+        mmmu:              { value: 79.2, date: "2026-03", verified: true },
+        swebench_verified: null, ifeval: null, terminal_bench: null,
+        ailuminate: null, aa_speed: null, aa_cost: null, chatbot_arena: null
+      }
+    },
+    { id: "glm-5", name: "GLM-5 (Reasoning)", provider: "Zhipu AI",
+      type: "open_weights", release_date: "2026-Q1", context_window: "128k tokens",
+      scores: {
+        aa_intelligence:   { value: 50,   date: "2026-03", verified: true },
+        gpqa_diamond: null, mmmu: null, swebench_verified: null, ifeval: null,
+        terminal_bench: null, ailuminate: null, aa_speed: null, aa_cost: null, chatbot_arena: null
+      }
+    },
+    { id: "gemini-2-5-flash", name: "Gemini 2.5 Flash-Lite (Reasoning)", provider: "Google",
+      type: "proprietary", release_date: "2025", context_window: "1M tokens",
+      scores: {
+        aa_intelligence: null, gpqa_diamond: null, mmmu: null, swebench_verified: null,
+        ifeval: null, terminal_bench: null, ailuminate: null,
+        aa_speed:          { value: 386.1, date: "2026-03", verified: true },
+        aa_cost: null, chatbot_arena: null
+      }
+    },
+    { id: "mercury-2", name: "Mercury 2", provider: "Inception Labs",
+      type: "proprietary", release_date: "2026-Q1", context_window: "32k tokens",
+      scores: {
+        aa_intelligence: null, gpqa_diamond: null, mmmu: null, swebench_verified: null,
+        ifeval: null, terminal_bench: null, ailuminate: null,
+        aa_speed:          { value: 789.2, date: "2026-03", verified: true },
+        aa_cost: null, chatbot_arena: null
+      }
+    },
+    { id: "gemma-3n-e4b", name: "Gemma 3n E4B Instruct", provider: "Google",
+      type: "open_weights", release_date: "2026-Q1", context_window: "8k tokens",
+      scores: {
+        aa_intelligence: null, gpqa_diamond: null, mmmu: null, swebench_verified: null,
+        ifeval: null, terminal_bench: null, ailuminate: null, aa_speed: null,
+        aa_cost:           { value: 0.03, date: "2026-03", verified: true },
+        chatbot_arena: null
+      }
+    }
+  ],
+
+  history: [
+    { date: "2026-03-31", note: "Initial data population from benchmark research. Many fields pending — trigger an update to populate more scores.", model_count: 10, benchmark_count: 10 }
+  ]
+};
+/* ================================================================
+   END DATA SECTION
+   ================================================================ */
+
+
+/* ---- Utilities ---- */
+
+const PROVIDER_COLORS = {
+  "Anthropic":      { bg: "bg-orange-100", text: "text-orange-800", border: "border-orange-200" },
+  "OpenAI":         { bg: "bg-green-100",  text: "text-green-800",  border: "border-green-200" },
+  "Google":         { bg: "bg-blue-100",   text: "text-blue-800",   border: "border-blue-200" },
+  "Zhipu AI":       { bg: "bg-purple-100", text: "text-purple-800", border: "border-purple-200" },
+  "Inception Labs": { bg: "bg-pink-100",   text: "text-pink-800",   border: "border-pink-200" },
+  "default":        { bg: "bg-gray-100",   text: "text-gray-700",   border: "border-gray-200" }
+};
+
+function providerColor(provider) {
+  return PROVIDER_COLORS[provider] || PROVIDER_COLORS.default;
+}
+
+function getBenchmarkRanges() {
+  const ranges = {};
+  DATA.benchmarks.forEach(b => {
+    const vals = DATA.models
+      .map(m => m.scores[b.id]?.value)
+      .filter(v => v != null && typeof v === "number");
+    if (vals.length >= 1) {
+      ranges[b.id] = { min: Math.min(...vals), max: Math.max(...vals) };
+    }
+  });
+  return ranges;
+}
+
+const RANGES = getBenchmarkRanges();
+
+function normalizeValue(benchmarkId, value) {
+  const b = DATA.benchmarks.find(x => x.id === benchmarkId);
+  const range = RANGES[benchmarkId];
+  if (!b || !range) return null;
+  if (range.min === range.max) return 75;
+  const n = (value - range.min) / (range.max - range.min) * 100;
+  return b.higher_is_better ? n : 100 - n;
+}
+
+function computeUseCaseScore(model, useCase) {
+  const weights = useCase.benchmark_weights;
+  let weightedSum = 0, totalWeight = 0;
+  const breakdown = [];
+  const missing = [];
+
+  Object.entries(weights).forEach(([bId, w]) => {
+    const scoreData = model.scores[bId];
+    const b = DATA.benchmarks.find(x => x.id === bId);
+    if (scoreData?.value != null) {
+      const norm = normalizeValue(bId, scoreData.value);
+      if (norm !== null) {
+        weightedSum += norm * w;
+        totalWeight += w;
+        breakdown.push({ bId, norm, raw: scoreData.value, w, metric: b.metric });
+      } else { missing.push(bId); }
+    } else { missing.push(bId); }
+  });
+
+  if (totalWeight === 0) return null;
+  const totalPossibleWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+  return {
+    score: weightedSum / totalWeight,
+    coverage: totalWeight / totalPossibleWeight,
+    breakdown,
+    missing
+  };
+}
+
+function rankModels(useCase) {
+  return DATA.models
+    .map(m => ({ model: m, result: computeUseCaseScore(m, useCase) }))
+    .filter(x => x.result !== null)
+    .sort((a, b) => b.result.score - a.result.score);
+}
+
+function scoreColor(score) {
+  if (score >= 75) return "text-green-700";
+  if (score >= 50) return "text-yellow-700";
+  return "text-red-600";
+}
+
+function scoreBg(score) {
+  if (score >= 75) return "bg-green-500";
+  if (score >= 50) return "bg-yellow-400";
+  return "bg-red-400";
+}
+
+function formatValue(benchmarkId, value) {
+  const b = DATA.benchmarks.find(x => x.id === benchmarkId);
+  if (!b) return String(value);
+  if (b.metric.includes("%") || b.metric.includes("Accuracy")) return `${value}%`;
+  if (b.metric.includes("$/")) return `$${value}`;
+  if (b.metric.includes("Tokens/sec")) return `${value} t/s`;
+  return String(value);
+}
+
+
+/* ---- Small shared components ---- */
+
+function ProviderBadge({ provider }) {
+  const c = providerColor(provider);
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${c.bg} ${c.text} ${c.border}`}>
+      {provider}
+    </span>
+  );
+}
+
+function TypeBadge({ type }) {
+  return type === "open_weights"
+    ? <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">Open weights</span>
+    : <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">Proprietary</span>;
+}
+
+function CoverageIndicator({ coverage }) {
+  const pct = Math.round(coverage * 100);
+  const color = pct >= 70 ? "bg-green-400" : pct >= 40 ? "bg-yellow-400" : "bg-gray-300";
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-xs text-gray-400">{pct}% data</span>
+    </div>
+  );
+}
+
+function ScoreBar({ score, label }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full score-bar ${scoreBg(score)}`} style={{ width: `${score}%` }} />
+      </div>
+      <span className={`text-sm font-bold w-8 text-right ${scoreColor(score)}`}>{Math.round(score)}</span>
+    </div>
+  );
+}
+
+
+/* ---- Tab: Use Case Finder ---- */
+
+function UseCaseFinder() {
+  const [selected, setSelected] = useState(null);
+
+  const ranked = useMemo(() => {
+    if (!selected) return [];
+    return rankModels(selected);
+  }, [selected]);
+
+  return (
+    <div className="fade-in">
+      <div className="mb-6">
+        <h2 className="text-xl font-semibold text-gray-800 mb-1">Which model for my use case?</h2>
+        <p className="text-gray-500 text-sm">Select a use case to see models ranked by evidence from our benchmark sources.</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mb-8 sm:grid-cols-4">
+        {DATA.use_cases.map(uc => (
+          <button
+            key={uc.id}
+            onClick={() => setSelected(uc.id === selected?.id ? null : uc)}
+            className={`text-left p-4 rounded-xl border-2 transition-all cursor-pointer ${
+              selected?.id === uc.id
+                ? "border-indigo-500 bg-indigo-50 shadow-sm"
+                : "border-gray-200 bg-white hover:border-indigo-300 hover:shadow-sm"
+            }`}
+          >
+            <div className="text-2xl mb-2">{uc.icon}</div>
+            <div className="font-medium text-sm text-gray-800">{uc.label}</div>
+            <div className="text-xs text-gray-400 mt-0.5 leading-tight">{uc.description}</div>
+          </button>
+        ))}
+      </div>
+
+      {selected && (
+        <div className="fade-in">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-gray-800">
+              {selected.icon} Best models for <span className="text-indigo-600">{selected.label}</span>
+            </h3>
+            <span className="text-xs text-gray-400">Ranked by weighted benchmark score</span>
+          </div>
+
+          {ranked.length === 0 ? (
+            <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-200">
+              No models have data for this use case yet. Trigger an update to populate scores.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {ranked.map(({ model, result }, i) => (
+                <RankedModelCard key={model.id} model={model} result={result} rank={i + 1} useCase={selected} />
+              ))}
+            </div>
+          )}
+
+          <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+            <strong>Note:</strong> Rankings are weighted averages of available benchmark data.
+            Models with low data coverage (shown below each bar) should be verified before use.
+            Benchmarks used: {Object.keys(selected.benchmark_weights).map(id => DATA.benchmarks.find(b => b.id === id)?.short).join(", ")}.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RankedModelCard({ model, result, rank, useCase }) {
+  const [expanded, setExpanded] = useState(false);
+  const isTop = rank === 1;
+
+  return (
+    <div className={`bg-white rounded-xl border ${isTop ? "border-indigo-300 shadow-sm" : "border-gray-200"} overflow-hidden`}>
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+            isTop ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-500"
+          }`}>
+            {rank}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <span className="font-semibold text-gray-900">{model.name}</span>
+              <ProviderBadge provider={model.provider} />
+              <TypeBadge type={model.type} />
+              {isTop && <span className="text-xs font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">Top pick</span>}
+            </div>
+            <ScoreBar score={result.score} />
+            <div className="mt-1.5">
+              <CoverageIndicator coverage={result.coverage} />
+            </div>
+          </div>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex-shrink-0 text-xs text-indigo-500 hover:text-indigo-700 font-medium"
+          >
+            {expanded ? "▲ Less" : "▼ Detail"}
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-gray-100 px-4 py-3 bg-gray-50 fade-in">
+          <div className="text-xs font-medium text-gray-500 mb-2">Benchmark breakdown</div>
+          <div className="space-y-1.5">
+            {result.breakdown.map(({ bId, norm, raw }) => {
+              const b = DATA.benchmarks.find(x => x.id === bId);
+              return (
+                <div key={bId} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 w-24 truncate">{b?.short}</span>
+                  <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${scoreBg(norm)}`} style={{ width: `${norm}%` }} />
+                  </div>
+                  <span className="text-xs text-gray-700 font-medium w-20 text-right">{formatValue(bId, raw)}</span>
+                  <a href={b?.url} target="_blank" rel="noreferrer" className="text-xs text-indigo-400 hover:text-indigo-600">↗</a>
+                </div>
+              );
+            })}
+            {result.missing.length > 0 && (
+              <div className="text-xs text-gray-400 pt-1">
+                Missing data: {result.missing.map(id => DATA.benchmarks.find(b => b.id === id)?.short).join(", ")}
+              </div>
+            )}
+          </div>
+          <div className="mt-2 text-xs text-gray-400">Context: {model.context_window} · Released: {model.release_date}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* ---- Tab: Model Browser ---- */
+
+function ModelBrowser({ onAddToCompare, compareIds }) {
+  const [query, setQuery] = useState("");
+  const [providerFilter, setProviderFilter] = useState("All");
+  const [typeFilter, setTypeFilter] = useState("All");
+  const [expandedId, setExpandedId] = useState(null);
+
+  const providers = ["All", ...Array.from(new Set(DATA.models.map(m => m.provider)))];
+
+  const filtered = useMemo(() => {
+    return DATA.models.filter(m => {
+      const matchQuery = m.name.toLowerCase().includes(query.toLowerCase()) || m.provider.toLowerCase().includes(query.toLowerCase());
+      const matchProvider = providerFilter === "All" || m.provider === providerFilter;
+      const matchType = typeFilter === "All" || m.type === typeFilter;
+      return matchQuery && matchProvider && matchType;
+    });
+  }, [query, providerFilter, typeFilter]);
+
+  return (
+    <div className="fade-in">
+      <div className="mb-5">
+        <h2 className="text-xl font-semibold text-gray-800 mb-1">Model Browser</h2>
+        <p className="text-gray-500 text-sm">Search and explore all tracked models with their full benchmark profiles.</p>
+      </div>
+
+      <div className="flex flex-wrap gap-3 mb-5">
+        <input
+          type="text"
+          placeholder="Search models…"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm flex-1 min-w-48 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+        />
+        <select value={providerFilter} onChange={e => setProviderFilter(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white">
+          {providers.map(p => <option key={p}>{p}</option>)}
+        </select>
+        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white">
+          <option value="All">All types</option>
+          <option value="proprietary">Proprietary</option>
+          <option value="open_weights">Open weights</option>
+        </select>
+      </div>
+
+      <div className="space-y-2">
+        {filtered.length === 0 && (
+          <div className="text-center py-12 text-gray-400 bg-white rounded-xl border border-gray-200">No models match your search.</div>
+        )}
+        {filtered.map(model => (
+          <ModelBrowserCard
+            key={model.id}
+            model={model}
+            expanded={expandedId === model.id}
+            onToggle={() => setExpandedId(expandedId === model.id ? null : model.id)}
+            onAddToCompare={onAddToCompare}
+            inCompare={compareIds.includes(model.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ModelBrowserCard({ model, expanded, onToggle, onAddToCompare, inCompare }) {
+  const scoredBenchmarks = DATA.benchmarks.filter(b => model.scores[b.id]?.value != null);
+  const dataPct = Math.round((scoredBenchmarks.length / DATA.benchmarks.length) * 100);
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="p-4 flex items-center gap-3 cursor-pointer" onClick={onToggle}>
+        <div className="flex-1">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <span className="font-semibold text-gray-900">{model.name}</span>
+            <ProviderBadge provider={model.provider} />
+            <TypeBadge type={model.type} />
+          </div>
+          <div className="flex flex-wrap gap-3 text-xs text-gray-400">
+            <span>Context: {model.context_window}</span>
+            <span>Released: {model.release_date}</span>
+            <span className={dataPct >= 50 ? "text-green-600" : "text-amber-500"}>{dataPct}% benchmark coverage</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={e => { e.stopPropagation(); onAddToCompare(model.id); }}
+            className={`text-xs px-2.5 py-1 rounded border font-medium transition-all ${
+              inCompare
+                ? "bg-indigo-600 text-white border-indigo-600"
+                : "border-gray-300 text-gray-600 hover:border-indigo-400 hover:text-indigo-600"
+            }`}
+          >
+            {inCompare ? "✓ In compare" : "+ Compare"}
+          </button>
+          <span className="text-gray-300 text-sm">{expanded ? "▲" : "▼"}</span>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-gray-100 bg-gray-50 px-4 py-4 fade-in">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {DATA.benchmarks.map(b => {
+              const scoreData = model.scores[b.id];
+              const hasData = scoreData?.value != null;
+              return (
+                <div key={b.id} className="flex items-center gap-2">
+                  <a href={b.url} target="_blank" rel="noreferrer"
+                    className="text-xs text-indigo-500 hover:text-indigo-700 w-20 truncate flex-shrink-0" title={b.name}>
+                    {b.short}
+                  </a>
+                  {hasData ? (
+                    <>
+                      <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${scoreBg(normalizeValue(b.id, scoreData.value) ?? 50)}`}
+                          style={{ width: `${normalizeValue(b.id, scoreData.value) ?? 50}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-medium text-gray-700 w-20 text-right">{formatValue(b.id, scoreData.value)}</span>
+                      <span className="text-xs text-gray-300 w-12 text-right">{scoreData.date}</span>
+                    </>
+                  ) : (
+                    <span className="text-xs text-gray-300 flex-1">— no data</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-3 text-xs text-gray-400">
+            Tip: Click any benchmark name to view source leaderboard. Missing scores can be populated by running an update.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* ---- Tab: Compare ---- */
+
+function Compare({ compareIds, onAddToCompare }) {
+  const models = DATA.models.filter(m => compareIds.includes(m.id));
+  const [addQuery, setAddQuery] = useState("");
+
+  const suggestions = DATA.models.filter(m =>
+    !compareIds.includes(m.id) &&
+    (m.name.toLowerCase().includes(addQuery.toLowerCase()) || m.provider.toLowerCase().includes(addQuery.toLowerCase()))
+  ).slice(0, 5);
+
+  const benchmarksWithAnyData = DATA.benchmarks.filter(b =>
+    models.some(m => m.scores[b.id]?.value != null)
+  );
+
+  function winnerForBenchmark(b) {
+    const withData = models.filter(m => m.scores[b.id]?.value != null);
+    if (withData.length < 2) return null;
+    return withData.reduce((best, m) => {
+      const bDef = DATA.benchmarks.find(x => x.id === b.id);
+      const better = bDef.higher_is_better
+        ? m.scores[b.id].value > best.scores[b.id].value
+        : m.scores[b.id].value < best.scores[b.id].value;
+      return better ? m : best;
+    });
+  }
+
+  const winCounts = {};
+  models.forEach(m => { winCounts[m.id] = 0; });
+  benchmarksWithAnyData.forEach(b => {
+    const w = winnerForBenchmark(b);
+    if (w) winCounts[w.id] = (winCounts[w.id] || 0) + 1;
+  });
+
+  return (
+    <div className="fade-in">
+      <div className="mb-5">
+        <h2 className="text-xl font-semibold text-gray-800 mb-1">Compare Models</h2>
+        <p className="text-gray-500 text-sm">Side-by-side benchmark comparison. Add models from the Model Browser or search below.</p>
+      </div>
+
+      {/* Add models */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-5">
+        <div className="text-sm font-medium text-gray-700 mb-3">
+          {models.length === 0 ? "Add models to compare" : `Comparing ${models.length} model${models.length > 1 ? "s" : ""}`}
+        </div>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {models.map(m => (
+            <span key={m.id} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 border border-indigo-200 rounded-lg text-sm">
+              <span className="font-medium text-indigo-800">{m.name}</span>
+              <button onClick={() => onAddToCompare(m.id)} className="text-indigo-400 hover:text-indigo-700 font-bold text-base leading-none">×</button>
+            </span>
+          ))}
+          {models.length === 0 && <span className="text-sm text-gray-400">No models selected yet</span>}
+        </div>
+        <input
+          type="text"
+          placeholder="Search to add a model…"
+          value={addQuery}
+          onChange={e => setAddQuery(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-300"
+        />
+        {addQuery && suggestions.length > 0 && (
+          <div className="mt-2 border border-gray-100 rounded-lg overflow-hidden shadow-sm">
+            {suggestions.map(m => (
+              <button key={m.id} onClick={() => { onAddToCompare(m.id); setAddQuery(""); }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 border-b border-gray-100 last:border-0 flex items-center gap-2">
+                <span>{m.name}</span>
+                <ProviderBadge provider={m.provider} />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {models.length >= 2 && benchmarksWithAnyData.length > 0 && (
+        <>
+          {/* Win summary */}
+          <div className="grid gap-3 mb-5" style={{ gridTemplateColumns: `repeat(${models.length}, 1fr)` }}>
+            {models.map(m => (
+              <div key={m.id} className={`bg-white rounded-xl border p-4 text-center ${
+                Math.max(...Object.values(winCounts)) === winCounts[m.id] && winCounts[m.id] > 0
+                  ? "border-indigo-300 shadow-sm" : "border-gray-200"
+              }`}>
+                <div className="font-semibold text-gray-800 text-sm mb-1 truncate">{m.name}</div>
+                <ProviderBadge provider={m.provider} />
+                <div className="mt-3">
+                  <span className="text-3xl font-bold text-indigo-600">{winCounts[m.id]}</span>
+                  <span className="text-sm text-gray-400"> wins</span>
+                </div>
+                <div className="text-xs text-gray-400 mt-0.5">of {benchmarksWithAnyData.length} benchmarks</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Benchmark table */}
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="grid border-b border-gray-100 bg-gray-50 px-4 py-3"
+              style={{ gridTemplateColumns: `180px repeat(${models.length}, 1fr)` }}>
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Benchmark</div>
+              {models.map(m => (
+                <div key={m.id} className="text-xs font-semibold text-gray-700 truncate px-2">{m.name}</div>
+              ))}
+            </div>
+
+            {benchmarksWithAnyData.map(b => {
+              const winner = winnerForBenchmark(b);
+              return (
+                <div key={b.id} className="grid border-b border-gray-50 last:border-0 px-4 py-3 hover:bg-gray-50"
+                  style={{ gridTemplateColumns: `180px repeat(${models.length}, 1fr)` }}>
+                  <div>
+                    <a href={b.url} target="_blank" rel="noreferrer"
+                      className="text-sm font-medium text-gray-700 hover:text-indigo-600">{b.short}</a>
+                    <div className="text-xs text-gray-400">{b.metric}</div>
+                  </div>
+                  {models.map(m => {
+                    const sd = m.scores[b.id];
+                    const isWinner = winner?.id === m.id;
+                    return (
+                      <div key={m.id} className={`px-2 flex items-center gap-2 ${isWinner ? "font-semibold" : ""}`}>
+                        {sd?.value != null ? (
+                          <>
+                            <span className={`text-sm ${isWinner ? "text-green-700" : "text-gray-600"}`}>
+                              {isWinner && "★ "}{formatValue(b.id, sd.value)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-sm text-gray-300">—</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {models.length < 2 && (
+        <div className="text-center py-16 text-gray-400 bg-white rounded-xl border border-dashed border-gray-200">
+          <div className="text-4xl mb-3">⚖️</div>
+          <div className="font-medium">Add at least 2 models to compare</div>
+          <div className="text-sm mt-1">Use the search above or the Model Browser tab to add models</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* ---- Tab: History ---- */
+
+function History() {
+  return (
+    <div className="fade-in">
+      <div className="mb-5">
+        <h2 className="text-xl font-semibold text-gray-800 mb-1">Update History</h2>
+        <p className="text-gray-500 text-sm">A log of each time this dashboard's data was refreshed.</p>
+      </div>
+
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-5">
+        <div className="p-4 border-b border-gray-100 bg-indigo-50">
+          <div className="text-sm font-semibold text-indigo-800 mb-1">How to trigger an update</div>
+          <div className="text-sm text-indigo-700">
+            Open a Claude session and say: <em>"{DATA.meta.update_instructions}"</em>
+          </div>
+          <div className="text-xs text-indigo-500 mt-1.5">
+            Claude will re-research benchmark scores from the sources in our research file and rewrite the DATA section of this file.
+            The history log below will be updated automatically.
+          </div>
+        </div>
+
+        <div className="divide-y divide-gray-100">
+          {[...DATA.history].reverse().map((entry, i) => (
+            <div key={i} className="px-5 py-4 flex items-start gap-4">
+              <div className="w-2 h-2 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0" />
+              <div>
+                <div className="text-sm font-semibold text-gray-700">{entry.date}</div>
+                <div className="text-sm text-gray-500 mt-0.5">{entry.note}</div>
+                <div className="flex gap-4 mt-1.5 text-xs text-gray-400">
+                  <span>{entry.model_count} models</span>
+                  <span>{entry.benchmark_count} benchmarks</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+        <strong>Why manual updates?</strong> Automatic scraping of benchmark leaderboards is unreliable —
+        sites change structure, update methodology, and publish contested results.
+        A human-in-the-loop update ensures scores are verified before they inform decisions.
+      </div>
+    </div>
+  );
+}
+
+
+/* ---- Header ---- */
+
+function Header() {
+  return (
+    <div className="bg-white border-b border-gray-200">
+      <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-bold text-gray-900">LLM Intelligence Dashboard</h1>
+          <p className="text-xs text-gray-400">Last updated {DATA.meta.last_updated} · {DATA.models.length} models · {DATA.benchmarks.length} benchmarks</p>
+        </div>
+        <div className="text-xs text-gray-400 text-right hidden sm:block">
+          <div>Internal research tool</div>
+          <div className="text-indigo-500 font-medium">v{DATA.meta.version}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ---- Tab Nav ---- */
+
+function TabNav({ activeTab, setActiveTab }) {
+  const tabs = [
+    { id: "finder",  label: "Use Case Finder", icon: "🔍" },
+    { id: "browser", label: "Model Browser",   icon: "📊" },
+    { id: "compare", label: "Compare",          icon: "⚖️" },
+    { id: "history", label: "History",          icon: "🕐" }
+  ];
+  return (
+    <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
+      <div className="max-w-6xl mx-auto px-4 flex gap-0 overflow-x-auto">
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-all ${
+              activeTab === t.id
+                ? "border-indigo-600 text-indigo-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            }`}
+          >
+            <span>{t.icon}</span>
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+/* ---- Root App ---- */
+
+function App() {
+  const [activeTab, setActiveTab] = useState("finder");
+  const [compareIds, setCompareIds] = useState([]);
+
+  function handleAddToCompare(modelId) {
+    setCompareIds(prev =>
+      prev.includes(modelId) ? prev.filter(id => id !== modelId) : [...prev, modelId]
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      <TabNav activeTab={activeTab} setActiveTab={setActiveTab} />
+      <main className="max-w-6xl mx-auto px-4 py-8">
+        {activeTab === "finder"  && <UseCaseFinder />}
+        {activeTab === "browser" && <ModelBrowser onAddToCompare={handleAddToCompare} compareIds={compareIds} />}
+        {activeTab === "compare" && <Compare compareIds={compareIds} onAddToCompare={handleAddToCompare} />}
+        {activeTab === "history" && <History />}
+      </main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
