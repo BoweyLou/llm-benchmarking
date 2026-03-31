@@ -2,6 +2,10 @@
 
 LLM Benchmarking is a local benchmarking dashboard for comparing AI models across public benchmark sources.
 
+## License
+
+MIT. See [LICENSE](LICENSE).
+
 The current stack is:
 
 - FastAPI backend for model, benchmark, ranking, update, and audit APIs
@@ -14,6 +18,9 @@ The current stack is:
 After cloning the repo:
 
 ```bash
+git clone https://github.com/BoweyLou/llm-benchmarking.git
+cd llm-benchmarking
+
 python -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt
@@ -23,7 +30,7 @@ cd ..
 python -m backend.bootstrap_db
 ```
 
-That last command creates the SQLite schema and runs a full Phase 1 ingest so the cloned repo has data without needing the API server first.
+That last command creates the SQLite schema and runs a full Phase 1 ingest so the cloned repo has data without needing the API server first. It exits non-zero if the post-ingest audit fails.
 
 ## Run Locally
 
@@ -43,6 +50,16 @@ npm run dev
 ```
 
 The backend bootstraps its schema on startup. SQLite files are intentionally not committed, and `python -m backend.bootstrap_db` is the supported first-run populate command.
+
+## Contributor workflow
+
+Build checks:
+
+```bash
+python3 -m py_compile backend/*.py backend/sources/*.py
+cd frontend
+npm run build
+```
 
 ## Current scope
 

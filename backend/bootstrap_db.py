@@ -4,7 +4,7 @@ import argparse
 import json
 from typing import Sequence
 
-from .update_engine import bootstrap, run_update_sync
+from .update_engine import bootstrap, get_update_log, run_update_sync
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,11 +34,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     bootstrap()
     log_id = run_update_sync(benchmarks=args.benchmarks, triggered_by=args.triggered_by)
+    log = get_update_log(log_id)
+    if log is None:
+        raise RuntimeError(f"Unable to load update log {log_id} after bootstrap")
+
     if args.json:
-        print(json.dumps({"log_id": log_id, "status": "completed"}, indent=2))
+        print(json.dumps(log, indent=2, default=str))
     else:
-        print(f"Bootstrap complete: update_log_id={log_id}")
-    return 0
+        print(
+            "Bootstrap "
+            f'{log["status"]}: '
+            f'update_log_id={log_id}, '
+            f'scores_added={log["scores_added"]}, '
+            f'scores_updated={log["scores_updated"]}'
+        )
+        audit = log.get("audit_summary")
+        if audit:
+            print(
+                "Audit "
+                f'{audit["status"]}: '
+                f'blockers={audit["blocker_count"]}, '
+                f'warnings={audit["warning_count"]}, '
+                f'info={audit["info_count"]}'
+            )
+    return 1 if log["status"] == "failed" else 0
 
 
 if __name__ == "__main__":
