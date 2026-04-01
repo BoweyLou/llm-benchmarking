@@ -150,6 +150,18 @@ function App() {
       );
     }
 
+    if (activeTab === "methodology") {
+      return (
+        <Methodology
+          benchmarks={data.benchmarks}
+          benchmarksById={benchmarksById}
+          catalogMode={catalogMode}
+          selectedUseCaseId={data.selectedUseCaseId}
+          useCases={data.useCases}
+        />
+      );
+    }
+
     return (
       <History
         expandedHistoryId={expandedHistoryId}
@@ -221,6 +233,7 @@ function TabNav({ activeTab, onTabChange }) {
     { id: "finder", label: "Use Case Finder", icon: "🔍" },
     { id: "browser", label: "Model Browser", icon: "📊" },
     { id: "compare", label: "Compare", icon: "⚖️" },
+    { id: "methodology", label: "Methodology", icon: "🧭" },
     { id: "history", label: "History", icon: "🕐" },
   ];
 
@@ -409,6 +422,237 @@ function UseCaseFinder({
           ) : null}
         </section>
       ) : null}
+    </section>
+  );
+}
+
+function Methodology({ benchmarks, benchmarksById, catalogMode, selectedUseCaseId, useCases }) {
+  const groupedUseCases = groupUseCasesBySegment(useCases);
+  const selectedLens = useCases.find((useCase) => useCase.id === selectedUseCaseId) || useCases.find((useCase) => useCase.id === "coding") || useCases[0] || null;
+  const benchmarksWithUsage = [...benchmarks]
+    .map((benchmark) => ({
+      ...benchmark,
+      usedBy: useCases.filter((useCase) => Object.prototype.hasOwnProperty.call(useCase.weights || {}, benchmark.id)),
+    }))
+    .sort((left, right) => {
+      if (left.tier !== right.tier) {
+        return left.tier - right.tier;
+      }
+      return left.name.localeCompare(right.name);
+    });
+
+  return (
+    <section className="stack">
+      <div className="section-head">
+        <div>
+          <h2>Methodology</h2>
+          <p>How this app ranks models, what each source measures, and how to interpret the outputs responsibly.</p>
+        </div>
+        <div className="hint">This is the decision logic behind every use-case ranking.</div>
+      </div>
+
+      <div className="method-grid">
+        <article className="panel method-card">
+          <div className="panel-head">What this app is doing</div>
+          <div className="method-copy">
+            This is a weighted decision system over benchmark evidence. It is not claiming one universal “best model”.
+            Each use case defines its own evidence mix, minimum coverage threshold, and required benchmarks.
+          </div>
+          <div className="method-list">
+            <div><strong>Score:</strong> weighted normalized composite, not a raw percentage.</div>
+            <div><strong>Coverage:</strong> how much of the use-case evidence stack a model actually covers.</div>
+            <div><strong>Critical gaps:</strong> missing required benchmarks that make a ranking less trustworthy.</div>
+          </div>
+        </article>
+
+        <article className="panel method-card">
+          <div className="panel-head">How ranking works</div>
+          <div className="method-steps">
+            <div className="method-step"><strong>1.</strong> Pick the benchmarks that belong to the selected lens.</div>
+            <div className="method-step"><strong>2.</strong> Normalize each benchmark against the current model pool, including inverting lower-is-better metrics like cost or hallucination rate.</div>
+            <div className="method-step"><strong>3.</strong> Apply the lens weights and compute a weighted average over the benchmarks the model actually has.</div>
+            <div className="method-step"><strong>4.</strong> Drop any model below the lens minimum coverage threshold.</div>
+            <div className="method-step"><strong>5.</strong> Sort models with fewer critical gaps first, then higher weighted score, then higher coverage.</div>
+          </div>
+        </article>
+
+        <article className="panel method-card">
+          <div className="panel-head">How to read results</div>
+          <div className="method-list">
+            <div><strong>#1 rank:</strong> strongest evidence mix for that lens in the current dataset.</div>
+            <div><strong>High score, low trust:</strong> possible when a model is strong on partial evidence but misses required benchmarks.</div>
+            <div><strong>Preview lens:</strong> useful for exploration, but still thinner or more uneven than ready lenses.</div>
+            <div><strong>{catalogMode === "family" ? "Families mode" : "Exact variants mode"}:</strong> {catalogMode === "family" ? "variant scores are rolled into a family card using the best available benchmark evidence per family." : "you are looking at exact model/variant cards with no family aggregation."}</div>
+          </div>
+          <div className="method-badges">
+            <span className="method-badge"><SourceBadge score={{ source_type: "primary", verified: true }} /> direct primary row</span>
+            <span className="method-badge"><SourceBadge score={{ source_type: "secondary", verified: false }} /> lower-trust / derived / self-reported</span>
+            <span className="method-badge"><SourceBadge score={{ source_type: "manual", verified: false }} /> manual entry</span>
+          </div>
+        </article>
+
+        <article className="panel method-card">
+          <div className="panel-head">How to use this tool</div>
+          <div className="method-list">
+            <div><strong>Start with a use case lens:</strong> that gives you the right weighting for the task you actually care about.</div>
+            <div><strong>Use family view first:</strong> it is the best default for procurement and shortlist decisions.</div>
+            <div><strong>Switch to exact variants second:</strong> use it when you need to choose between reasoning, max, mini, or context-window variants.</div>
+            <div><strong>Open the benchmark rows:</strong> check source, caveat, and missing evidence before trusting a high rank.</div>
+          </div>
+        </article>
+      </div>
+
+      {selectedLens ? (
+        <section className="panel methodology-focus">
+          <div className="panel-head">How to read the current lens</div>
+          <div className="method-focus-head">
+            <div className="method-focus-title">
+              <span className="usecase-icon">{selectedLens.icon}</span>
+              <div>
+                <div className="title">{selectedLens.label}</div>
+                <div className="method-subtle">{selectedLens.description}</div>
+              </div>
+            </div>
+            <div className="usecase-status-row">
+              <span className={selectedLens.status === "preview" ? "tag tag-preview" : "tag tag-ready"}>
+                {selectedLens.status === "preview" ? "Preview lens" : "Ready lens"}
+              </span>
+              <span className="tag">{Math.round((selectedLens.min_coverage ?? 0.5) * 100)}% minimum coverage</span>
+            </div>
+          </div>
+          <div className="method-grid">
+            <div className="method-card method-card-soft">
+              <div className="detail-label">Weights</div>
+              <div className="weight-list">
+                {Object.entries(selectedLens.weights || {})
+                  .sort((left, right) => right[1] - left[1])
+                  .map(([benchmarkId, weight]) => (
+                    <div key={benchmarkId} className="weight-row">
+                      <span>{benchmarksById[benchmarkId]?.short || benchmarkId.replaceAll("_", " ")}</span>
+                      <span>{Math.round(weight * 100)}%</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+            <div className="method-card method-card-soft">
+              <div className="detail-label">Required evidence</div>
+              <div className="usecase-chip-list">
+                {(selectedLens.required_benchmarks || []).map((benchmarkId) => (
+                  <span key={benchmarkId} className="usecase-chip usecase-chip-required">
+                    {benchmarksById[benchmarkId]?.short || benchmarkId.replaceAll("_", " ")}
+                  </span>
+                ))}
+              </div>
+              <div className="method-subtle">
+                Models missing these benchmarks can still appear if they clear the coverage gate, but they rank below more complete evidence.
+              </div>
+            </div>
+          </div>
+          <div className="usecase-notes">
+            {Object.entries(selectedLens.benchmark_notes || {}).map(([benchmarkId, note]) => (
+              <div key={benchmarkId} className="usecase-note-item">
+                <strong>{benchmarksById[benchmarkId]?.short || benchmarkId.replaceAll("_", " ")}:</strong>
+                <span>{note}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="stack">
+        <div className="section-head">
+          <div>
+            <h3>Use-case lenses</h3>
+            <p>Every lens is a different ranking recipe. The weights below are the actual scoring logic.</p>
+          </div>
+        </div>
+        {groupedUseCases.map((group) => (
+          <section key={group.id} className="stack stack-tight">
+            <div className="usecase-section-head">
+              <div className="eyebrow">{group.title}</div>
+              <div className="usecase-section-copy">{group.description}</div>
+            </div>
+            <div className="methodology-usecases">
+              {group.items.map((useCase) => (
+                <article key={useCase.id} className="panel method-card">
+                  <div className="method-focus-head">
+                    <div className="method-focus-title">
+                      <span className="usecase-icon">{useCase.icon}</span>
+                      <div>
+                        <div className="title">{useCase.label}</div>
+                        <div className="method-subtle">{useCase.description}</div>
+                      </div>
+                    </div>
+                    <div className="usecase-status-row">
+                      <span className={useCase.status === "preview" ? "tag tag-preview" : "tag tag-ready"}>
+                        {useCase.status === "preview" ? "Preview" : "Ready"}
+                      </span>
+                      <span className="tag">{Math.round((useCase.min_coverage ?? 0.5) * 100)}% min coverage</span>
+                    </div>
+                  </div>
+                  <div className="usecase-chip-list">
+                    {(useCase.required_benchmarks || []).map((benchmarkId) => (
+                      <span key={benchmarkId} className="usecase-chip usecase-chip-required">
+                        {benchmarksById[benchmarkId]?.short || benchmarkId.replaceAll("_", " ")}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="weight-list">
+                    {Object.entries(useCase.weights || {})
+                      .sort((left, right) => right[1] - left[1])
+                      .map(([benchmarkId, weight]) => (
+                        <div key={benchmarkId} className="weight-row">
+                          <span>{benchmarksById[benchmarkId]?.short || benchmarkId.replaceAll("_", " ")}</span>
+                          <span>{Math.round(weight * 100)}%</span>
+                        </div>
+                      ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        ))}
+      </section>
+
+      <section className="stack">
+        <div className="section-head">
+          <div>
+            <h3>Benchmark source library</h3>
+            <p>What each benchmark is, who publishes it, why it matters, and where it is used.</p>
+          </div>
+        </div>
+        <div className="methodology-benchmarks">
+          {benchmarksWithUsage.map((benchmark) => {
+            const context = getBenchmarkContext(benchmark);
+            return (
+              <article key={benchmark.id} className="panel method-card">
+                <div className="method-focus-head">
+                  <div>
+                    <div className="title">{benchmark.name}</div>
+                    <div className="method-subtle">{benchmark.short} · {benchmark.category}</div>
+                  </div>
+                  <div className="usecase-status-row">
+                    <span className="tag">Tier {benchmark.tier}</span>
+                    <span className="tag">{benchmark.higher_is_better ? "Higher is better" : "Lower is better"}</span>
+                  </div>
+                </div>
+                <div className="method-list">
+                  <div><strong>Metric:</strong> {benchmark.metric}</div>
+                  <div><strong>Source:</strong> {context.source}</div>
+                  <div><strong>Why it matters:</strong> {context.why}</div>
+                  {context.caveat ? <div><strong>Caveat:</strong> {context.caveat}</div> : null}
+                  <div><strong>Used in:</strong> {benchmark.usedBy.length ? benchmark.usedBy.map((useCase) => useCase.label).join(", ") : "Not currently used in a ranking lens."}</div>
+                </div>
+                {benchmark.url ? (
+                  <a className="bench-source" href={benchmark.url} rel="noreferrer" target="_blank">
+                    Open source leaderboard
+                  </a>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+      </section>
     </section>
   );
 }
@@ -2035,6 +2279,80 @@ const styles = `
   }
   .panel-head { font-weight: 700; }
   .panel-copy { margin: 0; line-height: 1.5; }
+  .method-grid, .methodology-usecases, .methodology-benchmarks {
+    display: grid;
+    gap: 12px;
+  }
+  .method-card {
+    align-content: start;
+  }
+  .method-card-soft {
+    padding: 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(148, 163, 184, .14);
+    background: rgba(248, 250, 252, .8);
+  }
+  .method-copy, .method-subtle {
+    font-size: .82rem;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+  .method-list, .method-steps, .weight-list {
+    display: grid;
+    gap: 8px;
+  }
+  .method-list > div, .method-step {
+    font-size: .8rem;
+    line-height: 1.45;
+    color: #334155;
+  }
+  .method-step strong {
+    display: inline-block;
+    width: 18px;
+    color: var(--accent);
+  }
+  .method-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .method-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 999px;
+    padding: 8px 10px;
+    border: 1px solid rgba(148, 163, 184, .18);
+    background: rgba(255,255,255,.94);
+    font-size: .75rem;
+    color: #334155;
+  }
+  .method-focus-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .method-focus-title {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .weight-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: .78rem;
+    color: #334155;
+    border-bottom: 1px solid rgba(148, 163, 184, .12);
+    padding-bottom: 6px;
+  }
+  .weight-row:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
   .toolbar {
     display: grid;
     grid-template-columns: 1fr;
@@ -2043,6 +2361,9 @@ const styles = `
   }
   @media (min-width: 860px) {
     .toolbar { grid-template-columns: minmax(0, 1fr) 220px 220px; }
+    .method-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .methodology-usecases { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .methodology-benchmarks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
   .input, .select {
     width: 100%;
