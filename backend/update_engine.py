@@ -192,6 +192,18 @@ def list_source_runs(log_id: int) -> list[dict[str, Any]]:
     return [_serialize_source_run(row) for row in rows]
 
 
+def list_raw_source_records(source_run_id: int) -> list[dict[str, Any]]:
+    bootstrap()
+    with get_connection(ENGINE) as conn:
+        rows = fetch_all(
+            conn,
+            select(raw_source_records_table)
+            .where(raw_source_records_table.c.source_run_id == source_run_id)
+            .order_by(raw_source_records_table.c.id.asc()),
+        )
+    return [dict(row) for row in rows]
+
+
 def get_rankings(use_case_id: str) -> dict[str, Any] | None:
     bootstrap()
     use_case = _get_use_case(use_case_id)
@@ -821,6 +833,7 @@ __all__ = [
     "get_rankings",
     "list_benchmarks",
     "list_models",
+    "list_raw_source_records",
     "list_source_runs",
     "list_update_logs",
     "list_use_cases",

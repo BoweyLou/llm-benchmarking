@@ -123,13 +123,8 @@ def run_audit(engine, update_log_id: int) -> dict[str, Any]:
                     raw_source_records_table.c.resolution_status,
                 )
                 .where(raw_source_records_table.c.source_run_id.in_(source_run_ids))
-                .where(raw_source_records_table.c.normalized_model_id.is_(None)),
+                .where(raw_source_records_table.c.resolution_status == "unresolved"),
             )
-            unresolved = [
-                row
-                for row in unresolved
-                if str(row.get("resolution_status") or "unresolved") != "skipped_aggregate"
-            ]
             if unresolved:
                 findings.append(
                     _finding(

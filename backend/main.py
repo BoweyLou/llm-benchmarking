@@ -6,6 +6,7 @@ from .models import (
     AuditRunOut,
     BenchmarkOut,
     ModelOut,
+    RawSourceRecordOut,
     RankingsResponseOut,
     SourceRunOut,
     UpdateLogOut,
@@ -21,6 +22,7 @@ from .update_engine import (
     get_update_log,
     list_benchmarks,
     list_models,
+    list_raw_source_records,
     list_source_runs,
     list_update_logs,
     list_use_cases,
@@ -75,6 +77,14 @@ def api_update_history_sources(log_id: int) -> list[dict]:
     if log is None:
         raise HTTPException(status_code=404, detail="Update log not found")
     return list_source_runs(log_id)
+
+
+@app.get("/api/update/source-runs/{source_run_id}/raw-records", response_model=list[RawSourceRecordOut])
+def api_source_run_raw_records(source_run_id: int) -> list[dict]:
+    records = list_raw_source_records(source_run_id)
+    if not records:
+        raise HTTPException(status_code=404, detail="Source run raw records not found")
+    return records
 
 
 @app.get("/api/update/audit/{log_id}", response_model=AuditRunOut)
