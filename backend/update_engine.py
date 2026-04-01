@@ -424,7 +424,7 @@ def _persist_source_result(source_run_id: int, result: SourceFetchResult) -> tup
     for raw_record in result.raw_records:
         identity = _record_identity(raw_record.raw_model_name, raw_record.raw_model_key)
         normalized_model_id = model_ids_by_identity.get(identity)
-        if normalized_model_id is None:
+        if normalized_model_id is None and not _should_skip_raw_model_resolution(raw_record):
             normalized_model_id = _ensure_model(
                 raw_record.raw_model_name,
                 raw_record.metadata,
@@ -779,6 +779,10 @@ def _slugify_model_id(raw_model_name: str) -> str:
 
 def _record_identity(raw_model_name: str, raw_model_key: str | None) -> str:
     return f"{raw_model_key or raw_model_name}|{normalize_text(raw_model_name)}"
+
+
+def _should_skip_raw_model_resolution(raw_record: RawSourceRecord) -> bool:
+    return bool(raw_record.metadata.get("aggregate_submission"))
 
 
 def _stringify(value: Any) -> str:

@@ -116,10 +116,20 @@ def run_audit(engine, update_log_id: int) -> dict[str, Any]:
         if source_run_ids:
             unresolved = fetch_all(
                 conn,
-                select(raw_source_records_table.c.id, raw_source_records_table.c.source_run_id, raw_source_records_table.c.raw_model_name)
+                select(
+                    raw_source_records_table.c.id,
+                    raw_source_records_table.c.source_run_id,
+                    raw_source_records_table.c.raw_model_name,
+                    raw_source_records_table.c.notes,
+                )
                 .where(raw_source_records_table.c.source_run_id.in_(source_run_ids))
                 .where(raw_source_records_table.c.normalized_model_id.is_(None)),
             )
+            unresolved = [
+                row
+                for row in unresolved
+                if '"aggregate_submission": true' not in str(row.get("notes") or "")
+            ]
             if unresolved:
                 findings.append(
                     _finding(
