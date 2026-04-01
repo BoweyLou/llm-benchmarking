@@ -4,6 +4,7 @@ import {
   getBenchmarks,
   getModels,
   getRankings,
+  getSourceRunRawRecords,
   getUpdateHistory,
   getUpdateHistorySources,
   getUpdateStatus,
@@ -20,6 +21,8 @@ export function useDashboardData() {
   const [selectedUseCaseId, setSelectedUseCaseId] = useState("");
   const [sourceRunsByLogId, setSourceRunsByLogId] = useState({});
   const [sourceRunsLoadingByLogId, setSourceRunsLoadingByLogId] = useState({});
+  const [rawRecordsBySourceRunId, setRawRecordsBySourceRunId] = useState({});
+  const [rawRecordsLoadingBySourceRunId, setRawRecordsLoadingBySourceRunId] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [rankingsLoading, setRankingsLoading] = useState(false);
@@ -151,6 +154,28 @@ export function useDashboardData() {
     }
   }
 
+  async function loadRawSourceRecords(sourceRunId) {
+    if (!sourceRunId) {
+      return [];
+    }
+
+    if (Object.prototype.hasOwnProperty.call(rawRecordsBySourceRunId, sourceRunId)) {
+      return rawRecordsBySourceRunId[sourceRunId];
+    }
+
+    setRawRecordsLoadingBySourceRunId((current) => ({ ...current, [sourceRunId]: true }));
+    try {
+      const records = await getSourceRunRawRecords(sourceRunId);
+      setRawRecordsBySourceRunId((current) => ({ ...current, [sourceRunId]: records }));
+      return records;
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Failed to load raw source records.");
+      return [];
+    } finally {
+      setRawRecordsLoadingBySourceRunId((current) => ({ ...current, [sourceRunId]: false }));
+    }
+  }
+
   useEffect(() => {
     refreshData();
   }, []);
@@ -172,6 +197,9 @@ export function useDashboardData() {
     setSelectedUseCaseId,
     sourceRunsByLogId,
     sourceRunsLoadingByLogId,
+    rawRecordsBySourceRunId,
+    rawRecordsLoadingBySourceRunId,
+    loadRawSourceRecords,
     triggerUpdate,
     updateState,
     useCases,

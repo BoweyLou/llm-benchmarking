@@ -154,7 +154,10 @@ function App() {
       <History
         expandedHistoryId={expandedHistoryId}
         history={data.history}
+        loadRawSourceRecords={data.loadRawSourceRecords}
         onToggleEntry={toggleHistoryEntry}
+        rawRecordsBySourceRunId={data.rawRecordsBySourceRunId}
+        rawRecordsLoadingBySourceRunId={data.rawRecordsLoadingBySourceRunId}
         sourceRunsByLogId={data.sourceRunsByLogId}
         sourceRunsLoadingByLogId={data.sourceRunsLoadingByLogId}
         updateState={data.updateState}
@@ -514,6 +517,7 @@ function ModelBrowserCard({ benchmarksById, compareIds, expanded, model, onAddTo
               const benchmark = benchmarksById[benchmarkId];
               const label = benchmark?.short || benchmarkId.replaceAll("_", " ");
               const variantName = score?.family_variant_name;
+              const provenance = benchmarkId === "terminal_bench" ? score?.notes : "";
               return (
                 <div key={benchmarkId} className="bench-row">
                   {benchmark?.url ? (
@@ -536,6 +540,7 @@ function ModelBrowserCard({ benchmarksById, compareIds, expanded, model, onAddTo
                         {formatBenchmarkValue(benchmark, score.value)}
                       </span>
                       {variantName ? <span className="bench-variant">via {variantName}</span> : null}
+                      {provenance ? <span className="bench-provenance">{provenance}</span> : null}
                       <span className="bench-date">{formatDate(score.collected_at)}</span>
                     </>
                   ) : (
@@ -696,6 +701,7 @@ function Compare({
                               {formatBenchmarkValue(benchmarksById[benchmark.id], score.value)}
                             </span>
                             {score.family_variant_name ? <span className="cell-variant">via {score.family_variant_name}</span> : null}
+                            {benchmark.id === "terminal_bench" && score.notes ? <span className="cell-variant">{score.notes}</span> : null}
                           </div>
                         ) : (
                           <span className="cell-empty">—</span>
@@ -718,12 +724,26 @@ function Compare({
 function History({
   expandedHistoryId,
   history,
+  loadRawSourceRecords,
   onToggleEntry,
+  rawRecordsBySourceRunId,
+  rawRecordsLoadingBySourceRunId,
   sourceRunsByLogId,
   sourceRunsLoadingByLogId,
   updateState,
 }) {
+  const [expandedSourceRunIds, setExpandedSourceRunIds] = useState({});
   const entries = [...history].sort((left, right) => String(right.started_at).localeCompare(String(left.started_at)));
+
+  function toggleSourceRun(sourceRunId) {
+    setExpandedSourceRunIds((current) => {
+      const isExpanded = Boolean(current[sourceRunId]);
+      if (!isExpanded && !rawRecordsBySourceRunId[sourceRunId]?.length) {
+        loadRawSourceRecords(sourceRunId);
+      }
+      return { ...current, [sourceRunId]: !isExpanded };
+    });
+  }
 
   return (
     <section className="stack">
@@ -775,19 +795,29 @@ function History({
                       <div className="history-sources-empty">Loading source runs...</div>
                     ) : sourceRuns.length ? (
                       sourceRuns.map((sourceRun) => (
-                        <div key={sourceRun.id} className="history-source-row">
-                          <div>
-                            <div className="history-source-name">{sourceRun.source_name}</div>
-                            <div className="history-source-meta">
-                              {sourceRun.benchmark_id || "n/a"} · {sourceRun.records_found} raw records
+                        <div key={sourceRun.id} className="history-source-card">
+                          <button className="history-source-row" onClick={() => toggleSourceRun(sourceRun.id)} type="button">
+                            <div>
+                              <div className="history-source-name">{sourceRun.source_name}</div>
+                              <div className="history-source-meta">
+                                {sourceRun.benchmark_id || "n/a"} · {sourceRun.records_found} raw records
+                              </div>
                             </div>
-                          </div>
-                          <div className="history-source-status">
-                            <span className={sourceRun.status === "completed" ? "pill pill-good" : sourceRun.status === "failed" ? "pill pill-bad" : "pill"}>
-                              {sourceRun.status}
-                            </span>
-                            {sourceRun.error_message ? <div className="history-source-error">{sourceRun.error_message}</div> : null}
-                          </div>
+                            <div className="history-source-status">
+                              <span className={sourceRun.status === "completed" ? "pill pill-good" : sourceRun.status === "failed" ? "pill pill-bad" : "pill"}>
+                                {sourceRun.status}
+                              </span>
+                              <span className="history-source-chevron">{expandedSourceRunIds[sourceRun.id] ? "▲" : "▼"}</span>
+                              {sourceRun.error_message ? <div className="history-source-error">{sourceRun.error_message}</div> : null}
+                            </div>
+                          </button>
+                          {expandedSourceRunIds[sourceRun.id] ? (
+                            <HistorySourceRunDetails
+                              rawRecords={rawRecordsBySourceRunId[sourceRun.id] || []}
+                              rawRecordsLoading={rawRecordsLoadingBySourceRunId[sourceRun.id]}
+                              sourceRun={sourceRun}
+                            />
+                          ) : null}
                         </div>
                       ))
                     ) : (
@@ -817,6 +847,61 @@ function History({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function HistorySourceRunDetails({ rawRecords, rawRecordsLoading, sourceRun }) {
+  if (rawRecordsLoading) {
+    return <div className="history-raw-empty">Loading raw-record detail...</div>;
+  }
+
+  if (!rawRecords.length) {
+    return <div className="history-raw-empty">No raw-record detail stored for this source run.</div>;
+  }
+
+  const resolutionCounts = rawRecords.reduce((acc, row) => {
+    const key = row.resolution_status || "unresolved";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const skippedAggregate = rawRecords.filter((row) => row.resolution_status === "skipped_aggregate").slice(0, 5);
+  const unresolved = rawRecords.filter((row) => row.resolution_status === "unresolved").slice(0, 5);
+
+  return (
+    <div className="history-raw-panel">
+      <div className="history-raw-summary">
+        <span className="pill">resolved {resolutionCounts.resolved || 0}</span>
+        <span className="pill">skipped aggregate {resolutionCounts.skipped_aggregate || 0}</span>
+        <span className="pill">unresolved {resolutionCounts.unresolved || 0}</span>
+      </div>
+      {sourceRun.source_name === "terminal_bench" ? (
+        <div className="history-raw-note">
+          Terminal-Bench keeps multi-model aggregate submissions as raw provenance and excludes them from the model catalog.
+        </div>
+      ) : null}
+      {skippedAggregate.length ? (
+        <div className="history-raw-list">
+          <div className="detail-label">Aggregate provenance kept raw</div>
+          {skippedAggregate.map((row) => (
+            <div key={row.id} className="history-raw-row">
+              <span className="history-raw-name">{row.raw_model_name}</span>
+              <span className="history-raw-meta">{row.raw_value || "n/a"}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {unresolved.length ? (
+        <div className="history-raw-list">
+          <div className="detail-label">Still unresolved</div>
+          {unresolved.map((row) => (
+            <div key={row.id} className="history-raw-row">
+              <span className="history-raw-name">{row.raw_model_name}</span>
+              <span className="history-raw-meta">{row.raw_value || "n/a"}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1519,9 +1604,13 @@ const styles = `
     align-items: center;
     gap: 6px;
   }
-  .bench-variant, .cell-variant {
+  .bench-variant, .cell-variant, .bench-provenance {
     color: var(--muted);
     font-size: .76rem;
+  }
+  .bench-provenance {
+    grid-column: 2 / 4;
+    line-height: 1.45;
   }
   .source-badge {
     display: inline-flex;
@@ -1747,7 +1836,20 @@ const styles = `
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
+    border: 0;
+    background: transparent;
+    width: 100%;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
   }
+  .history-source-card {
+    display: grid;
+    gap: 8px;
+    padding: 10px 0;
+    border-top: 1px solid rgba(148, 163, 184, .12);
+  }
+  .history-source-card:first-child { border-top: 0; padding-top: 0; }
   .history-source-name {
     font-weight: 700;
     color: var(--text);
@@ -1761,11 +1863,48 @@ const styles = `
     justify-items: end;
     gap: 6px;
   }
+  .history-source-chevron {
+    color: var(--accent);
+    font-size: .8rem;
+    font-weight: 800;
+  }
   .history-source-error {
     font-size: .76rem;
     color: #b91c1c;
     text-align: right;
     max-width: 280px;
+  }
+  .history-raw-panel {
+    display: grid;
+    gap: 8px;
+    margin-left: 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(148, 163, 184, .16);
+    border-radius: 12px;
+    background: rgba(248, 250, 252, .88);
+  }
+  .history-raw-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .history-raw-note, .history-raw-empty, .history-raw-meta {
+    font-size: .76rem;
+    color: var(--muted);
+  }
+  .history-raw-list {
+    display: grid;
+    gap: 6px;
+  }
+  .history-raw-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: baseline;
+  }
+  .history-raw-name {
+    font-size: .8rem;
+    color: var(--text);
   }
   .banner {
     padding: 14px 16px;

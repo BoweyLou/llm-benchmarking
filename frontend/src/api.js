@@ -56,3 +56,7 @@ export function getUpdateHistory() {
 export function getUpdateHistorySources(logId) {
   return request(`/update/history/${logId}/sources`);
 }
+
+export function getSourceRunRawRecords(sourceRunId) {
+  return request(`/update/source-runs/${sourceRunId}/raw-records`);
+}
