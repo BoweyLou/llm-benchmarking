@@ -10,12 +10,17 @@ from typing import Any, Iterable, Mapping
 _STRIP_TOKENS = {
     "official",
     "preview",
+    "latest",
     "model",
     "release",
     "edition",
     "series",
     "version",
 }
+
+_PROVIDER_PREFIX_RE = re.compile(r"^[a-z0-9_.-]+/")
+_TRAILING_ISO_DATE_RE = re.compile(r"[-_]?20\d{2}[-_]\d{2}[-_]\d{2}$", re.IGNORECASE)
+_TRAILING_COMPACT_DATE_RE = re.compile(r"[-_]?20\d{6}$", re.IGNORECASE)
 
 _PUNCT_TRANSLATION = str.maketrans(
     {
@@ -61,6 +66,28 @@ def _compact_text(value: str) -> str:
     return normalize_text(value).replace(" ", "")
 
 
+def _raw_name_variants(raw_name: str) -> tuple[str, ...]:
+    pending = [raw_name.strip()]
+    seen: set[str] = set()
+
+    while pending:
+        candidate = pending.pop()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+
+        provider_stripped = _PROVIDER_PREFIX_RE.sub("", candidate, count=1)
+        if provider_stripped != candidate:
+            pending.append(provider_stripped)
+
+        for pattern in (_TRAILING_ISO_DATE_RE, _TRAILING_COMPACT_DATE_RE):
+            date_stripped = pattern.sub("", candidate).strip("-_ ")
+            if date_stripped != candidate:
+                pending.append(date_stripped)
+
+    return tuple(seen)
+
+
 def _candidate_strings(model: Mapping[str, Any]) -> tuple[str, ...]:
     candidates: list[str] = []
     for key in ("name",):
@@ -94,6 +121,12 @@ def _model_candidates(models: Iterable[Mapping[str, Any]]) -> list[NormalizedMod
     return [normalize_model_entry(model) for model in models]
 
 
+def _exact_match_priority(candidate: NormalizedModel) -> tuple[int, int, str]:
+    provider_unknown = 1 if not candidate.provider or candidate.provider.lower() == "unknown" else 0
+    has_provider_prefix = 1 if "/" in candidate.name else 0
+    return (provider_unknown, has_provider_prefix, candidate.model_id)
+
+
 def resolve_model_name(raw_name: str, models: Iterable[Mapping[str, Any]], *, threshold: float = 80.0) -> str | None:
     """Resolve a raw leaderboard label to an existing model id.
 
@@ -108,14 +141,20 @@ def resolve_model_name(raw_name: str, models: Iterable[Mapping[str, Any]], *, th
         return None
 
     candidates = _model_candidates(models)
+    raw_aliases = {
+        alias
+        for variant in _raw_name_variants(raw_name)
+        for alias in (normalize_text(variant), _compact_text(variant))
+        if alias
+    }
     exact: list[NormalizedModel] = []
 
     for candidate in candidates:
-        if any(raw_norm == alias or raw_compact == alias for alias in candidate.aliases):
+        if any(alias in raw_aliases for alias in candidate.aliases):
             exact.append(candidate)
 
     if exact:
-        exact.sort(key=lambda candidate: candidate.model_id)
+        exact.sort(key=_exact_match_priority)
         return exact[0].model_id
 
     # Threshold is intentionally unused for now. Fuzzy matching created

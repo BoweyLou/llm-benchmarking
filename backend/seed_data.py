@@ -97,6 +97,20 @@ BENCHMARKS: list[dict[str, Any]] = [
         "active": 1,
     },
     {
+        "id": "rag_task_faithfulness",
+        "name": "FaithJudge",
+        "short": "FaithJudge",
+        "source": "Vectara",
+        "url": "https://github.com/vectara/FaithJudge#leaderboard",
+        "category": "Retrieval & Grounding",
+        "metric": "Hallucination Rate %",
+        "higher_is_better": 0,
+        "tier": 2,
+        "scraper_id": "FaithJudgeAdapter",
+        "description": "Overall hallucination rate across RAG tasks on FaithBench and RagTruth. Lower is better.",
+        "active": 1,
+    },
+    {
         "id": "terminal_bench",
         "name": "Terminal-Bench 2.0",
         "short": "Term-B",
@@ -468,20 +482,20 @@ USE_CASES: list[dict[str, Any]] = [
         "segment": "enterprise",
         "status": "preview",
         "min_coverage": 0.55,
-        "required_benchmarks": ["rag_groundedness", "ifeval"],
+        "required_benchmarks": ["rag_groundedness", "rag_task_faithfulness", "ifeval"],
         "benchmark_notes": {
             "rag_groundedness": "Vectara factual consistency to supplied source text. RAG-adjacent faithfulness signal, not retrieval relevance.",
+            "rag_task_faithfulness": "FaithJudge direct hallucination rate across RAG tasks on supplied contexts. Lower is better, but it still does not measure retrieval relevance.",
             "ifeval": "Instruction fidelity for organizing, ranking, and shaping retrieved context.",
             "aa_intelligence": "General capability context for synthesis and analysis once retrieval is assembled.",
             "chatbot_arena": "Answer quality after retrieval is assembled.",
-            "gpqa_diamond": "Reasoning context for choosing relevant retrieved evidence.",
         },
         "weights": {
-            "rag_groundedness": 0.45,
-            "ifeval": 0.20,
+            "rag_task_faithfulness": 0.35,
+            "rag_groundedness": 0.25,
+            "ifeval": 0.15,
             "aa_intelligence": 0.15,
             "chatbot_arena": 0.10,
-            "gpqa_diamond": 0.10,
         },
     },
     {
@@ -692,8 +706,17 @@ def _has_rows(conn: Connection, table) -> bool:
 
 
 def _upsert_rows(conn: Connection, table, rows: Iterable[Mapping[str, Any]]) -> None:
-    stmt = sqlite_insert(table).values(list(rows))
-    stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
+    rows_list = list(rows)
+    if not rows_list:
+        return
+
+    stmt = sqlite_insert(table).values(rows_list)
+    update_columns = {
+        column.name: getattr(stmt.excluded, column.name)
+        for column in table.columns
+        if column.name != "id"
+    }
+    stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=update_columns)
     conn.execute(stmt)
 
 

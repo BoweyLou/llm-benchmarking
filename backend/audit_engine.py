@@ -23,6 +23,7 @@ MIN_EXPECTED_RECORDS = {
     "ailuminate": 20,
     "chatbot_arena": 200,
     "epoch_ai": 100,
+    "faithjudge": 30,
     "ifeval": 50,
     "mmmu": 120,
     "swebench": 10,

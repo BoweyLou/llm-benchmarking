@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Sequence
 
 import httpx
@@ -8,62 +7,60 @@ import httpx
 from .base import BaseSourceAdapter, RawSourceRecord, ScoreCandidate, safe_float, utc_now_iso
 
 
-FAITHJUDGE_README_URL = "https://raw.githubusercontent.com/vectara/FaithJudge/main/README.md"
-FAITHJUDGE_PAGE_URL = "https://github.com/vectara/FaithJudge#leaderboard"
-TABLE_START_MARKER = "<!-- TABLE START -->"
-TABLE_END_MARKER = "<!-- TABLE END -->"
-MODEL_LINK_RE = re.compile(r"\[(?P<name>[^\]]+)\]\((?P<url>[^)]+)\)")
+VECTARA_README_URL = "https://raw.githubusercontent.com/vectara/hallucination-leaderboard/main/README.md"
+VECTARA_PAGE_URL = "https://github.com/vectara/hallucination-leaderboard"
+LEADERBOARD_MARKER = "<!-- LEADERBOARD_START -->"
 
 
-class FaithJudgeAdapter(BaseSourceAdapter):
-    source_id = "faithjudge"
+class VectaraHallucinationAdapter(BaseSourceAdapter):
+    source_id = "vectara_hallucination"
     benchmark_ids = ("rag_groundedness",)
-    source_url = FAITHJUDGE_PAGE_URL
+    source_url = VECTARA_PAGE_URL
 
     async def fetch_raw(self, client: httpx.AsyncClient) -> list[RawSourceRecord]:
-        response = await client.get(FAITHJUDGE_README_URL, timeout=30.0)
+        response = await client.get(VECTARA_README_URL, timeout=30.0)
         response.raise_for_status()
 
+        rows = self._extract_table_rows(response.text)
         fetched_at = utc_now_iso()
         raw_records: list[RawSourceRecord] = []
-        for line in self._extract_table_lines(response.text):
-            parsed = self._parse_table_row(line)
-            if parsed is None:
+
+        for rank, row in enumerate(rows, start=1):
+            model_name = row["model_name"]
+            factual_consistency = safe_float(row["factual_consistency_rate"].replace("%", ""))
+            if not model_name or factual_consistency is None:
                 continue
 
             raw_records.append(
                 RawSourceRecord(
                     source_id=self.source_id,
                     benchmark_id="rag_groundedness",
-                    raw_model_name=parsed["model_name"],
-                    raw_value=parsed["overall_hallucination_rate"],
+                    raw_model_name=model_name,
+                    raw_value=f"{factual_consistency:.1f}",
                     source_url=self.source_url,
                     collected_at=fetched_at,
-                    raw_model_key=parsed["model_name"],
-                    payload={"table_row": line},
+                    raw_model_key=model_name,
+                    payload={"table_row": row["table_row"]},
                     metadata={
-                        "rank": parsed["rank"],
-                        "organization": parsed["organization"],
-                        "parameters": parsed["parameters"],
-                        "model_url": parsed["model_url"],
-                        "faithbench_summarization": parsed["faithbench_summarization"],
-                        "ragtruth_summarization": parsed["ragtruth_summarization"],
-                        "ragtruth_question_answering": parsed["ragtruth_question_answering"],
-                        "ragtruth_data_to_text": parsed["ragtruth_data_to_text"],
+                        "rank": rank,
+                        "hallucination_rate": safe_float(row["hallucination_rate"].replace("%", "")),
+                        "factual_consistency_rate": factual_consistency,
+                        "answer_rate": safe_float(row["answer_rate"].replace("%", "")),
+                        "average_summary_length_words": safe_float(row["average_summary_length_words"]),
                     },
                 )
             )
 
         if not raw_records:
-            raise ValueError("Could not parse any FaithJudge leaderboard rows.")
+            raise ValueError("Could not parse any Vectara leaderboard rows.")
 
         return raw_records
 
     def normalize(self, raw_records: Sequence[RawSourceRecord]) -> list[ScoreCandidate]:
         candidates: list[ScoreCandidate] = []
 
-        for record in sorted(raw_records, key=lambda item: self._rank_value(item.metadata.get("rank"))):
-            value = safe_float(str(record.raw_value).replace("%", ""))
+        for record in sorted(raw_records, key=lambda item: int(item.metadata.get("rank", 10**9))):
+            value = safe_float(record.raw_value)
             if value is None:
                 continue
 
@@ -74,69 +71,45 @@ class FaithJudgeAdapter(BaseSourceAdapter):
                     raw_model_name=record.raw_model_name,
                     raw_model_key=record.raw_model_key or record.raw_model_name,
                     value=value,
-                    raw_value=record.raw_value,
+                    raw_value=f"{value:.1f}",
                     source_url=record.source_url,
                     collected_at=record.collected_at,
                     source_type="primary",
                     verified=True,
-                    notes="FaithJudge overall hallucination rate across FaithBench and RagTruth RAG tasks. Lower is better.",
+                    notes="Vectara factual consistency to supplied source text. RAG-adjacent faithfulness signal, not retrieval relevance.",
                     metadata=dict(record.metadata),
                 )
             )
 
         return candidates
 
-    def _extract_table_lines(self, text: str) -> list[str]:
-        lines = text.splitlines()
-        collecting = False
-        table_lines: list[str] = []
+    def _extract_table_rows(self, text: str) -> list[dict[str, str]]:
+        lines = [line.strip() for line in text.splitlines()]
+        seen_marker = False
+        rows: list[dict[str, str]] = []
 
         for line in lines:
-            stripped = line.strip()
-            if stripped == TABLE_START_MARKER:
-                collecting = True
+            if line == LEADERBOARD_MARKER:
+                seen_marker = True
                 continue
-            if stripped == TABLE_END_MARKER:
-                break
-            if collecting:
-                table_lines.append(stripped)
+            if not seen_marker or not line.startswith("|"):
+                continue
+            if "Factual Consistency Rate" in line or line.startswith("|----"):
+                continue
 
-        return [
-            line
-            for line in table_lines
-            if line.startswith("|")
-            and "Overall Hallucination Rate" not in line
-            and not line.startswith("|-------")
-        ]
+            cells = [cell.strip() for cell in line.strip("|").split("|")]
+            if len(cells) != 5:
+                continue
 
-    def _parse_table_row(self, line: str) -> dict[str, str] | None:
-        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if len(cells) < 9:
-            return None
+            rows.append(
+                {
+                    "table_row": line,
+                    "model_name": cells[0],
+                    "hallucination_rate": cells[1],
+                    "factual_consistency_rate": cells[2],
+                    "answer_rate": cells[3],
+                    "average_summary_length_words": cells[4],
+                }
+            )
 
-        model_match = MODEL_LINK_RE.search(cells[1])
-        model_name = model_match.group("name").strip() if model_match else cells[1]
-        model_url = model_match.group("url").strip() if model_match else self.source_url
-        if not model_name:
-            return None
-
-        return {
-            "rank": cells[0],
-            "model_name": model_name,
-            "model_url": model_url,
-            "organization": cells[2],
-            "parameters": cells[3],
-            "overall_hallucination_rate": cells[4],
-            "faithbench_summarization": cells[5],
-            "ragtruth_summarization": cells[6],
-            "ragtruth_question_answering": cells[7],
-            "ragtruth_data_to_text": cells[8],
-        }
-
-    def _rank_value(self, value: object) -> int:
-        rank = safe_float(value)
-        return int(rank) if rank is not None else 10**9
-
-
-# Compatibility alias while the source file name still reflects the older implementation.
-VectaraHallucinationAdapter = FaithJudgeAdapter
+        return rows
