@@ -103,6 +103,7 @@ raw_source_records = Table(
     Column("source_url", String),
     Column("source_type", String, nullable=False, server_default=text("'primary'")),
     Column("verified", Integer, nullable=False, server_default=text("0")),
+    Column("resolution_status", String, nullable=False, server_default=text("'resolved'")),
     Column("collected_at", String, nullable=False),
     Column("notes", Text),
 )
@@ -250,6 +251,7 @@ def _create_schema_sql() -> list[str]:
             source_url TEXT,
             source_type TEXT NOT NULL DEFAULT 'primary',
             verified INTEGER NOT NULL DEFAULT 0,
+            resolution_status TEXT NOT NULL DEFAULT 'resolved',
             collected_at TEXT NOT NULL,
             notes TEXT
         )
@@ -317,9 +319,25 @@ def init_db(engine: Engine | None = None) -> Engine:
     with engine.begin() as conn:
         for statement in _create_schema_sql():
             conn.exec_driver_sql(statement)
+        _ensure_schema_migrations(conn)
         conn.exec_driver_sql("DROP VIEW IF EXISTS latest_scores")
         conn.exec_driver_sql(LATEST_SCORES_VIEW_SQL)
     return engine
+
+
+def _ensure_schema_migrations(conn: Connection) -> None:
+    if conn.engine.url.get_backend_name() != "sqlite":
+        return
+
+    raw_source_record_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(raw_source_records)").fetchall()
+    }
+    if "resolution_status" not in raw_source_record_columns:
+        conn.exec_driver_sql(
+            "ALTER TABLE raw_source_records "
+            "ADD COLUMN resolution_status TEXT NOT NULL DEFAULT 'resolved'"
+        )
 
 
 @contextmanager

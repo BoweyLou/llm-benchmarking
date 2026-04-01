@@ -424,13 +424,19 @@ def _persist_source_result(source_run_id: int, result: SourceFetchResult) -> tup
     for raw_record in result.raw_records:
         identity = _record_identity(raw_record.raw_model_name, raw_record.raw_model_key)
         normalized_model_id = model_ids_by_identity.get(identity)
-        if normalized_model_id is None and not _should_skip_raw_model_resolution(raw_record):
+        skipped_resolution = _should_skip_raw_model_resolution(raw_record)
+        if normalized_model_id is None and not skipped_resolution:
             normalized_model_id = _ensure_model(
                 raw_record.raw_model_name,
                 raw_record.metadata,
                 raw_record.raw_model_key,
             )
             model_ids_by_identity[identity] = normalized_model_id
+        resolution_status = _resolution_status_for_raw_record(
+            raw_record,
+            normalized_model_id=normalized_model_id,
+            skipped_resolution=skipped_resolution,
+        )
 
         source_type, verified = source_meta_by_identity.get(
             identity,
@@ -445,6 +451,7 @@ def _persist_source_result(source_run_id: int, result: SourceFetchResult) -> tup
             normalized_model_id=normalized_model_id,
             source_type=source_type,
             verified=verified,
+            resolution_status=resolution_status,
         )
 
     return scores_added, scores_updated
@@ -457,6 +464,7 @@ def _insert_raw_source_record(
     normalized_model_id: str | None,
     source_type: str,
     verified: bool,
+    resolution_status: str,
 ) -> None:
     with ENGINE.begin() as conn:
         conn.execute(
@@ -471,6 +479,7 @@ def _insert_raw_source_record(
                 source_url=raw_record.source_url,
                 source_type=source_type,
                 verified=1 if verified else 0,
+                resolution_status=resolution_status,
                 collected_at=raw_record.collected_at,
                 notes=_stringify(raw_record.metadata) if raw_record.metadata else None,
             )
@@ -783,6 +792,19 @@ def _record_identity(raw_model_name: str, raw_model_key: str | None) -> str:
 
 def _should_skip_raw_model_resolution(raw_record: RawSourceRecord) -> bool:
     return bool(raw_record.metadata.get("aggregate_submission"))
+
+
+def _resolution_status_for_raw_record(
+    raw_record: RawSourceRecord,
+    *,
+    normalized_model_id: str | None,
+    skipped_resolution: bool,
+) -> str:
+    if normalized_model_id:
+        return "resolved"
+    if skipped_resolution:
+        return "skipped_aggregate"
+    return "unresolved"
 
 
 def _stringify(value: Any) -> str:

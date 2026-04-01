@@ -120,7 +120,7 @@ def run_audit(engine, update_log_id: int) -> dict[str, Any]:
                     raw_source_records_table.c.id,
                     raw_source_records_table.c.source_run_id,
                     raw_source_records_table.c.raw_model_name,
-                    raw_source_records_table.c.notes,
+                    raw_source_records_table.c.resolution_status,
                 )
                 .where(raw_source_records_table.c.source_run_id.in_(source_run_ids))
                 .where(raw_source_records_table.c.normalized_model_id.is_(None)),
@@ -128,7 +128,7 @@ def run_audit(engine, update_log_id: int) -> dict[str, Any]:
             unresolved = [
                 row
                 for row in unresolved
-                if '"aggregate_submission": true' not in str(row.get("notes") or "")
+                if str(row.get("resolution_status") or "unresolved") != "skipped_aggregate"
             ]
             if unresolved:
                 findings.append(

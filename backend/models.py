@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 SourceType = Literal["primary", "secondary", "manual"]
+RawSourceResolutionStatus = Literal["resolved", "skipped_aggregate", "unresolved"]
 UpdateStatus = Literal["running", "completed", "failed"]
 TriggeredBy = Literal["manual", "api", "scheduled", "bootstrap", "cli"]
 AuditStatus = Literal["passed", "warning", "failed"]
@@ -136,6 +137,7 @@ class RawSourceRecordOut(APIModel):
     source_url: str | None = None
     source_type: SourceType = "primary"
     verified: bool = False
+    resolution_status: RawSourceResolutionStatus = "resolved"
     collected_at: datetime
     notes: str | None = None
 
@@ -206,6 +208,7 @@ __all__ = [
     "ModelOut",
     "ModelSummaryOut",
     "RawSourceRecordOut",
+    "RawSourceResolutionStatus",
     "RankingBreakdownOut",
     "RankingOut",
     "RankingsResponseOut",
