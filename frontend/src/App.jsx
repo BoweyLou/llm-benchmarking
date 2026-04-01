@@ -607,8 +607,7 @@ function ModelBrowserCard({ benchmarksById, compareIds, expanded, model, onAddTo
               const label = benchmark?.short || benchmarkId.replaceAll("_", " ");
               const variantName = score?.family_variant_name;
               const provenance = benchmarkId === "terminal_bench" ? score?.notes : "";
-              const sourceHost = formatSourceHost(benchmark?.url);
-              const sourceLabel = benchmark?.source || sourceHost || "Source";
+              const benchmarkContext = getBenchmarkContext(benchmark);
               return (
                 <div key={benchmarkId} className="bench-row">
                   {benchmark?.url ? (
@@ -639,12 +638,13 @@ function ModelBrowserCard({ benchmarksById, compareIds, expanded, model, onAddTo
                   )}
                   {benchmark?.url ? (
                     <a className="bench-source" href={benchmark.url} rel="noreferrer" target="_blank">
-                      Source: {sourceHost || sourceLabel}
+                      Source: {benchmarkContext.source}
                     </a>
                   ) : (
-                    <span className="bench-source">Source: {sourceLabel}</span>
+                    <span className="bench-source">Source: {benchmarkContext.source}</span>
                   )}
-                  {benchmark?.description ? <span className="bench-context">{benchmark.description}</span> : null}
+                  <span className="bench-context">Why it matters: {benchmarkContext.why}</span>
+                  {benchmarkContext.caveat ? <span className="bench-caveat">Caveat: {benchmarkContext.caveat}</span> : null}
                 </div>
               );
             })}
@@ -1411,6 +1411,73 @@ function formatSourceHost(url) {
   }
 }
 
+function getBenchmarkContext(benchmark) {
+  const sourceHost = formatSourceHost(benchmark?.url);
+  const fallbackSource = benchmark?.source ? `${benchmark.source}${sourceHost ? ` · ${sourceHost}` : ""}` : sourceHost || "benchmark source";
+
+  const contextByBenchmarkId = {
+    aa_intelligence: {
+      source: "Artificial Analysis · independent frontier model leaderboard",
+      why: "best single-number snapshot here for broad model capability when you need an overall quality signal.",
+    },
+    aa_speed: {
+      source: "Artificial Analysis · throughput leaderboard",
+      why: "strongest quick signal here for real-time UX, concurrency, and queue-processing latency.",
+    },
+    aa_cost: {
+      source: "Artificial Analysis · normalized model pricing data",
+      why: "best quick read on whether a model is financially viable at production volume.",
+    },
+    chatbot_arena: {
+      source: "Arena.ai / LMSYS lineage · blind human preference votes",
+      why: "strong proxy for chat quality, helpfulness, and which answers people actually prefer.",
+    },
+    gpqa_diamond: {
+      source: "Epoch AI · contamination-resistant reasoning benchmark",
+      why: "one of the better signals here for hard reasoning beyond memorized benchmark performance.",
+    },
+    mmmu: {
+      source: "MMMU benchmark team · multimodal academic benchmark",
+      why: "best current signal here for document, chart, screenshot, and image reasoning.",
+    },
+    swebench_verified: {
+      source: "SWE-bench team · verified GitHub issue benchmark",
+      why: "best signal here for repo-level bug fixing and code-change execution.",
+      caveat: "still a benchmark, not a complete substitute for your own engineering evals.",
+    },
+    terminal_bench: {
+      source: "tbench.ai · public verified leaderboard for agent submissions",
+      why: "strongest signal here for real tool use and terminal workflows, so it matters heavily for enterprise agents.",
+      caveat: "scores are agent-derived from verified single-model submissions, not a pure model-only benchmark.",
+    },
+    ifeval: {
+      source: "llm-stats / ZeroEval feed · instruction-following leaderboard",
+      why: "useful proxy for instruction obedience, formatting reliability, and workflow discipline in enterprise prompts.",
+      caveat: "we treat this as lower-trust than fully primary benchmark publishers.",
+    },
+    ailuminate: {
+      source: "MLCommons AILuminate · public named safety results",
+      why: "best current signal here for deployment risk, refusal quality, and enterprise guardrails.",
+    },
+    rag_groundedness: {
+      source: "Vectara hallucination leaderboard · factual consistency evaluation",
+      why: "useful groundedness signal for whether answers stay faithful to supplied source text.",
+      caveat: "measures faithfulness to provided context, not retrieval relevance on your private corpus.",
+    },
+    rag_task_faithfulness: {
+      source: "Vectara FaithJudge leaderboard · RAG task hallucination benchmark",
+      why: "more direct signal for hallucination across RAG-style tasks than generic chat benchmarks.",
+      caveat: "still measures faithfulness on supplied context, not end-to-end retrieval quality.",
+    },
+  };
+
+  return contextByBenchmarkId[benchmark?.id] || {
+    source: fallbackSource,
+    why: benchmark?.description || "useful benchmark evidence for this model decision.",
+    caveat: "",
+  };
+}
+
 const styles = `
   :root {
     color-scheme: light;
@@ -1880,7 +1947,7 @@ const styles = `
     color: var(--muted);
     font-size: .76rem;
   }
-  .bench-source, .bench-context {
+  .bench-source, .bench-context, .bench-caveat {
     grid-column: 2 / 5;
     font-size: .76rem;
     line-height: 1.45;
@@ -1894,6 +1961,9 @@ const styles = `
   }
   .bench-context {
     color: var(--muted);
+  }
+  .bench-caveat {
+    color: #92400e;
   }
   .source-badge {
     display: inline-flex;
@@ -2246,7 +2316,7 @@ const styles = `
     .table-row > div { margin-bottom: 8px; }
     .detail-row, .bench-row { grid-template-columns: 82px minmax(0, 1fr); }
     .detail-weight { grid-column: 2; }
-    .detail-note, .bench-provenance, .bench-source, .bench-context { grid-column: 2; }
+    .detail-note, .bench-provenance, .bench-source, .bench-context, .bench-caveat { grid-column: 2; }
     .history-source-row { flex-direction: column; }
     .history-source-status { justify-items: start; }
     .history-source-error { max-width: none; text-align: left; }
