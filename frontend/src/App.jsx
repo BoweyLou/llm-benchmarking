@@ -607,6 +607,8 @@ function ModelBrowserCard({ benchmarksById, compareIds, expanded, model, onAddTo
               const label = benchmark?.short || benchmarkId.replaceAll("_", " ");
               const variantName = score?.family_variant_name;
               const provenance = benchmarkId === "terminal_bench" ? score?.notes : "";
+              const sourceHost = formatSourceHost(benchmark?.url);
+              const sourceLabel = benchmark?.source || sourceHost || "Source";
               return (
                 <div key={benchmarkId} className="bench-row">
                   {benchmark?.url ? (
@@ -635,6 +637,14 @@ function ModelBrowserCard({ benchmarksById, compareIds, expanded, model, onAddTo
                   ) : (
                     <span className="bench-empty">— no data</span>
                   )}
+                  {benchmark?.url ? (
+                    <a className="bench-source" href={benchmark.url} rel="noreferrer" target="_blank">
+                      Source: {sourceHost || sourceLabel}
+                    </a>
+                  ) : (
+                    <span className="bench-source">Source: {sourceLabel}</span>
+                  )}
+                  {benchmark?.description ? <span className="bench-context">{benchmark.description}</span> : null}
                 </div>
               );
             })}
@@ -1389,6 +1399,18 @@ function formatDate(value) {
   return text;
 }
 
+function formatSourceHost(url) {
+  if (!url) {
+    return "";
+  }
+
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return String(url);
+  }
+}
+
 const styles = `
   :root {
     color-scheme: light;
@@ -1858,9 +1880,20 @@ const styles = `
     color: var(--muted);
     font-size: .76rem;
   }
+  .bench-source, .bench-context {
+    grid-column: 2 / 5;
+    font-size: .76rem;
+    line-height: 1.45;
+  }
+  .bench-source {
+    color: var(--accent);
+  }
   .bench-provenance {
     grid-column: 2 / 4;
     line-height: 1.45;
+  }
+  .bench-context {
+    color: var(--muted);
   }
   .source-badge {
     display: inline-flex;
@@ -2213,7 +2246,7 @@ const styles = `
     .table-row > div { margin-bottom: 8px; }
     .detail-row, .bench-row { grid-template-columns: 82px minmax(0, 1fr); }
     .detail-weight { grid-column: 2; }
-    .detail-note, .bench-provenance { grid-column: 2; }
+    .detail-note, .bench-provenance, .bench-source, .bench-context { grid-column: 2; }
     .history-source-row { flex-direction: column; }
     .history-source-status { justify-items: start; }
     .history-source-error { max-width: none; text-align: left; }
