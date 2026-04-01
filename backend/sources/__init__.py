@@ -8,6 +8,7 @@ from .ifeval import IfevalAdapter
 from .mmmu import MmmuAdapter
 from .swebench import SwebenchAdapter
 from .terminal_bench import TerminalBenchAdapter
+from .vectara_hallucination import VectaraHallucinationAdapter
 
 
 def get_phase_one_adapters():
@@ -19,6 +20,7 @@ def get_phase_one_adapters():
         IfevalAdapter(),
         MmmuAdapter(),
         SwebenchAdapter(),
+        VectaraHallucinationAdapter(),
     ]
 
 
@@ -43,6 +45,7 @@ __all__ = [
     "IfevalAdapter",
     "MmmuAdapter",
     "TerminalBenchAdapter",
+    "VectaraHallucinationAdapter",
     "SwebenchAdapter",
     "get_phase_one_adapters",
     "get_phase_two_adapters",

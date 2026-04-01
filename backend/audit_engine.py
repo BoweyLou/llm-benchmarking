@@ -27,6 +27,7 @@ MIN_EXPECTED_RECORDS = {
     "mmmu": 120,
     "swebench": 10,
     "terminal_bench": 50,
+    "vectara_hallucination": 80,
 }
 DRIFT_MIN_BASELINE_RECORDS = 20
 DRIFT_BLOCKER_DROP_THRESHOLD = -0.5
