@@ -466,7 +466,7 @@ USE_CASES: list[dict[str, Any]] = [
         "icon": "🔎",
         "description": "Retrieval sorting, context ranking, and grounded answer shaping around retrieved context",
         "segment": "enterprise",
-        "status": "ready",
+        "status": "preview",
         "min_coverage": 0.55,
         "required_benchmarks": ["rag_groundedness", "ifeval"],
         "benchmark_notes": {
