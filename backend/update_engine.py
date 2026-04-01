@@ -560,7 +560,7 @@ def _ensure_model(raw_model_name: str, metadata: dict[str, Any], raw_model_key: 
         return resolved
 
     model_id = _choose_model_id(raw_model_name, raw_model_key)
-    provider = _infer_provider(metadata) or "Unknown"
+    provider = _infer_provider(metadata, raw_model_name) or "Unknown"
     stmt = sqlite_insert(models_table).values(
         id=model_id,
         name=raw_model_name,
@@ -756,7 +756,7 @@ def _model_summary(model: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _infer_provider(metadata: dict[str, Any]) -> str | None:
+def _infer_provider(metadata: dict[str, Any], raw_model_name: str) -> str | None:
     for key in (
         "organization",
         "organization_name",
@@ -768,6 +768,39 @@ def _infer_provider(metadata: dict[str, Any]) -> str | None:
         value = metadata.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+
+    lowered = raw_model_name.strip().lower()
+    for prefix, provider in (
+        ("openai/", "OpenAI"),
+        ("anthropic/", "Anthropic"),
+        ("google/", "Google"),
+        ("meta-llama/", "Meta"),
+        ("microsoft/", "Microsoft"),
+        ("mistralai/", "Mistral"),
+        ("qwen/", "Alibaba"),
+        ("deepseek-ai/", "DeepSeek"),
+        ("zai-org/", "Zhipu AI"),
+        ("xai-org/", "xAI"),
+        ("moonshotai/", "Moonshot AI"),
+        ("coherelabs/", "Cohere"),
+        ("amazon/", "Amazon"),
+        ("ibm-granite/", "IBM"),
+    ):
+        if lowered.startswith(prefix):
+            return provider
+
+    for prefix, provider in (
+        ("gpt", "OpenAI"),
+        ("o1", "OpenAI"),
+        ("o3", "OpenAI"),
+        ("o4", "OpenAI"),
+        ("claude", "Anthropic"),
+        ("gemini", "Google"),
+        ("gemma", "Google"),
+        ("phi", "Microsoft"),
+    ):
+        if lowered.startswith(prefix):
+            return provider
     return None
 
 

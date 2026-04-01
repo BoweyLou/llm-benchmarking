@@ -299,7 +299,7 @@ USE_CASES: list[dict[str, Any]] = [
         "description": "Code generation, debugging, repo-level tasks, DevOps",
         "segment": "core",
         "status": "ready",
-        "min_coverage": 0.5,
+        "min_coverage": 0.45,
         "required_benchmarks": ["swebench_verified", "terminal_bench"],
         "benchmark_notes": {
             "swebench_verified": "Repo-level bug fixing and code-change execution.",

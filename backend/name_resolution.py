@@ -21,6 +21,14 @@ _STRIP_TOKENS = {
 _PROVIDER_PREFIX_RE = re.compile(r"^[a-z0-9_.-]+/")
 _TRAILING_ISO_DATE_RE = re.compile(r"[-_]?20\d{2}[-_]\d{2}[-_]\d{2}$", re.IGNORECASE)
 _TRAILING_COMPACT_DATE_RE = re.compile(r"[-_]?20\d{6}$", re.IGNORECASE)
+_TRAILING_PAREN_VARIANT_RE = re.compile(r"\s*\([^)]*\)\s*$")
+_TRAILING_SLUG_VARIANT_RE = re.compile(
+    r"-(?:\d+k-)?thinking(?:-\d+k)?$|"
+    r"-thinking(?:-\d+k)?$|"
+    r"-(?:no-thinking|max|adaptive|high|medium|low|xhigh)$|"
+    r"-non-reasoning(?:-low-effort)?$",
+    re.IGNORECASE,
+)
 
 _PUNCT_TRANSLATION = str.maketrans(
     {
@@ -50,6 +58,7 @@ class NormalizedModel:
     model_id: str
     name: str
     provider: str | None
+    exact_names: tuple[str, ...]
     aliases: tuple[str, ...]
 
 
@@ -66,8 +75,8 @@ def _compact_text(value: str) -> str:
     return normalize_text(value).replace(" ", "")
 
 
-def _raw_name_variants(raw_name: str) -> tuple[str, ...]:
-    pending = [raw_name.strip()]
+def _name_variants(value: str) -> tuple[str, ...]:
+    pending = [value.strip()]
     seen: set[str] = set()
 
     while pending:
@@ -84,6 +93,14 @@ def _raw_name_variants(raw_name: str) -> tuple[str, ...]:
             date_stripped = pattern.sub("", candidate).strip("-_ ")
             if date_stripped != candidate:
                 pending.append(date_stripped)
+
+        paren_variant_stripped = _TRAILING_PAREN_VARIANT_RE.sub("", candidate).strip()
+        if paren_variant_stripped and paren_variant_stripped != candidate:
+            pending.append(paren_variant_stripped)
+
+        slug_variant_stripped = _TRAILING_SLUG_VARIANT_RE.sub("", candidate).strip("-_ ")
+        if slug_variant_stripped and slug_variant_stripped != candidate:
+            pending.append(slug_variant_stripped)
 
     return tuple(seen)
 
@@ -107,14 +124,30 @@ def normalize_model_entry(model: Mapping[str, Any]) -> NormalizedModel:
     name = str(model.get("name", model_id))
     provider = model.get("provider")
     provider_str = str(provider) if isinstance(provider, str) else None
-    alias_set = {
+    candidate_strings = _candidate_strings(model)
+    exact_name_set = {
         normalized
-        for candidate in _candidate_strings(model)
+        for candidate in candidate_strings
         for normalized in (normalize_text(candidate), _compact_text(candidate))
         if normalized
     }
+    alias_set = {
+        normalized
+        for candidate in candidate_strings
+        for variant in _name_variants(candidate)
+        for normalized in (normalize_text(variant), _compact_text(variant))
+        if normalized
+    }
+    alias_set.update(exact_name_set)
+    exact_names = tuple(sorted(exact_name_set))
     aliases = tuple(sorted(alias_set))
-    return NormalizedModel(model_id=model_id, name=name, provider=provider_str, aliases=aliases)
+    return NormalizedModel(
+        model_id=model_id,
+        name=name,
+        provider=provider_str,
+        exact_names=exact_names,
+        aliases=aliases,
+    )
 
 
 def _model_candidates(models: Iterable[Mapping[str, Any]]) -> list[NormalizedModel]:
@@ -136,26 +169,33 @@ def resolve_model_name(raw_name: str, models: Iterable[Mapping[str, Any]], *, th
     """
 
     raw_norm = normalize_text(raw_name)
-    raw_compact = raw_norm.replace(" ", "")
     if not raw_norm:
         return None
 
     candidates = _model_candidates(models)
     raw_aliases = {
         alias
-        for variant in _raw_name_variants(raw_name)
+        for variant in _name_variants(raw_name)
         for alias in (normalize_text(variant), _compact_text(variant))
         if alias
     }
     exact: list[NormalizedModel] = []
+    alias_matches: list[NormalizedModel] = []
 
     for candidate in candidates:
-        if any(alias in raw_aliases for alias in candidate.aliases):
+        if any(alias in raw_aliases for alias in candidate.exact_names):
             exact.append(candidate)
+            continue
+        if any(alias in raw_aliases for alias in candidate.aliases):
+            alias_matches.append(candidate)
 
     if exact:
         exact.sort(key=_exact_match_priority)
         return exact[0].model_id
+
+    if alias_matches:
+        alias_matches.sort(key=_exact_match_priority)
+        return alias_matches[0].model_id
 
     # Threshold is intentionally unused for now. Fuzzy matching created
     # cross-family and cross-generation collapses in live benchmark data.
