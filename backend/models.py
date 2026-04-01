@@ -75,6 +75,10 @@ class UseCaseOut(APIModel):
     icon: str
     description: str
     segment: str = "core"
+    status: Literal["ready", "preview"] = "ready"
+    min_coverage: float = 0.5
+    required_benchmarks: list[str] = Field(default_factory=list)
+    benchmark_notes: dict[str, str] = Field(default_factory=dict)
     weights: dict[str, float]
 
 
@@ -96,6 +100,7 @@ class RankingOut(APIModel):
     model: ModelSummaryOut
     breakdown: list[RankingBreakdownOut] = Field(default_factory=list)
     missing_benchmarks: list[str] = Field(default_factory=list)
+    critical_missing_benchmarks: list[str] = Field(default_factory=list)
 
 
 class RankingsResponseOut(APIModel):

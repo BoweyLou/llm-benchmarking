@@ -82,6 +82,10 @@ def list_use_cases() -> list[dict[str, Any]]:
             "icon": use_case["icon"],
             "description": use_case["description"],
             "segment": use_case.get("segment", "core"),
+            "status": use_case.get("status", "ready"),
+            "min_coverage": float(use_case.get("min_coverage", MIN_RANKING_COVERAGE)),
+            "required_benchmarks": list(use_case.get("required_benchmarks", [])),
+            "benchmark_notes": dict(use_case.get("benchmark_notes", {})),
             "weights": dict(use_case["weights"]),
         }
         for use_case in USE_CASES
@@ -214,6 +218,8 @@ def get_rankings(use_case_id: str) -> dict[str, Any] | None:
     benchmarks = {row["id"]: row for row in list_benchmarks()}
     models = list_models()
     weights = use_case["weights"]
+    required_benchmarks = list(use_case.get("required_benchmarks", []))
+    use_case_min_coverage = float(use_case.get("min_coverage", MIN_RANKING_COVERAGE))
     ranges = _benchmark_ranges(models, weights)
 
     rankings: list[dict[str, Any]] = []
@@ -222,6 +228,7 @@ def get_rankings(use_case_id: str) -> dict[str, Any] | None:
         total_weight = 0.0
         breakdown: list[dict[str, Any]] = []
         missing_benchmarks: list[str] = []
+        critical_missing_benchmarks: list[str] = []
 
         for benchmark_id, weight in weights.items():
             score = model["scores"].get(benchmark_id)
@@ -230,6 +237,8 @@ def get_rankings(use_case_id: str) -> dict[str, Any] | None:
 
             if score is None or benchmark is None or score_range is None:
                 missing_benchmarks.append(benchmark_id)
+                if benchmark_id in required_benchmarks:
+                    critical_missing_benchmarks.append(benchmark_id)
                 continue
 
             raw_value = float(score["value"])
@@ -258,7 +267,7 @@ def get_rankings(use_case_id: str) -> dict[str, Any] | None:
             continue
 
         coverage = total_weight / sum(weights.values())
-        if coverage < MIN_RANKING_COVERAGE:
+        if coverage < use_case_min_coverage:
             continue
 
         rankings.append(
@@ -268,11 +277,14 @@ def get_rankings(use_case_id: str) -> dict[str, Any] | None:
                 "model": _model_summary(model),
                 "breakdown": breakdown,
                 "missing_benchmarks": missing_benchmarks,
+                "critical_missing_benchmarks": critical_missing_benchmarks,
             }
         )
 
     rankings.sort(
         key=lambda item: (
+            len(item["critical_missing_benchmarks"]) > 0,
+            len(item["critical_missing_benchmarks"]),
             -float(item["score"]),
             -float(item["coverage"]),
             item["model"]["name"].lower(),
@@ -290,6 +302,10 @@ def get_rankings(use_case_id: str) -> dict[str, Any] | None:
             "icon": use_case["icon"],
             "description": use_case["description"],
             "segment": use_case.get("segment", "core"),
+            "status": use_case.get("status", "ready"),
+            "min_coverage": use_case_min_coverage,
+            "required_benchmarks": required_benchmarks,
+            "benchmark_notes": dict(use_case.get("benchmark_notes", {})),
             "weights": dict(use_case["weights"]),
         },
         "rankings": rankings,

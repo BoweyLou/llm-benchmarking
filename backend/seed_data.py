@@ -254,6 +254,14 @@ USE_CASES: list[dict[str, Any]] = [
         "icon": "🧠",
         "description": "Logic, multi-step problem solving, knowledge-intensive tasks",
         "segment": "core",
+        "status": "ready",
+        "min_coverage": 0.5,
+        "required_benchmarks": ["gpqa_diamond"],
+        "benchmark_notes": {
+            "gpqa_diamond": "Hard factual reasoning and exam-style problem solving.",
+            "chatbot_arena": "User-facing helpfulness and response quality context.",
+            "aa_intelligence": "Broad capability proxy for general model strength.",
+        },
         "weights": {"aa_intelligence": 0.40, "gpqa_diamond": 0.35, "chatbot_arena": 0.25},
     },
     {
@@ -262,6 +270,14 @@ USE_CASES: list[dict[str, Any]] = [
         "icon": "💻",
         "description": "Code generation, debugging, repo-level tasks, DevOps",
         "segment": "core",
+        "status": "ready",
+        "min_coverage": 0.5,
+        "required_benchmarks": ["swebench_verified", "terminal_bench"],
+        "benchmark_notes": {
+            "swebench_verified": "Repo-level bug fixing and code-change execution.",
+            "terminal_bench": "Agent-derived workflow evidence from verified single-model submissions.",
+            "aa_intelligence": "General capability proxy for coding-adjacent reasoning.",
+        },
         "weights": {"swebench_verified": 0.55, "aa_intelligence": 0.25, "terminal_bench": 0.20},
     },
     {
@@ -270,6 +286,14 @@ USE_CASES: list[dict[str, Any]] = [
         "icon": "🤖",
         "description": "Multi-step workflows, API calls, terminal and browser automation",
         "segment": "core",
+        "status": "ready",
+        "min_coverage": 0.5,
+        "required_benchmarks": ["terminal_bench", "swebench_verified"],
+        "benchmark_notes": {
+            "terminal_bench": "Agent-derived workflow evidence from verified single-model submissions.",
+            "swebench_verified": "Tool-using repo-level execution under realistic constraints.",
+            "aa_intelligence": "General capability proxy for planning and reasoning.",
+        },
         "weights": {"terminal_bench": 0.50, "swebench_verified": 0.25, "aa_intelligence": 0.25},
     },
     {
@@ -278,6 +302,13 @@ USE_CASES: list[dict[str, Any]] = [
         "icon": "🛡️",
         "description": "Harmful output avoidance, hazard categories, regulatory readiness",
         "segment": "core",
+        "status": "ready",
+        "min_coverage": 0.5,
+        "required_benchmarks": ["ailuminate"],
+        "benchmark_notes": {
+            "ailuminate": "Safety and hazard-resistance coverage for enterprise deployment readiness.",
+            "aa_intelligence": "General capability context alongside safety.",
+        },
         "weights": {"ailuminate": 0.70, "aa_intelligence": 0.30},
     },
     {
@@ -286,6 +317,14 @@ USE_CASES: list[dict[str, Any]] = [
         "icon": "💰",
         "description": "Minimise spend while maintaining quality for high-volume use",
         "segment": "core",
+        "status": "ready",
+        "min_coverage": 0.5,
+        "required_benchmarks": ["aa_cost", "aa_speed"],
+        "benchmark_notes": {
+            "aa_cost": "Unit economics and spend per generated output.",
+            "aa_speed": "Throughput and latency under load.",
+            "aa_intelligence": "Quality context so low cost does not hide weak capability.",
+        },
         "weights": {"aa_cost": 0.60, "aa_speed": 0.25, "aa_intelligence": 0.15},
     },
     {
@@ -294,6 +333,13 @@ USE_CASES: list[dict[str, Any]] = [
         "icon": "🖼️",
         "description": "Vision-language, chart understanding, document image processing",
         "segment": "core",
+        "status": "ready",
+        "min_coverage": 0.5,
+        "required_benchmarks": ["mmmu"],
+        "benchmark_notes": {
+            "mmmu": "Document, chart, and image reasoning signal for multimodal enterprise work.",
+            "aa_intelligence": "General capability context for multimodal selection.",
+        },
         "weights": {"mmmu": 0.65, "aa_intelligence": 0.35},
     },
     {
@@ -302,6 +348,13 @@ USE_CASES: list[dict[str, Any]] = [
         "icon": "📋",
         "description": "Strict adherence to constraints, formatting rules, complex prompt structures",
         "segment": "core",
+        "status": "ready",
+        "min_coverage": 0.5,
+        "required_benchmarks": ["ifeval"],
+        "benchmark_notes": {
+            "ifeval": "Constraint-following and formatting obedience.",
+            "chatbot_arena": "Helpfulness and response quality context.",
+        },
         "weights": {"ifeval": 0.75, "chatbot_arena": 0.25},
     },
     {
@@ -310,6 +363,13 @@ USE_CASES: list[dict[str, Any]] = [
         "icon": "⚡",
         "description": "Maximum throughput for real-time, streaming, or high-concurrency apps",
         "segment": "core",
+        "status": "ready",
+        "min_coverage": 0.5,
+        "required_benchmarks": ["aa_speed"],
+        "benchmark_notes": {
+            "aa_speed": "Throughput and latency under production-like load.",
+            "aa_intelligence": "Quality context so the fastest model is not selected blindly.",
+        },
         "weights": {"aa_speed": 0.80, "aa_intelligence": 0.20},
     },
     {
@@ -318,6 +378,17 @@ USE_CASES: list[dict[str, Any]] = [
         "icon": "🏢",
         "description": "Internal copilots, workflow execution, ticket triage, and system actions under enterprise constraints",
         "segment": "enterprise",
+        "status": "preview",
+        "min_coverage": 0.55,
+        "required_benchmarks": ["terminal_bench", "ifeval", "ailuminate"],
+        "benchmark_notes": {
+            "terminal_bench": "Agent-derived workflow evidence from verified single-model submissions.",
+            "ifeval": "Instruction fidelity under structured enterprise prompts.",
+            "ailuminate": "Safety and policy compliance under enterprise guardrails.",
+            "aa_intelligence": "General capability context.",
+            "aa_cost": "Operational spend for high-volume automation.",
+            "aa_speed": "Latency for interactive workflows.",
+        },
         "weights": {
             "terminal_bench": 0.35,
             "ifeval": 0.20,
@@ -333,6 +404,16 @@ USE_CASES: list[dict[str, Any]] = [
         "icon": "🎧",
         "description": "Service desk chat, escalation handling, response quality, safety, and operating cost at scale",
         "segment": "enterprise",
+        "status": "preview",
+        "min_coverage": 0.5,
+        "required_benchmarks": ["chatbot_arena", "ifeval", "ailuminate"],
+        "benchmark_notes": {
+            "chatbot_arena": "Preference and conversational quality for support-style interactions.",
+            "ifeval": "Ability to obey policy and format constraints in scripted support flows.",
+            "ailuminate": "Safety and refusal quality for customer-facing deployments.",
+            "aa_cost": "Unit economics for support at scale.",
+            "aa_speed": "Latency for interactive service conversations.",
+        },
         "weights": {
             "chatbot_arena": 0.30,
             "ifeval": 0.25,
@@ -347,6 +428,16 @@ USE_CASES: list[dict[str, Any]] = [
         "icon": "🗂️",
         "description": "Document review, form extraction, policy QA, and visual enterprise content workflows",
         "segment": "enterprise",
+        "status": "ready",
+        "min_coverage": 0.5,
+        "required_benchmarks": ["mmmu", "ifeval"],
+        "benchmark_notes": {
+            "mmmu": "Vision-language and document reasoning for forms, charts, and screenshots.",
+            "ifeval": "Structured instruction following for extraction and policy QA.",
+            "aa_intelligence": "General capability context for mixed document tasks.",
+            "ailuminate": "Safety and compliance context when document content is sensitive.",
+            "aa_speed": "Throughput for bulk processing.",
+        },
         "weights": {
             "mmmu": 0.35,
             "ifeval": 0.25,

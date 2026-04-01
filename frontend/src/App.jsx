@@ -276,6 +276,9 @@ function UseCaseFinder({
 }) {
   const selected = useCases.find((useCase) => useCase.id === selectedUseCaseId) || null;
   const groupedUseCases = groupUseCasesBySegment(useCases);
+  const selectedRequired = selected?.required_benchmarks || [];
+  const selectedNotes = selected?.benchmark_notes || {};
+  const selectedMinCoverage = selected?.min_coverage ?? 0.5;
 
   return (
     <section className="stack">
@@ -304,10 +307,25 @@ function UseCaseFinder({
                 >
                   <div className="usecase-topline">
                     <div className="usecase-icon">{useCase.icon}</div>
-                    {useCase.segment === "enterprise" ? <span className="tag tag-enterprise">Enterprise</span> : null}
+                    <span className={useCase.status === "preview" ? "tag tag-preview" : "tag tag-ready"}>
+                      {useCase.status === "preview" ? "Preview" : "Ready"}
+                    </span>
                   </div>
                   <div className="usecase-label">{useCase.label}</div>
                   <div className="usecase-desc">{useCase.description}</div>
+                  <div className="usecase-meta">
+                    <span>{Math.round((useCase.min_coverage ?? 0.5) * 100)}% min coverage</span>
+                    {useCase.segment === "enterprise" ? <span className="tag tag-enterprise">Enterprise</span> : null}
+                  </div>
+                  {useCase.required_benchmarks?.length ? (
+                    <div className="usecase-chip-list">
+                      {useCase.required_benchmarks.slice(0, 3).map((benchmarkId) => (
+                        <span key={benchmarkId} className="usecase-chip">
+                          {benchmarksById[benchmarkId]?.short || benchmarkId.replaceAll("_", " ")}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </button>
               ))}
             </div>
@@ -326,6 +344,19 @@ function UseCaseFinder({
             <div className="hint">Ranked by weighted benchmark score</div>
           </div>
 
+          <div className="usecase-status-row">
+            <span className={selected.status === "preview" ? "tag tag-preview" : "tag tag-ready"}>
+              {selected.status === "preview" ? "Preview lens" : "Ready lens"}
+            </span>
+            <span className="tag">{Math.round(selectedMinCoverage * 100)}% minimum coverage</span>
+          </div>
+          {selected.status === "preview" ? (
+            <div className="preview-note">
+              Preview lenses are useful for exploration, but they still rely on thinner or more uneven benchmark coverage
+              than the ready lenses.
+            </div>
+          ) : null}
+
           {!rankings || !rankings.rankings || rankings.rankings.length === 0 ? (
             <EmptyState message="No models have data for this use case yet. Trigger an update to populate scores." />
           ) : (
@@ -338,7 +369,7 @@ function UseCaseFinder({
 
           <div className="note">
             <strong>Note:</strong> Rankings are weighted averages of available benchmark data. Models must cover at
-            least 50% of the benchmark weight for a use case to be ranked.
+            least {Math.round(selectedMinCoverage * 100)}% of the benchmark weight for this use case to be ranked.
             <span className="note-list">
               Evidence mix: {formatUseCaseWeights(selected, benchmarksById)}
               .
@@ -349,6 +380,33 @@ function UseCaseFinder({
               </span>
             ) : null}
           </div>
+
+          {selectedRequired.length ? (
+            <div className="panel">
+              <div className="panel-head">Required evidence</div>
+              <div className="usecase-chip-list">
+                {selectedRequired.map((benchmarkId) => (
+                  <span key={benchmarkId} className="usecase-chip usecase-chip-required">
+                    {benchmarksById[benchmarkId]?.short || benchmarkId.replaceAll("_", " ")}
+                  </span>
+                ))}
+              </div>
+              <div className="usecase-note-caption">
+                Models missing any required benchmark stay visible if they clear the coverage threshold, but they are
+                flagged with critical gaps and sorted below more complete evidence.
+              </div>
+              {Object.keys(selectedNotes).length ? (
+                <div className="usecase-notes">
+                  {Object.entries(selectedNotes).map(([benchmarkId, note]) => (
+                    <div key={benchmarkId} className="usecase-note-item">
+                      <strong>{benchmarksById[benchmarkId]?.short || benchmarkId.replaceAll("_", " ")}:</strong>
+                      <span>{note}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </section>
       ) : null}
     </section>
@@ -358,6 +416,7 @@ function UseCaseFinder({
 function RankedModelCard({ benchmarksById, entry }) {
   const [expanded, setExpanded] = useState(false);
   const isTop = entry.rank === 1;
+  const criticalMissing = entry.critical_missing_benchmarks || [];
 
   return (
     <article className={isTop ? "card card-top" : "card"}>
@@ -369,6 +428,9 @@ function RankedModelCard({ benchmarksById, entry }) {
             <ProviderBadge provider={entry.model.provider} />
             <TypeBadge type={entry.model.type} />
             {isTop ? <span className="tag tag-top">Top pick</span> : null}
+            {criticalMissing.length ? (
+              <span className="tag tag-warning">Critical gaps: {criticalMissing.map((id) => benchmarksById[id]?.short || id.replaceAll("_", " ")).join(", ")}</span>
+            ) : null}
           </div>
           <ScoreBar score={entry.score} />
           <CoverageIndicator coverage={entry.coverage} />
@@ -381,6 +443,12 @@ function RankedModelCard({ benchmarksById, entry }) {
       {expanded ? (
         <div className="card-details">
           <div className="detail-label">Benchmark breakdown</div>
+          {criticalMissing.length ? (
+            <div className="critical-gaps">
+              <strong>Critical evidence missing:</strong>{" "}
+              {criticalMissing.map((id) => benchmarksById[id]?.short || id.replaceAll("_", " ")).join(", ")}
+            </div>
+          ) : null}
           <div className="detail-list">
             {entry.breakdown.map((item) => (
               <div key={item.benchmark_id} className="detail-row">
@@ -1519,6 +1587,21 @@ const styles = `
     color: var(--accent);
     border-color: rgba(79, 70, 229, .18);
   }
+  .tag-ready {
+    background: rgba(34, 197, 94, .10);
+    color: #166534;
+    border-color: rgba(34, 197, 94, .22);
+  }
+  .tag-preview {
+    background: rgba(245, 158, 11, .12);
+    color: #92400e;
+    border-color: rgba(245, 158, 11, .22);
+  }
+  .tag-warning {
+    background: rgba(251, 146, 60, .12);
+    color: #9a3412;
+    border-color: rgba(251, 146, 60, .22);
+  }
   .badge-orange { background: rgba(249, 115, 22, .10); color: #9a3412; }
   .badge-green { background: rgba(34, 197, 94, .10); color: #166534; }
   .badge-blue { background: rgba(59, 130, 246, .10); color: #1d4ed8; }
@@ -1580,6 +1663,64 @@ const styles = `
   .usecase-icon { font-size: 1.45rem; }
   .usecase-label { font-weight: 700; font-size: .92rem; color: #111827; }
   .usecase-desc { margin-top: 6px; font-size: .77rem; line-height: 1.3; color: var(--muted); }
+  .usecase-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 10px;
+    font-size: .74rem;
+    color: var(--muted);
+  }
+  .usecase-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .usecase-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: .72rem;
+    color: #334155;
+    background: rgba(255,255,255,.92);
+    border: 1px solid rgba(148, 163, 184, .18);
+  }
+  .usecase-chip-required {
+    background: rgba(239, 246, 255, .95);
+    border-color: rgba(59, 130, 246, .16);
+  }
+  .usecase-status-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .preview-note, .usecase-note-caption {
+    font-size: .78rem;
+    line-height: 1.45;
+    color: var(--muted);
+  }
+  .preview-note {
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(245, 158, 11, .18);
+    background: rgba(255, 251, 235, .88);
+  }
+  .usecase-notes {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .usecase-note-item {
+    display: grid;
+    gap: 2px;
+    font-size: .78rem;
+    line-height: 1.4;
+    color: var(--muted);
+  }
   .tag-enterprise {
     background: rgba(2, 132, 199, .10);
     color: #0f766e;
@@ -1642,6 +1783,16 @@ const styles = `
     border-top: 1px solid rgba(148, 163, 184, .16);
     background: rgba(248, 250, 252, .8);
     padding: 14px 16px;
+  }
+  .critical-gaps {
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255, 247, 237, .9);
+    border: 1px solid rgba(251, 146, 60, .22);
+    color: #9a3412;
+    font-size: .78rem;
+    line-height: 1.45;
   }
   .detail-label { font-size: .76rem; font-weight: 700; margin-bottom: 10px; }
   .detail-list, .bench-grid, .history-list { display: grid; gap: 8px; }
