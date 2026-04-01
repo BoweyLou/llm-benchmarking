@@ -81,6 +81,7 @@ def list_use_cases() -> list[dict[str, Any]]:
             "label": use_case["label"],
             "icon": use_case["icon"],
             "description": use_case["description"],
+            "segment": use_case.get("segment", "core"),
             "weights": dict(use_case["weights"]),
         }
         for use_case in USE_CASES
@@ -247,6 +248,9 @@ def get_rankings(use_case_id: str) -> dict[str, Any] | None:
                     "normalised": normalised,
                     "weight": weight,
                     "metric": benchmark["metric"],
+                    "source_type": score.get("source_type", "primary"),
+                    "verified": bool(score.get("verified", False)),
+                    "notes": score.get("notes"),
                 }
             )
 
@@ -285,6 +289,7 @@ def get_rankings(use_case_id: str) -> dict[str, Any] | None:
             "label": use_case["label"],
             "icon": use_case["icon"],
             "description": use_case["description"],
+            "segment": use_case.get("segment", "core"),
             "weights": dict(use_case["weights"]),
         },
         "rankings": rankings,
@@ -374,7 +379,7 @@ async def _collect_adapter(adapter: BaseSourceAdapter) -> SourceFetchResult:
 
 
 def _selected_adapters(selected_benchmarks: set[str] | None) -> list[BaseSourceAdapter]:
-    include_phase_two = bool(selected_benchmarks and "terminal_bench" in selected_benchmarks)
+    include_phase_two = selected_benchmarks is None or "terminal_bench" in selected_benchmarks
     adapters = get_source_adapters(include_phase_two=include_phase_two)
     if not selected_benchmarks:
         return adapters

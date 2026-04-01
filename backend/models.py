@@ -74,6 +74,7 @@ class UseCaseOut(APIModel):
     label: str
     icon: str
     description: str
+    segment: str = "core"
     weights: dict[str, float]
 
 
@@ -83,6 +84,9 @@ class RankingBreakdownOut(APIModel):
     normalised: float
     weight: float
     metric: str
+    source_type: SourceType = "primary"
+    verified: bool = False
+    notes: str | None = None
 
 
 class RankingOut(APIModel):

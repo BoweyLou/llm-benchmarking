@@ -253,6 +253,7 @@ USE_CASES: list[dict[str, Any]] = [
         "label": "General Reasoning",
         "icon": "🧠",
         "description": "Logic, multi-step problem solving, knowledge-intensive tasks",
+        "segment": "core",
         "weights": {"aa_intelligence": 0.40, "gpqa_diamond": 0.35, "chatbot_arena": 0.25},
     },
     {
@@ -260,6 +261,7 @@ USE_CASES: list[dict[str, Any]] = [
         "label": "Coding & Engineering",
         "icon": "💻",
         "description": "Code generation, debugging, repo-level tasks, DevOps",
+        "segment": "core",
         "weights": {"swebench_verified": 0.55, "aa_intelligence": 0.25, "terminal_bench": 0.20},
     },
     {
@@ -267,6 +269,7 @@ USE_CASES: list[dict[str, Any]] = [
         "label": "Agentic & Tool Use",
         "icon": "🤖",
         "description": "Multi-step workflows, API calls, terminal and browser automation",
+        "segment": "core",
         "weights": {"terminal_bench": 0.50, "swebench_verified": 0.25, "aa_intelligence": 0.25},
     },
     {
@@ -274,6 +277,7 @@ USE_CASES: list[dict[str, Any]] = [
         "label": "Safety & Compliance",
         "icon": "🛡️",
         "description": "Harmful output avoidance, hazard categories, regulatory readiness",
+        "segment": "core",
         "weights": {"ailuminate": 0.70, "aa_intelligence": 0.30},
     },
     {
@@ -281,6 +285,7 @@ USE_CASES: list[dict[str, Any]] = [
         "label": "Cost Efficiency",
         "icon": "💰",
         "description": "Minimise spend while maintaining quality for high-volume use",
+        "segment": "core",
         "weights": {"aa_cost": 0.60, "aa_speed": 0.25, "aa_intelligence": 0.15},
     },
     {
@@ -288,6 +293,7 @@ USE_CASES: list[dict[str, Any]] = [
         "label": "Multimodal",
         "icon": "🖼️",
         "description": "Vision-language, chart understanding, document image processing",
+        "segment": "core",
         "weights": {"mmmu": 0.65, "aa_intelligence": 0.35},
     },
     {
@@ -295,6 +301,7 @@ USE_CASES: list[dict[str, Any]] = [
         "label": "Instruction Following",
         "icon": "📋",
         "description": "Strict adherence to constraints, formatting rules, complex prompt structures",
+        "segment": "core",
         "weights": {"ifeval": 0.75, "chatbot_arena": 0.25},
     },
     {
@@ -302,7 +309,51 @@ USE_CASES: list[dict[str, Any]] = [
         "label": "Speed / Latency",
         "icon": "⚡",
         "description": "Maximum throughput for real-time, streaming, or high-concurrency apps",
+        "segment": "core",
         "weights": {"aa_speed": 0.80, "aa_intelligence": 0.20},
+    },
+    {
+        "id": "enterprise_automation",
+        "label": "Enterprise Automation",
+        "icon": "🏢",
+        "description": "Internal copilots, workflow execution, ticket triage, and system actions under enterprise constraints",
+        "segment": "enterprise",
+        "weights": {
+            "terminal_bench": 0.35,
+            "ifeval": 0.20,
+            "ailuminate": 0.15,
+            "aa_intelligence": 0.15,
+            "aa_cost": 0.10,
+            "aa_speed": 0.05,
+        },
+    },
+    {
+        "id": "customer_support",
+        "label": "Customer Support",
+        "icon": "🎧",
+        "description": "Service desk chat, escalation handling, response quality, safety, and operating cost at scale",
+        "segment": "enterprise",
+        "weights": {
+            "chatbot_arena": 0.30,
+            "ifeval": 0.25,
+            "ailuminate": 0.20,
+            "aa_cost": 0.15,
+            "aa_speed": 0.10,
+        },
+    },
+    {
+        "id": "document_operations",
+        "label": "Document Operations",
+        "icon": "🗂️",
+        "description": "Document review, form extraction, policy QA, and visual enterprise content workflows",
+        "segment": "enterprise",
+        "weights": {
+            "mmmu": 0.35,
+            "ifeval": 0.25,
+            "aa_intelligence": 0.20,
+            "ailuminate": 0.10,
+            "aa_speed": 0.10,
+        },
     },
 ]
 

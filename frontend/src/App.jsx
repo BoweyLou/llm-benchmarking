@@ -275,6 +275,7 @@ function UseCaseFinder({
   useCases,
 }) {
   const selected = useCases.find((useCase) => useCase.id === selectedUseCaseId) || null;
+  const groupedUseCases = groupUseCasesBySegment(useCases);
 
   return (
     <section className="stack">
@@ -286,18 +287,31 @@ function UseCaseFinder({
         {isPending || rankingsLoading ? <div className="pill">Loading rankings...</div> : null}
       </div>
 
-      <div className="usecase-grid">
-        {useCases.map((useCase) => (
-          <button
-            key={useCase.id}
-            className={selected?.id === useCase.id ? "usecase usecase-active" : "usecase"}
-            onClick={() => onSelectUseCase(useCase.id)}
-            type="button"
-          >
-            <div className="usecase-icon">{useCase.icon}</div>
-            <div className="usecase-label">{useCase.label}</div>
-            <div className="usecase-desc">{useCase.description}</div>
-          </button>
+      <div className="usecase-sections">
+        {groupedUseCases.map((group) => (
+          <section key={group.id} className="usecase-section">
+            <div className="usecase-section-head">
+              <div className="eyebrow">{group.title}</div>
+              <div className="usecase-section-copy">{group.description}</div>
+            </div>
+            <div className="usecase-grid">
+              {group.items.map((useCase) => (
+                <button
+                  key={useCase.id}
+                  className={selected?.id === useCase.id ? "usecase usecase-active" : "usecase"}
+                  onClick={() => onSelectUseCase(useCase.id)}
+                  type="button"
+                >
+                  <div className="usecase-topline">
+                    <div className="usecase-icon">{useCase.icon}</div>
+                    {useCase.segment === "enterprise" ? <span className="tag tag-enterprise">Enterprise</span> : null}
+                  </div>
+                  <div className="usecase-label">{useCase.label}</div>
+                  <div className="usecase-desc">{useCase.description}</div>
+                </button>
+              ))}
+            </div>
+          </section>
         ))}
       </div>
 
@@ -326,12 +340,14 @@ function UseCaseFinder({
             <strong>Note:</strong> Rankings are weighted averages of available benchmark data. Models must cover at
             least 50% of the benchmark weight for a use case to be ranked.
             <span className="note-list">
-              Benchmarks used:{" "}
-              {Object.keys(selected.weights)
-                .map((id) => benchmarksById[id]?.short || id.replaceAll("_", " "))
-                .join(", ")}
+              Evidence mix: {formatUseCaseWeights(selected, benchmarksById)}
               .
             </span>
+            {Object.prototype.hasOwnProperty.call(selected.weights, "terminal_bench") ? (
+              <span className="note-list">
+                Terminal-Bench contributes agent-derived workflow evidence from verified single-model public submissions.
+              </span>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -372,7 +388,12 @@ function RankedModelCard({ benchmarksById, entry }) {
                 <div className="mini-bar">
                   <div className="mini-fill" style={{ width: `${item.normalised}%` }} />
                 </div>
-                <span className="detail-value">{formatBenchmarkValue(benchmarksById[item.benchmark_id], item.raw_value)}</span>
+                <span className="detail-value">
+                  <SourceBadge score={{ source_type: item.source_type, verified: item.verified }} />
+                  {formatBenchmarkValue(benchmarksById[item.benchmark_id], item.raw_value)}
+                </span>
+                <span className="detail-weight">{Math.round(item.weight * 100)}% weight</span>
+                {item.notes ? <span className="detail-note">{item.notes}</span> : null}
               </div>
             ))}
             {entry.missing_benchmarks.length ? (
@@ -988,6 +1009,38 @@ function isWinner(winCounts, models, modelId) {
   return winCounts[modelId] === top && top > 0;
 }
 
+function groupUseCasesBySegment(useCases) {
+  const orderedSegments = [
+    {
+      id: "core",
+      title: "Core evaluation lenses",
+      description: "General-purpose benchmark views for model selection and frontier tracking.",
+    },
+    {
+      id: "enterprise",
+      title: "Enterprise workflows",
+      description: "Operational lenses tuned for internal copilots, support, and document-heavy business work.",
+    },
+  ];
+
+  return orderedSegments
+    .map((segment) => ({
+      ...segment,
+      items: useCases.filter((useCase) => (useCase.segment || "core") === segment.id),
+    }))
+    .filter((segment) => segment.items.length);
+}
+
+function formatUseCaseWeights(useCase, benchmarksById) {
+  return Object.entries(useCase.weights || {})
+    .sort((left, right) => right[1] - left[1])
+    .map(([benchmarkId, weight]) => {
+      const label = benchmarksById[benchmarkId]?.short || benchmarkId.replaceAll("_", " ");
+      return `${label} ${Math.round(weight * 100)}%`;
+    })
+    .join(", ");
+}
+
 function buildFamilyModels(models, benchmarksById) {
   const groups = new Map();
 
@@ -1483,7 +1536,19 @@ const styles = `
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
-    margin-bottom: 12px;
+  }
+  .usecase-sections, .usecase-section {
+    display: grid;
+    gap: 14px;
+  }
+  .usecase-section-head {
+    display: grid;
+    gap: 4px;
+  }
+  .usecase-section-copy {
+    color: var(--muted);
+    font-size: .83rem;
+    max-width: 720px;
   }
   @media (min-width: 760px) {
     .usecase-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -1505,9 +1570,21 @@ const styles = `
     border-color: rgba(79, 70, 229, .4);
     background: rgba(239, 246, 255, .95);
   }
-  .usecase-icon { font-size: 1.45rem; margin-bottom: 12px; }
+  .usecase-topline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .usecase-icon { font-size: 1.45rem; }
   .usecase-label { font-weight: 700; font-size: .92rem; color: #111827; }
   .usecase-desc { margin-top: 6px; font-size: .77rem; line-height: 1.3; color: var(--muted); }
+  .tag-enterprise {
+    background: rgba(2, 132, 199, .10);
+    color: #0f766e;
+    border-color: rgba(14, 165, 233, .22);
+  }
   .card, .panel, .banner, .summary, .table, .empty { overflow: hidden; }
   .card-body {
     padding: 16px;
@@ -1583,7 +1660,13 @@ const styles = `
     color: #334155;
     font-size: .76rem;
   }
-  .detail-row, .bench-row {
+  .detail-row {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr) auto auto;
+    gap: 8px;
+    align-items: center;
+  }
+  .bench-row {
     display: grid;
     grid-template-columns: 96px minmax(0, 1fr) auto auto;
     gap: 8px;
@@ -1603,6 +1686,22 @@ const styles = `
     display: inline-flex;
     align-items: center;
     gap: 6px;
+  }
+  .detail-value {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .detail-weight {
+    font-size: .72rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .detail-note {
+    grid-column: 2 / 5;
+    font-size: .76rem;
+    color: var(--muted);
+    line-height: 1.45;
   }
   .bench-variant, .cell-variant, .bench-provenance {
     color: var(--muted);
@@ -1962,6 +2061,8 @@ const styles = `
     .table-head, .table-row { grid-template-columns: 1fr !important; }
     .table-row > div { margin-bottom: 8px; }
     .detail-row, .bench-row { grid-template-columns: 82px minmax(0, 1fr); }
+    .detail-weight { grid-column: 2; }
+    .detail-note, .bench-provenance { grid-column: 2; }
     .history-source-row { flex-direction: column; }
     .history-source-status { justify-items: start; }
     .history-source-error { max-width: none; text-align: left; }
