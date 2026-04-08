@@ -117,7 +117,6 @@ const PORTABLE_SNAPSHOT_STYLE = `
   .snapshot-card-actions,
   .snapshot-card-meta,
   .snapshot-pill-list,
-  .snapshot-hero-metrics,
   .snapshot-subtle-grid,
   .usecase-chip-list,
   .usecase-status-row {
@@ -178,6 +177,14 @@ const PORTABLE_SNAPSHOT_STYLE = `
     border-color: rgba(148, 163, 184, 0.2);
     background: rgba(241, 245, 249, 0.92);
     color: var(--soft);
+  }
+
+  .snapshot-pill-not-recommended,
+  .tag-not-recommended {
+    border-color: rgba(249, 115, 22, 0.32);
+    background: rgba(249, 115, 22, 0.16);
+    color: #9a3412;
+    font-weight: 800;
   }
 
   .tag-provisional {
@@ -248,6 +255,8 @@ const PORTABLE_SNAPSHOT_STYLE = `
 
   .snapshot-hero-metrics {
     margin-top: 18px;
+    display: grid;
+    gap: 10px;
   }
 
   .snapshot-metric-card,
@@ -648,6 +657,14 @@ const PORTABLE_SNAPSHOT_STYLE = `
   .methodology-benchmarks,
   .static-export-market-grid {
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    align-items: start;
+  }
+
+  .methodology-focus,
+  .method-card {
+    display: grid;
+    gap: 16px;
+    align-content: start;
   }
 
   .method-list,
@@ -862,9 +879,6 @@ function buildPortableSnapshotHtml({ snapshot, methodologyMarkup, historyMarkup 
 
 function buildPortableShellMarkup({ snapshot, methodologyMarkup, historyMarkup }) {
   const selectedLensLabel = snapshot.selectedUseCaseLabel || "No ranking lens selected";
-  const sourceLinkMarkup = snapshot.meta?.sourceUrl
-    ? `<a class="snapshot-link" href="${escapeAttribute(snapshot.meta.sourceUrl)}" rel="noreferrer" target="_blank">Open source app</a>`
-    : "";
 
   return `
     <div class="snapshot-shell">
@@ -887,7 +901,6 @@ function buildPortableShellMarkup({ snapshot, methodologyMarkup, historyMarkup }
             <button class="snapshot-mode-button" data-mode="family" type="button">Families</button>
             <button class="snapshot-mode-button" data-mode="exact" type="button">Individual models</button>
           </div>
-          ${sourceLinkMarkup}
         </div>
       </header>
 
@@ -996,10 +1009,11 @@ function portableSnapshotRuntime() {
   const DEFAULT_INFERENCE_LOCATION_FILTER = "All";
   const DEFAULT_RECOMMENDATION_FILTER = "all";
   const AUTO_NOT_RECOMMENDED_RELEASE_DAYS = 365;
-  const AUTO_NOT_RECOMMENDED_OPENROUTER_DAYS = 540;
+  const AUTO_NOT_RECOMMENDED_OPENROUTER_DAYS = 365;
   const BROWSER_SORT_OPTIONS = [
     { id: "smart", label: "Smart order" },
     { id: "popularity", label: "OpenRouter popularity" },
+    { id: "price", label: "Lowest price" },
     { id: "coverage", label: "Coverage" },
     { id: "release", label: "Newest release" },
     { id: "name", label: "Name A-Z" },
@@ -1570,6 +1584,9 @@ function portableSnapshotRuntime() {
     const openRouterLine = popularityLabel
       ? `${popularityLabel}${popularityDetail ? ` · ${popularityDetail}` : ""}`
       : "";
+    const pricingLabel = getModelPricingReferenceLabel(model);
+    const licenseLabel = getModelLicenseLabel(model);
+    const metadataLinks = getModelMetadataLinks(model);
     const familyMemberModels = getFamilyMemberModels(model);
     const canExpandFamily = state.catalogMode === "family" && familyMemberModels.length > 0;
     const familyExpanded = canExpandFamily && state.expandedFamilyIds.includes(model.id);
@@ -1597,6 +1614,7 @@ function portableSnapshotRuntime() {
         <div class="snapshot-pill-list">
           ${primaryOrigin ? `<span class="snapshot-pill snapshot-pill-accent">${escapeHtml(primaryOrigin.flag)} ${escapeHtml(model.provider || "Provider")}</span>` : ""}
           <span class="snapshot-pill snapshot-pill-muted">${escapeHtml(model.type === "open_weights" ? "Open weights" : "Proprietary")}</span>
+          ${licenseLabel ? `<span class="snapshot-pill snapshot-pill-warn">${escapeHtml(`License: ${licenseLabel}`)}</span>` : ""}
           ${canExpandFamily ? `<span class="snapshot-pill snapshot-pill-muted">${escapeHtml(`${familyMemberModels.length} individual model${familyMemberModels.length === 1 ? "" : "s"}`)}</span>` : ""}
           ${String(model.catalog_status || "") === "provisional" ? `<span class="snapshot-pill snapshot-pill-warn">OpenRouter provisional</span>` : ""}
           ${approvalSummary ? `<span class="snapshot-pill ${approvalSummary.toneClass}">${escapeHtml(approvalSummary.label)}</span>` : ""}
@@ -1640,6 +1658,22 @@ function portableSnapshotRuntime() {
           }
           <div class="snapshot-card-line"><strong>Inference:</strong> ${escapeHtml(inferenceLocations.join(", ") || "Not specified")}</div>
           <div class="snapshot-card-line"><strong>Origin:</strong> ${escapeHtml(originCountries.join(", ") || "Not specified")}</div>
+          ${licenseLabel ? `<div class="snapshot-card-line"><strong>License:</strong> ${escapeHtml(licenseLabel)}</div>` : ""}
+          ${model.training_cutoff ? `<div class="snapshot-card-line"><strong>Training cutoff:</strong> ${escapeHtml(model.training_cutoff)}</div>` : ""}
+          ${model.base_models?.length ? `<div class="snapshot-card-line"><strong>Base model:</strong> ${escapeHtml(model.base_models.join(", "))}</div>` : ""}
+          ${pricingLabel ? `<div class="snapshot-card-line"><strong>Pricing:</strong> ${escapeHtml(pricingLabel)}</div>` : ""}
+          ${model.intended_use_short ? `<div class="snapshot-card-line"><strong>Intended use:</strong> ${escapeHtml(model.intended_use_short)}</div>` : ""}
+          ${model.limitations_short ? `<div class="snapshot-card-line"><strong>Limitations:</strong> ${escapeHtml(model.limitations_short)}</div>` : ""}
+          ${
+            metadataLinks.length
+              ? `<div class="snapshot-inline-row">${metadataLinks
+                  .map(
+                    (entry) =>
+                      `<a class="snapshot-link-button" href="${escapeAttribute(entry.url)}" rel="noreferrer" target="_blank">${escapeHtml(entry.label)}</a>`,
+                  )
+                  .join("")}</div>`
+              : ""
+          }
           ${
             openRouterLine
               ? `<div class="snapshot-card-line"><strong>OpenRouter:</strong> ${escapeHtml(openRouterLine)}</div>`
@@ -1678,6 +1712,9 @@ function portableSnapshotRuntime() {
     const memberOpenRouterLine = memberOpenRouterLabel
       ? `${memberOpenRouterLabel}${memberOpenRouterDetail ? ` · ${memberOpenRouterDetail}` : ""}`
       : "";
+    const memberPricingLabel = getModelPricingReferenceLabel(member);
+    const memberLicenseLabel = getModelLicenseLabel(member);
+    const metadataLinks = getModelMetadataLinks(member);
     const metaBits = [
       memberRanking ? `#${memberRanking.rank}${selectedUseCase ? ` in ${selectedUseCase.label}` : ""}` : "",
       `${memberCoverage}% coverage`,
@@ -1693,9 +1730,21 @@ function portableSnapshotRuntime() {
         </div>
         <div class="snapshot-family-variant-meta">
           <span>${escapeHtml(metaBits.join(" · ") || "No additional metadata")}</span>
-          <span>${escapeHtml(member.type === "open_weights" ? "Open weights" : "Proprietary")}</span>
+          <span>${escapeHtml(member.type === "open_weights" ? "Open weights" : "Proprietary")}${memberLicenseLabel ? ` · ${escapeHtml(memberLicenseLabel)}` : ""}</span>
         </div>
         <div class="snapshot-family-variant-line"><strong>Inference:</strong> ${escapeHtml(memberInference)}</div>
+        ${memberPricingLabel ? `<div class="snapshot-family-variant-line"><strong>Pricing:</strong> ${escapeHtml(memberPricingLabel)}</div>` : ""}
+        ${memberLicenseLabel ? `<div class="snapshot-family-variant-line"><strong>License:</strong> ${escapeHtml(memberLicenseLabel)}</div>` : ""}
+        ${
+          metadataLinks.length
+            ? `<div class="snapshot-inline-row">${metadataLinks
+                .map(
+                  (entry) =>
+                    `<a class="snapshot-link-button" href="${escapeAttribute(entry.url)}" rel="noreferrer" target="_blank">${escapeHtml(entry.label)}</a>`,
+                )
+                .join("")}</div>`
+            : ""
+        }
         ${
           memberOpenRouterLine
             ? `<div class="snapshot-family-variant-line"><strong>OpenRouter:</strong> ${escapeHtml(memberOpenRouterLine)}</div>`
@@ -1902,8 +1951,17 @@ function portableSnapshotRuntime() {
       model.type,
       model.release_date,
       model.context_window,
+      model.license_name,
+      model.license_id,
+      model.training_cutoff,
+      model.intended_use_short,
+      model.limitations_short,
+      model.training_data_summary,
       model.family_name,
       model.canonical_model_name,
+      ...(model.base_models || []),
+      ...(model.supported_languages || []),
+      ...(model.capabilities || []),
       ...(model.inference_countries || []),
     ];
     if (model.family?.member_names?.length) {
@@ -1944,6 +2002,18 @@ function portableSnapshotRuntime() {
 
       const leftCoverage = getModelCoveragePercent(left);
       const rightCoverage = getModelCoveragePercent(right);
+
+      if (sortKey === "price") {
+        const leftPrice = getModelPricingSortValue(left);
+        const rightPrice = getModelPricingSortValue(right);
+        if (leftPrice !== rightPrice) {
+          return leftPrice - rightPrice;
+        }
+        if (leftCoverage !== rightCoverage) {
+          return rightCoverage - leftCoverage;
+        }
+        return String(left.name || "").localeCompare(String(right.name || ""));
+      }
 
       if (sortKey === "coverage") {
         if (leftCoverage !== rightCoverage) {
@@ -2212,7 +2282,7 @@ function portableSnapshotRuntime() {
           ? autoMeta.label
           : (totalCount > 1 && notRecommendedCount < totalCount ? `${notRecommendedCount}/${totalCount} not recommended` : "Not recommended"),
         title: autoMeta?.title || approval?.recommendation_notes || "Approved but not a default recommendation",
-        toneClass: "snapshot-pill-muted",
+        toneClass: "snapshot-pill-not-recommended",
       };
     }
     if (status === "discouraged") {
@@ -2234,6 +2304,128 @@ function portableSnapshotRuntime() {
   function getReleaseTimestamp(value) {
     const parsed = Date.parse(String(value || ""));
     return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  function getModelPricingReference(model) {
+    if (model?.pricing_reference) {
+      return model.pricing_reference;
+    }
+    return buildPricingReference([model?.price_input_per_mtok], [model?.price_output_per_mtok]);
+  }
+
+  function getModelPricingSortValue(model) {
+    const pricing = getModelPricingReference(model);
+    if (!pricing) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    const inputValue = Number(pricing.input_min);
+    const outputValue = Number(pricing.output_min);
+    const hasInput = Number.isFinite(inputValue);
+    const hasOutput = Number.isFinite(outputValue);
+
+    if (hasInput && hasOutput) {
+      return ((inputValue * 3) + outputValue) / 4;
+    }
+    if (hasInput) {
+      return inputValue;
+    }
+    if (hasOutput) {
+      return outputValue;
+    }
+    return Number.POSITIVE_INFINITY;
+  }
+
+  function getModelPricingReferenceLabel(model) {
+    const pricing = getModelPricingReference(model);
+    if (!pricing) {
+      return "";
+    }
+
+    const parts = [];
+    const inputLabel = formatPricingRange(pricing.input_min, pricing.input_max);
+    const outputLabel = formatPricingRange(pricing.output_min, pricing.output_max);
+
+    if (inputLabel) {
+      parts.push(`Input ${inputLabel}`);
+    }
+    if (outputLabel) {
+      parts.push(`Output ${outputLabel}`);
+    }
+
+    return parts.length ? `${parts.join(" / ")} per 1M tokens` : "";
+  }
+
+  function getModelLicenseLabel(model) {
+    return String(model?.license_name || model?.license_id || "").trim();
+  }
+
+  function getModelMetadataLinks(model) {
+    const links = [
+      { label: "Model card", url: model?.model_card_url },
+      { label: "Docs", url: model?.documentation_url },
+      { label: "Repo", url: model?.repo_url },
+      { label: "Paper", url: model?.paper_url },
+    ];
+    const seen = new Set();
+    return links.filter((entry) => {
+      const url = String(entry.url || "").trim();
+      if (!url || seen.has(url)) {
+        return false;
+      }
+      seen.add(url);
+      return true;
+    });
+  }
+
+  function buildPricingReference(inputValues, outputValues) {
+    const inputNumbers = normalizePriceValues(inputValues);
+    const outputNumbers = normalizePriceValues(outputValues);
+
+    if (!inputNumbers.length && !outputNumbers.length) {
+      return null;
+    }
+
+    return {
+      input_min: inputNumbers.length ? Math.min(...inputNumbers) : null,
+      input_max: inputNumbers.length ? Math.max(...inputNumbers) : null,
+      output_min: outputNumbers.length ? Math.min(...outputNumbers) : null,
+      output_max: outputNumbers.length ? Math.max(...outputNumbers) : null,
+    };
+  }
+
+  function normalizePriceValues(values) {
+    return (Array.isArray(values) ? values : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value >= 0);
+  }
+
+  function formatPricingRange(minimum, maximum) {
+    const hasMinimum = Number.isFinite(minimum);
+    const hasMaximum = Number.isFinite(maximum);
+
+    if (!hasMinimum && !hasMaximum) {
+      return "";
+    }
+    if (hasMinimum && hasMaximum && minimum === maximum) {
+      return `$${formatPricingNumber(minimum)}`;
+    }
+
+    const start = hasMinimum ? `$${formatPricingNumber(minimum)}` : "";
+    const end = hasMaximum ? `$${formatPricingNumber(maximum)}` : "";
+    return start && end ? `${start} to ${end}` : start || end;
+  }
+
+  function formatPricingNumber(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return "";
+    }
+    const maximumFractionDigits = numeric >= 100 ? 0 : numeric >= 10 ? 2 : numeric >= 1 ? 2 : numeric >= 0.1 ? 3 : 4;
+    return numeric.toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits,
+    });
   }
 
   function getModelAgeMeta(model) {

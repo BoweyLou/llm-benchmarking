@@ -36,6 +36,7 @@ const DEFAULT_FAMILY_APPROVAL_SCOPE = "family";
 const BROWSER_SORT_OPTIONS = [
   { id: "smart", label: "Smart order" },
   { id: "popularity", label: "OpenRouter popularity" },
+  { id: "price", label: "Lowest price" },
   { id: "coverage", label: "Coverage" },
   { id: "release", label: "Newest release" },
   { id: "name", label: "Name A-Z" },
@@ -206,7 +207,7 @@ const RECOMMENDATION_STATUS_OPTIONS = [
   { id: "discouraged", label: "Discouraged" },
 ];
 const AUTO_NOT_RECOMMENDED_RELEASE_DAYS = 365;
-const AUTO_NOT_RECOMMENDED_OPENROUTER_DAYS = 540;
+const AUTO_NOT_RECOMMENDED_OPENROUTER_DAYS = 365;
 const RECOMMENDATION_FILTER_OPTIONS = [
   { id: DEFAULT_RECOMMENDATION_FILTER, label: "All recommendation states" },
   ...RECOMMENDATION_STATUS_OPTIONS,
@@ -1090,43 +1091,6 @@ function UseCaseFinder({
                 </span>
               ) : null}
             </div>
-            {quickRankings.length ? (
-              <div className="finder-quick-picks">
-                {quickRankings.map((entry) => {
-                  const compareId = toCatalogIdForMode(entry.model.id, catalogMode, familyLookup);
-                  const inCompare = compareIds.includes(compareId);
-                  return (
-                    <article
-                      key={`quick-${entry.model.id}-${entry.rank}`}
-                      className={entry.rank === 1 ? "finder-quick-pick finder-quick-pick-top" : "finder-quick-pick"}
-                    >
-                      <div className="finder-quick-rank">#{entry.rank}</div>
-                      <div className="finder-quick-main">
-                        <div className="finder-quick-title">{entry.model.name}</div>
-                        <ProviderBadge
-                          countryCode={entry.model.provider_country_code}
-                          countryFlag={entry.model.provider_country_flag}
-                          countryName={entry.model.provider_country_name}
-                          provider={entry.model.provider}
-                        />
-                        <div className="finder-quick-meta">
-                          <span>Score {Math.round(entry.score)}</span>
-                          <span>{Math.round((entry.coverage || 0) * 100)}% coverage</span>
-                        </div>
-                      </div>
-                      <button
-                        aria-label={inCompare ? `Remove ${entry.model.name} from compare` : `Add ${entry.model.name} to compare`}
-                        className={inCompare ? "btn btn-secondary btn-active btn-compact" : "btn btn-secondary btn-compact"}
-                        onClick={() => onToggleCompare(compareId)}
-                        type="button"
-                      >
-                        {inCompare ? "In compare" : "Add"}
-                      </button>
-                    </article>
-                  );
-                })}
-              </div>
-            ) : null}
           </div>
           <div className="finder-focus-actions">
             <button className="btn btn-secondary" onClick={() => onLensPickerOpenChange(!lensPickerOpen)} type="button">
@@ -1151,6 +1115,43 @@ function UseCaseFinder({
               Review methodology
             </NavigationLink>
           </div>
+          {quickRankings.length ? (
+            <div className="finder-quick-picks">
+              {quickRankings.map((entry) => {
+                const compareId = toCatalogIdForMode(entry.model.id, catalogMode, familyLookup);
+                const inCompare = compareIds.includes(compareId);
+                return (
+                  <article
+                    key={`quick-${entry.model.id}-${entry.rank}`}
+                    className={entry.rank === 1 ? "finder-quick-pick finder-quick-pick-top" : "finder-quick-pick"}
+                  >
+                    <div className="finder-quick-rank">#{entry.rank}</div>
+                    <div className="finder-quick-main">
+                      <div className="finder-quick-title">{entry.model.name}</div>
+                      <ProviderBadge
+                        countryCode={entry.model.provider_country_code}
+                        countryFlag={entry.model.provider_country_flag}
+                        countryName={entry.model.provider_country_name}
+                        provider={entry.model.provider}
+                      />
+                      <div className="finder-quick-meta">
+                        <span>Score {Math.round(entry.score)}</span>
+                        <span>{Math.round((entry.coverage || 0) * 100)}% coverage</span>
+                      </div>
+                    </div>
+                    <button
+                      aria-label={inCompare ? `Remove ${entry.model.name} from compare` : `Add ${entry.model.name} to compare`}
+                      className={inCompare ? "btn btn-secondary btn-active btn-compact" : "btn btn-secondary btn-compact"}
+                      onClick={() => onToggleCompare(compareId)}
+                      type="button"
+                    >
+                      {inCompare ? "In compare" : "Add"}
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          ) : null}
           <details className="finder-details" open={showExpandedExportContent ? true : undefined}>
             <summary>{selectedRequired.length ? "Why this ranking and what is required" : "Why this ranking"}</summary>
             <div className="finder-details-body">
@@ -1575,6 +1576,8 @@ function RankedModelCard({
   const compareId = toCatalogIdForMode(entry.model.id, catalogMode, familyLookup);
   const isExpanded = forceExpanded || expanded;
   const ageMeta = getModelAgeMeta(entry.model);
+  const licenseLabel = getModelLicenseLabel(entry.model);
+  const metadataLinks = getModelMetadataLinks(entry.model);
 
   return (
     <article className={isTop ? "card card-top" : "card"}>
@@ -1593,6 +1596,7 @@ function RankedModelCard({
             <ApprovalBadge model={entry.model} useCaseId={selectedUseCase?.id} />
             <RecommendationBadge model={entry.model} useCaseId={selectedUseCase?.id} />
             <TypeBadge type={entry.model.type} />
+            {licenseLabel ? <span className="tag tag-license">License: {licenseLabel}</span> : null}
             {isTop ? <span className="tag tag-top">Top pick</span> : null}
             {criticalMissing.length ? (
               <span className="tag tag-warning">Critical gaps: {criticalMissing.map((id) => benchmarksById[id]?.short || id.replaceAll("_", " ")).join(", ")}</span>
@@ -1658,8 +1662,23 @@ function RankedModelCard({
           </div>
           <div className="small-meta">
             Context: {entry.model.context_window || "Unknown"} · Released: {entry.model.release_date || "Unknown"}
-            {ageMeta ? ` · Age: ${ageMeta.label}` : ""}
+            {ageMeta ? ` · Age: ${ageMeta.label}` : ""}{licenseLabel ? ` · License: ${licenseLabel}` : ""}
           </div>
+          {metadataLinks.length ? (
+            <div className="metadata-link-row">
+              {metadataLinks.map((entryLink) => (
+                <a
+                  className="metadata-link"
+                  href={entryLink.url}
+                  key={`${entry.model.id}-${entryLink.label}`}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {entryLink.label}
+                </a>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </article>
@@ -1894,6 +1913,8 @@ function ModelBrowserCard({
   const openRouterDetail = getOpenRouterPopularityDetail(model, selectedUseCase);
   const inferenceSummaryLabel = getInferenceSummaryLabel(model.inference_summary);
   const pricingReferenceLabel = getModelPricingReferenceLabel(model);
+  const licenseLabel = getModelLicenseLabel(model);
+  const metadataLinks = getModelMetadataLinks(model);
   const lensEligibility = selectedUseCase ? getLensEligibilitySummary(model, selectedUseCase, benchmarksById) : null;
   const ageMeta = getModelAgeMeta(model);
   const inferenceSectionLabel = isFamily ? "Family Inference Footprint" : "Inference";
@@ -1928,6 +1949,7 @@ function ModelBrowserCard({
             <ApprovalBadge model={model} useCaseId={selectedUseCase?.id} />
             <RecommendationBadge model={model} useCaseId={selectedUseCase?.id} />
             <TypeBadge type={model.type} />
+            {licenseLabel ? <span className="tag tag-license">License: {licenseLabel}</span> : null}
             {isFamily ? <span className="tag tag-family">{model.family.member_count} variants</span> : null}
             {model.inference_summary?.destination_count ? (
               <span className="tag tag-inference">{model.inference_summary.destination_count} hyperscalers</span>
@@ -1993,6 +2015,75 @@ function ModelBrowserCard({
           {selectedUseCase && !lensEntry && lensEligibility?.detailMessage ? (
             <div className="note">
               <strong>Why this {isFamily ? "family" : "exact model"} is not ranked in {selectedUseCase.label}:</strong> {lensEligibility.detailMessage}
+            </div>
+          ) : null}
+          {(licenseLabel || metadataLinks.length || model.intended_use_short || model.limitations_short || model.training_cutoff || (model.capabilities || []).length || (model.supported_languages || []).length || (model.base_models || []).length) ? (
+            <div className="stack stack-tight">
+              <div className="details-head">
+                <div className="detail-copy">
+                  <div className="detail-label">Model Card Metadata</div>
+                  <div className="detail-caption">
+                    Structured metadata pulled from the linked model card where available.
+                  </div>
+                </div>
+              </div>
+              {metadataLinks.length ? (
+                <div className="metadata-link-row">
+                  {metadataLinks.map((entry) => (
+                    <a
+                      className="metadata-link"
+                      href={entry.url}
+                      key={`${model.id}-${entry.label}`}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      {entry.label}
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+              <div className="metadata-summary-grid">
+                {licenseLabel ? (
+                  <div className="metadata-summary-item">
+                    <strong>License</strong>
+                    <span>{licenseLabel}</span>
+                  </div>
+                ) : null}
+                {model.training_cutoff ? (
+                  <div className="metadata-summary-item">
+                    <strong>Training cutoff</strong>
+                    <span>{model.training_cutoff}</span>
+                  </div>
+                ) : null}
+                {model.base_models?.length ? (
+                  <div className="metadata-summary-item">
+                    <strong>Base model</strong>
+                    <span>{model.base_models.join(", ")}</span>
+                  </div>
+                ) : null}
+                {model.supported_languages?.length ? (
+                  <div className="metadata-summary-item">
+                    <strong>Languages</strong>
+                    <span>{model.supported_languages.join(", ")}</span>
+                  </div>
+                ) : null}
+                {model.capabilities?.length ? (
+                  <div className="metadata-summary-item">
+                    <strong>Capabilities</strong>
+                    <span>{model.capabilities.join(", ")}</span>
+                  </div>
+                ) : null}
+              </div>
+              {model.intended_use_short ? (
+                <div className="note">
+                  <strong>Intended use:</strong> {model.intended_use_short}
+                </div>
+              ) : null}
+              {model.limitations_short ? (
+                <div className="note">
+                  <strong>Limitations:</strong> {model.limitations_short}
+                </div>
+              ) : null}
             </div>
           ) : null}
           {isFamily ? (
@@ -2189,6 +2280,8 @@ function getFamilyVariants(model, exactModelsById, benchmarkWinsByVariantId) {
 function FamilyVariantCard({ benchmarkWins, benchmarksById, isRepresentative, selectedUseCase, variant }) {
   const ageMeta = getModelAgeMeta(variant);
   const pricingLabel = getModelPricingReferenceLabel(variant);
+  const licenseLabel = getModelLicenseLabel(variant);
+  const metadataLinks = getModelMetadataLinks(variant);
   const inferenceSummaryLabel = getInferenceSummaryLabel(variant.inference_summary);
   const inferenceLocations = getModelInferenceCountries(variant);
   const benchmarkWinSet = new Set(benchmarkWins);
@@ -2217,9 +2310,25 @@ function FamilyVariantCard({ benchmarkWins, benchmarksById, isRepresentative, se
           <span>Context: {variant.context_window || "Unknown"}</span>
           <span>Released: {variant.release_date || "Unknown"}</span>
           {ageMeta ? <span>Age: {ageMeta.label}</span> : null}
+          {licenseLabel ? <span>License: {licenseLabel}</span> : null}
         </div>
       </div>
       <div className="family-variant-stat">{pricingLabel ? `Price: ${pricingLabel}` : "Price: unavailable"}</div>
+      {metadataLinks.length ? (
+        <div className="metadata-link-row">
+          {metadataLinks.map((entry) => (
+            <a
+              className="metadata-link"
+              href={entry.url}
+              key={`${variant.id}-${entry.label}`}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {entry.label}
+            </a>
+          ))}
+        </div>
+      ) : null}
       <div className="family-variant-stat">
         {inferenceSummaryLabel ? `Routing: ${inferenceSummaryLabel}` : "Routing: no tracked destinations"}
       </div>
@@ -5510,7 +5619,7 @@ function getRecommendationSummary(model, useCaseId) {
   }
   if (recommendationStatus === "not_recommended") {
     return {
-      className: "tag",
+      className: "tag tag-not-recommended",
       label: autoMeta
         ? autoMeta.label
         : (totalCount > 1 && notRecommendedCount < totalCount ? `${notRecommendedCount}/${totalCount} not recommended` : "Not recommended"),
@@ -6459,6 +6568,18 @@ function sortCatalogModels(models, { rankingByCatalogId, selectedUseCase, sortKe
     const leftCoverage = getModelCoveragePercent(left);
     const rightCoverage = getModelCoveragePercent(right);
 
+    if (sortKey === "price") {
+      const leftPrice = getModelPricingSortValue(left);
+      const rightPrice = getModelPricingSortValue(right);
+      if (leftPrice !== rightPrice) {
+        return leftPrice - rightPrice;
+      }
+      if (leftCoverage !== rightCoverage) {
+        return rightCoverage - leftCoverage;
+      }
+      return String(left.name).localeCompare(String(right.name));
+    }
+
     if (sortKey === "coverage") {
       if (leftCoverage !== rightCoverage) {
         return rightCoverage - leftCoverage;
@@ -7034,8 +7155,17 @@ function buildModelSearchText(model) {
     model.type,
     model.release_date,
     model.context_window,
+    model.license_name,
+    model.license_id,
+    model.training_cutoff,
+    model.intended_use_short,
+    model.limitations_short,
+    model.training_data_summary,
     model.family_name,
     model.canonical_model_name,
+    ...(model.base_models || []),
+    ...(model.supported_languages || []),
+    ...(model.capabilities || []),
     ...(model.inference_countries || []),
   ];
   if (model.family?.member_names?.length) {
@@ -7444,6 +7574,29 @@ function getModelPricingReference(model) {
   return buildPricingReference([model.price_input_per_mtok], [model.price_output_per_mtok]);
 }
 
+function getModelPricingSortValue(model) {
+  const pricing = getModelPricingReference(model);
+  if (!pricing) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const inputValue = Number(pricing.input_min);
+  const outputValue = Number(pricing.output_min);
+  const hasInput = Number.isFinite(inputValue);
+  const hasOutput = Number.isFinite(outputValue);
+
+  if (hasInput && hasOutput) {
+    return ((inputValue * 3) + outputValue) / 4;
+  }
+  if (hasInput) {
+    return inputValue;
+  }
+  if (hasOutput) {
+    return outputValue;
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
 function getModelPricingReferenceLabel(model) {
   const pricing = getModelPricingReference(model);
   if (!pricing) {
@@ -7462,6 +7615,28 @@ function getModelPricingReferenceLabel(model) {
   }
 
   return parts.length ? `${parts.join(" / ")} per 1M tokens` : "";
+}
+
+function getModelLicenseLabel(model) {
+  return String(model?.license_name || model?.license_id || "").trim();
+}
+
+function getModelMetadataLinks(model) {
+  const links = [
+    { label: "Model card", url: model?.model_card_url },
+    { label: "Docs", url: model?.documentation_url },
+    { label: "Repo", url: model?.repo_url },
+    { label: "Paper", url: model?.paper_url },
+  ];
+  const seen = new Set();
+  return links.filter((entry) => {
+    const url = String(entry.url || "").trim();
+    if (!url || seen.has(url)) {
+      return false;
+    }
+    seen.add(url);
+    return true;
+  });
 }
 
 function formatPricingRange(minimum, maximum) {
@@ -8189,12 +8364,23 @@ const styles = `
     color: #9a3412;
     border-color: rgba(251, 146, 60, .22);
   }
+  .tag-not-recommended {
+    background: rgba(249, 115, 22, .16);
+    color: #9a3412;
+    border-color: rgba(249, 115, 22, .32);
+    font-weight: 800;
+  }
   .tag-detail {
     background: rgba(148, 163, 184, .12);
     color: #334155;
     border-color: rgba(148, 163, 184, .18);
   }
   .tag-provisional {
+    background: rgba(245, 158, 11, .1);
+    color: #92400e;
+    border-color: rgba(245, 158, 11, .24);
+  }
+  .tag-license {
     background: rgba(245, 158, 11, .1);
     color: #92400e;
     border-color: rgba(245, 158, 11, .24);
@@ -8377,6 +8563,11 @@ const styles = `
   }
   .finder-focus {
     display: grid;
+    grid-template-areas:
+      "main"
+      "actions"
+      "quick"
+      "details";
     gap: 16px;
     padding: 22px;
     border: 1px solid rgba(148, 163, 184, .18);
@@ -8385,6 +8576,7 @@ const styles = `
     box-shadow: 0 14px 36px rgba(15, 23, 42, 0.06);
   }
   .finder-focus-main {
+    grid-area: main;
     display: grid;
     gap: 14px;
   }
@@ -8495,8 +8687,10 @@ const styles = `
     gap: 4px;
   }
   .finder-quick-picks {
+    grid-area: quick;
     display: grid;
     gap: 10px;
+    grid-template-columns: 1fr;
   }
   .finder-quick-pick {
     display: grid;
@@ -8534,12 +8728,14 @@ const styles = `
     color: var(--muted);
   }
   .finder-focus-actions {
+    grid-area: actions;
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
     align-items: flex-start;
   }
   .finder-details {
+    grid-area: details;
     border-top: 1px solid rgba(148, 163, 184, .16);
     padding-top: 14px;
   }
@@ -8682,6 +8878,48 @@ const styles = `
     font-size: .76rem;
     line-height: 1.45;
     color: var(--muted);
+  }
+  .metadata-link-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .metadata-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, .2);
+    background: rgba(248, 250, 252, .92);
+    color: var(--blue);
+    font-size: .82rem;
+    font-weight: 700;
+  }
+  .metadata-link:hover {
+    background: rgba(219, 234, 254, .42);
+    border-color: rgba(59, 130, 246, .26);
+  }
+  .metadata-summary-grid {
+    display: grid;
+    gap: 10px;
+  }
+  .metadata-summary-item {
+    display: grid;
+    gap: 4px;
+    padding: 12px 14px;
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, .18);
+    background: rgba(248, 250, 252, .82);
+  }
+  .metadata-summary-item strong {
+    color: var(--muted);
+    font-size: .76rem;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+  }
+  .metadata-summary-item span {
+    color: var(--text);
+    line-height: 1.45;
   }
   .detail-list, .bench-grid, .history-list { display: grid; gap: 8px; }
   .member-chips {
@@ -9359,8 +9597,15 @@ const styles = `
     .method-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .methodology-usecases { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .methodology-benchmarks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .finder-focus { grid-template-columns: minmax(0, 1fr) auto; }
-    .finder-quick-picks { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .finder-focus {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "main actions"
+        "quick quick"
+        "details details";
+      align-items: start;
+    }
+    .finder-focus-actions { justify-content: flex-end; }
   }
   .input, .select {
     width: 100%;

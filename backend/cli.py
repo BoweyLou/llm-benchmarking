@@ -9,7 +9,7 @@ from .database import DEFAULT_DB_PATH, get_engine
 from .inference_sync import sync_inference_catalog
 from .model_curation import MODEL_CURATION_BASELINE_PATH, export_model_curation_baseline
 from .seed_data import PROVIDER_ORIGIN_BASELINE_PATH, export_provider_origin_baseline
-from .update_engine import bootstrap, get_update_log, run_update_now
+from .update_engine import bootstrap, get_update_log, refresh_model_card_metadata, run_update_now
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,6 +44,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional subset of hyperscaler destinations to sync.",
     )
     inference_parser.set_defaults(func=cmd_inference_sync)
+
+    model_card_parser = subparsers.add_parser(
+        "model-card-sync",
+        help="Refresh Hugging Face-backed model card metadata for models that have a linked repo id.",
+    )
+    model_card_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Refresh even recently verified model-card rows.",
+    )
+    model_card_parser.set_defaults(func=cmd_model_card_sync)
 
     provider_origin_parser = subparsers.add_parser(
         "provider-origin-export",
@@ -103,6 +114,12 @@ def cmd_inference_sync(args: argparse.Namespace) -> int:
     print(json.dumps(summary, indent=2, sort_keys=True))
     statuses = [item.get("status") for item in summary.get("destinations", {}).values()]
     return 0 if statuses and all(status != "failed" for status in statuses) else 1
+
+
+def cmd_model_card_sync(args: argparse.Namespace) -> int:
+    refresh_model_card_metadata(force=bool(args.force))
+    print("Refreshed model-card metadata")
+    return 0
 
 
 def cmd_provider_origin_export(args: argparse.Namespace) -> int:

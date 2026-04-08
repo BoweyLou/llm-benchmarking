@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 from sqlalchemy import select, update
 
 from backend import update_engine
@@ -950,7 +951,14 @@ class RankingTests(unittest.TestCase):
                 "id": "amazon/nova-pro-v1",
                 "canonical_slug": "amazon/nova-pro-v1",
                 "name": "Amazon: Nova Pro 1.0",
+                "hugging_face_id": "amazon/nova-pro-hf",
                 "created": 1775592472,
+                "architecture": {
+                    "modality": "text+image->text",
+                    "input_modalities": ["text", "image"],
+                    "output_modalities": ["text"],
+                },
+                "supported_parameters": ["tools", "response_format"],
                 "top_provider": {
                     "context_length": 300000,
                     "max_completion_tokens": 8192,
@@ -971,8 +979,13 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(nova["openrouter_model_id"], "amazon/nova-pro-v1")
         self.assertEqual(nova["openrouter_canonical_slug"], "amazon/nova-pro-v1")
         self.assertEqual(nova["openrouter_added_at"], "2026-04-07T20:07:52Z")
+        self.assertEqual(nova["huggingface_repo_id"], "amazon/nova-pro-hf")
         self.assertEqual(nova["context_window_tokens"], 300000)
         self.assertEqual(nova["max_output_tokens"], 8192)
+        self.assertIn("text+image->text", nova["capabilities"])
+        self.assertIn("image-input", nova["capabilities"])
+        self.assertIn("tool-use", nova["capabilities"])
+        self.assertIn("structured-output", nova["capabilities"])
 
     def test_refresh_openrouter_model_metadata_imports_untracked_openrouter_model_as_provisional(self) -> None:
         openrouter_items = [
@@ -1004,6 +1017,187 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(imported["type"], "proprietary")
         self.assertEqual(imported["openrouter_added_at"], "2025-10-31T22:38:52Z")
         self.assertEqual(imported["context_window_tokens"], 1000000)
+
+    def test_build_huggingface_model_card_values_extracts_metadata(self) -> None:
+        info = {
+            "cardData": {
+                "license": "apache-2.0",
+                "license_name": "Apache 2.0",
+                "license_link": "https://example.com/license",
+                "language": ["en", "de"],
+                "pipeline_tag": "text-generation",
+                "base_model": "acme/Base-1",
+            },
+            "tags": ["chat", "arxiv:2401.12345"],
+        }
+        readme = """---
+license: apache-2.0
+---
+
+<a href="https://docs.acme.test/model">Documentation</a>
+<a href="https://github.com/acme/model">GitHub</a>
+
+Acme Model is built for coding and reasoning workloads in enterprise settings.
+
+## Intended Use
+Use this model for coding assistants and long-form analysis inside governed environments.
+
+## Limitations
+This model can still hallucinate and should be reviewed before use in regulated workflows.
+
+## Training Data
+Mixed public and licensed corpora with synthetic post-training examples.
+
+## Knowledge Cutoff
+January 2026
+"""
+
+        values = update_engine._build_huggingface_model_card_values(
+            info,
+            readme,
+            repo_id="acme/model",
+            verified_at="2026-04-09T00:00:00Z",
+        )
+
+        self.assertEqual(values["model_card_url"], "https://huggingface.co/acme/model")
+        self.assertEqual(values["documentation_url"], "https://docs.acme.test/model")
+        self.assertEqual(values["repo_url"], "https://github.com/acme/model")
+        self.assertEqual(values["paper_url"], "https://arxiv.org/abs/2401.12345")
+        self.assertEqual(values["license_id"], "apache-2.0")
+        self.assertEqual(values["license_name"], "Apache 2.0")
+        self.assertEqual(values["license_url"], "https://example.com/license")
+        self.assertEqual(json.loads(values["base_models_json"]), ["acme/Base-1"])
+        self.assertEqual(json.loads(values["supported_languages_json"]), ["en", "de"])
+        self.assertIn("text-generation", json.loads(values["capabilities_json"]))
+        self.assertIn("chat", json.loads(values["capabilities_json"]))
+        self.assertIn("coding assistants", values["intended_use_short"])
+        self.assertIn("hallucinate", values["limitations_short"])
+        self.assertIn("licensed corpora", values["training_data_summary"])
+        self.assertEqual(values["training_cutoff"], "January 2026")
+
+    def test_fetch_huggingface_model_card_values_keeps_structured_metadata_when_readme_fails(self) -> None:
+        info = {
+            "cardData": {
+                "license": "apache-2.0",
+                "pipeline_tag": "text-generation",
+            },
+            "siblings": [{"rfilename": "README.md"}],
+            "tags": [],
+        }
+        request = httpx.Request("GET", "https://huggingface.co/acme/model/raw/main/README.md")
+        response = httpx.Response(401, request=request)
+        readme_error = httpx.HTTPStatusError("unauthorized", request=request, response=response)
+
+        with httpx.Client() as client:
+            with patch.object(update_engine, "_fetch_huggingface_model_info", return_value=info), patch.object(
+                update_engine,
+                "_fetch_huggingface_readme",
+                side_effect=readme_error,
+            ):
+                values = update_engine._fetch_huggingface_model_card_values(
+                    client,
+                    "acme/model",
+                    verified_at="2026-04-09T00:00:00Z",
+                )
+
+        self.assertEqual(values["model_card_url"], "https://huggingface.co/acme/model")
+        self.assertEqual(values["model_card_source"], "huggingface")
+        self.assertEqual(values["license_id"], "apache-2.0")
+        self.assertIn("text-generation", json.loads(values["capabilities_json"]))
+
+    def test_refresh_model_card_metadata_populates_models_with_huggingface_repo(self) -> None:
+        self.add_model("gemma-variant", "Gemma Variant", provider="Google")
+        with self.engine.begin() as conn:
+            conn.execute(
+                update(models_table)
+                .where(models_table.c.id == "gemma-variant")
+                .values(huggingface_repo_id="google/gemma-4-26B-A4B-it")
+            )
+
+        mocked_values = {
+            "huggingface_repo_id": "google/gemma-4-26B-A4B-it",
+            "model_card_url": "https://huggingface.co/google/gemma-4-26B-A4B-it",
+            "model_card_source": "huggingface",
+            "model_card_verified_at": "2026-04-09T00:00:00Z",
+            "license_id": "apache-2.0",
+            "license_name": "Apache 2.0",
+            "documentation_url": "https://ai.google.dev/gemma/docs/core",
+            "repo_url": "https://github.com/google-gemma",
+            "capabilities_json": json.dumps(["image-text-to-text", "reasoning"], ensure_ascii=True),
+        }
+
+        with patch.object(update_engine, "_fetch_huggingface_model_card_values", return_value=mocked_values):
+            update_engine._refresh_model_card_metadata(force=True)
+
+        models = update_engine.list_models()
+        gemma = next(model for model in models if model["id"] == "gemma-variant")
+
+        self.assertEqual(gemma["license_id"], "apache-2.0")
+        self.assertEqual(gemma["license_name"], "Apache 2.0")
+        self.assertEqual(gemma["documentation_url"], "https://ai.google.dev/gemma/docs/core")
+        self.assertEqual(gemma["repo_url"], "https://github.com/google-gemma")
+        self.assertEqual(gemma["model_card_source"], "huggingface")
+        self.assertIn("image-text-to-text", gemma["capabilities"])
+
+    def test_refresh_model_card_metadata_commits_repo_updates_incrementally(self) -> None:
+        self.add_model("card-first", "Card First", provider="Acme")
+        self.add_model("card-second", "Card Second", provider="Acme")
+        mocked_rows = [
+            {
+                "id": "card-first",
+                "huggingface_repo_id": "acme/first",
+                "model_card_verified_at": None,
+                "model_card_url": None,
+                "license_id": None,
+                "license_name": None,
+                "capabilities_json": "[]",
+                "intended_use_short": None,
+                "limitations_short": None,
+                "training_data_summary": None,
+                "training_cutoff": None,
+            },
+            {
+                "id": "card-second",
+                "huggingface_repo_id": "acme/second",
+                "model_card_verified_at": None,
+                "model_card_url": None,
+                "license_id": None,
+                "license_name": None,
+                "capabilities_json": "[]",
+                "intended_use_short": None,
+                "limitations_short": None,
+                "training_data_summary": None,
+                "training_cutoff": None,
+            },
+        ]
+
+        def fake_fetch_model_card(_client: httpx.Client, repo_id: str, *, verified_at: str) -> dict[str, str]:
+            if repo_id == "acme/second":
+                raise KeyboardInterrupt()
+            return {
+                "huggingface_repo_id": repo_id,
+                "model_card_url": f"https://huggingface.co/{repo_id}",
+                "model_card_source": "huggingface",
+                "model_card_verified_at": verified_at,
+                "license_id": "apache-2.0",
+                "license_name": "Apache 2.0",
+            }
+
+        with patch.object(update_engine, "fetch_all", return_value=mocked_rows), patch.object(
+            update_engine,
+            "_fetch_huggingface_model_card_values",
+            side_effect=fake_fetch_model_card,
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                update_engine._refresh_model_card_metadata(force=True)
+
+        models = update_engine.list_models()
+        first = next(model for model in models if model["id"] == "card-first")
+        second = next(model for model in models if model["id"] == "card-second")
+
+        self.assertEqual(first["license_id"], "apache-2.0")
+        self.assertEqual(first["model_card_url"], "https://huggingface.co/acme/first")
+        self.assertIsNone(second["license_id"])
 
     def test_canonicalize_model_catalog_remaps_dependent_rows_before_delete(self) -> None:
         with self.engine.begin() as conn:

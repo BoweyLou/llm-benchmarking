@@ -233,9 +233,26 @@ class ModelOut(APIModel):
     openrouter_model_id: str | None = None
     openrouter_canonical_slug: str | None = None
     openrouter_added_at: datetime | None = None
+    huggingface_repo_id: str | None = None
     metadata_source_name: str | None = None
     metadata_source_url: str | None = None
     metadata_verified_at: datetime | None = None
+    model_card_url: str | None = None
+    model_card_source: str | None = None
+    model_card_verified_at: datetime | None = None
+    documentation_url: str | None = None
+    repo_url: str | None = None
+    paper_url: str | None = None
+    license_id: str | None = None
+    license_name: str | None = None
+    license_url: str | None = None
+    base_models: list[str] = Field(default_factory=list)
+    supported_languages: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+    intended_use_short: str | None = None
+    limitations_short: str | None = None
+    training_data_summary: str | None = None
+    training_cutoff: str | None = None
     openrouter_global_rank: int | None = None
     openrouter_global_total_tokens: int | None = None
     openrouter_global_share: float | None = None
@@ -285,6 +302,23 @@ class ModelSummaryOut(APIModel):
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
     openrouter_added_at: datetime | None = None
+    huggingface_repo_id: str | None = None
+    model_card_url: str | None = None
+    model_card_source: str | None = None
+    model_card_verified_at: datetime | None = None
+    documentation_url: str | None = None
+    repo_url: str | None = None
+    paper_url: str | None = None
+    license_id: str | None = None
+    license_name: str | None = None
+    license_url: str | None = None
+    base_models: list[str] = Field(default_factory=list)
+    supported_languages: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+    intended_use_short: str | None = None
+    limitations_short: str | None = None
+    training_data_summary: str | None = None
+    training_cutoff: str | None = None
     openrouter_global_rank: int | None = None
     openrouter_global_total_tokens: int | None = None
     openrouter_global_share: float | None = None

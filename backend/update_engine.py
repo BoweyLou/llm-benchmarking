@@ -6,10 +6,12 @@ import asyncio
 import json
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
+from urllib.parse import urlparse
 
 import httpx
+from bs4 import BeautifulSoup
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -75,6 +77,11 @@ OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 OPENROUTER_RANKINGS_URL = "https://openrouter.ai/rankings"
 OPENROUTER_PROGRAMMING_COLLECTION_URL = "https://openrouter.ai/collections/programming"
 OPENROUTER_MARKET_SOURCE_NAME = "openrouter"
+HUGGINGFACE_MODEL_API_URL_TEMPLATE = "https://huggingface.co/api/models/{repo_id}"
+HUGGINGFACE_MODEL_CARD_URL_TEMPLATE = "https://huggingface.co/{repo_id}"
+HUGGINGFACE_RAW_README_URL_TEMPLATE = "https://huggingface.co/{repo_id}/raw/main/README.md"
+MODEL_CARD_REFRESH_STALE_DAYS = 30
+MODEL_CARD_SUMMARY_MAX_LENGTH = 360
 INTERNAL_VIEW_NOTE = (
     "Optional internal assessment overlay entered in Admin. Missing internal scores do not block ranking eligibility."
 )
@@ -107,6 +114,7 @@ UPDATE_POST_PHASES = [
     {"key": "phase:identity-refresh-final", "label": "Refresh model identity metadata again", "kind": "phase"},
     {"key": "phase:provider-origin-baseline", "label": "Apply provider origin baseline", "kind": "phase"},
     {"key": "phase:openrouter-models", "label": "Refresh OpenRouter model metadata", "kind": "phase"},
+    {"key": "phase:model-card-metadata", "label": "Refresh model card metadata", "kind": "phase"},
     {"key": "phase:openrouter-market", "label": "Refresh OpenRouter market signals", "kind": "phase"},
     {"key": "phase:audit", "label": "Run post-update audit", "kind": "phase"},
     {"key": "phase:finalize", "label": "Finalize update", "kind": "phase"},
@@ -125,6 +133,14 @@ _OPENROUTER_TRAILING_ALIAS_RE = re.compile(
 )
 _OPENROUTER_TRAILING_VERSION_RE = re.compile(
     r"(?:[\s:_-]+v\d+(?:\.\d+)?(?::\d+)?)$",
+    re.IGNORECASE,
+)
+_MARKDOWN_HTML_LINK_RE = re.compile(r"<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", re.IGNORECASE | re.S)
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
+_MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.M)
+_README_FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n?", re.S)
+_TRAINING_CUTOFF_RE = re.compile(
+    r"\b(?:knowledge|training)(?:\s+data)?\s+cutoff\b[^:\n]*[:\-]?\s*([^\n.]{3,120})",
     re.IGNORECASE,
 )
 _NEXT_FLIGHT_PUSH_RE = re.compile(r"<script>self\.__next_f\.push\((\[.*?\])\)</script>", re.S)
@@ -227,6 +243,11 @@ def bootstrap() -> None:
         BOOTSTRAPPED = True
 
 
+def refresh_model_card_metadata(*, force: bool = False) -> None:
+    bootstrap()
+    _refresh_model_card_metadata(force=force)
+
+
 def _recover_interrupted_updates() -> None:
     with ENGINE.begin() as conn:
         rows = fetch_all(
@@ -282,6 +303,14 @@ def _decode_json_list(value: Any) -> list[Any]:
             return []
         return parsed if isinstance(parsed, list) else []
     return []
+
+
+def _decode_json_string_list(value: Any) -> list[str]:
+    return [
+        str(item).strip()
+        for item in _decode_json_list(value)
+        if str(item).strip()
+    ]
 
 
 def _humanize_source_name(source_name: str) -> str:
@@ -2185,6 +2214,19 @@ def _run_update_job(
             current_step_index = phase_offset + 6
             _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
             try:
+                _refresh_model_card_metadata()
+            except Exception as exc:
+                errors.append(
+                    {
+                        "benchmark_id": "",
+                        "source_id": "model_card_metadata",
+                        "error_message": str(exc),
+                    }
+                )
+
+            current_step_index = phase_offset + 7
+            _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
+            try:
                 _refresh_openrouter_market_signals()
             except Exception as exc:
                 errors.append(
@@ -2195,7 +2237,7 @@ def _run_update_job(
                     }
                 )
 
-            current_step_index = phase_offset + 7
+            current_step_index = phase_offset + 8
             _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
             try:
                 audit_result = run_audit(ENGINE, log_id)
@@ -3860,10 +3902,16 @@ def _openrouter_item_rank(item: dict[str, Any]) -> tuple[Any, ...]:
 def _openrouter_model_values(item: dict[str, Any], *, verified_at: str) -> dict[str, Any]:
     top_provider = item.get("top_provider") if isinstance(item.get("top_provider"), dict) else {}
     pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
+    architecture = item.get("architecture") if isinstance(item.get("architecture"), dict) else {}
     context_tokens = _safe_int(top_provider.get("context_length")) or _safe_int(item.get("context_length"))
     max_output_tokens = _safe_int(top_provider.get("max_completion_tokens"))
     input_price = _pricing_per_mtok(pricing.get("prompt"))
     output_price = _pricing_per_mtok(pricing.get("completion"))
+    huggingface_repo_id = _clean_text(item.get("hugging_face_id"))
+    openrouter_capabilities = _build_openrouter_capabilities(
+        architecture=architecture,
+        supported_parameters=item.get("supported_parameters"),
+    )
 
     values: dict[str, Any] = {
         "metadata_source_name": "openrouter",
@@ -3880,6 +3928,8 @@ def _openrouter_model_values(item: dict[str, Any], *, verified_at: str) -> dict[
     created_at = _openrouter_created_at(item.get("created"))
     if created_at:
         values["openrouter_added_at"] = created_at
+    if huggingface_repo_id:
+        values["huggingface_repo_id"] = huggingface_repo_id
     if context_tokens is not None:
         values["context_window_tokens"] = context_tokens
         values["context_window"] = _format_context_window_tokens(context_tokens)
@@ -3889,8 +3939,488 @@ def _openrouter_model_values(item: dict[str, Any], *, verified_at: str) -> dict[
         values["price_input_per_mtok"] = input_price
     if output_price is not None:
         values["price_output_per_mtok"] = output_price
+    if openrouter_capabilities:
+        values["capabilities_json"] = json.dumps(openrouter_capabilities, ensure_ascii=True)
 
     return values
+
+
+def _build_openrouter_capabilities(
+    *,
+    architecture: dict[str, Any] | None,
+    supported_parameters: Any,
+) -> list[str]:
+    capabilities: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: Any) -> None:
+        text = _clean_text(value)
+        if not text:
+            return
+        normalized = text.lower()
+        if normalized in seen:
+            return
+        seen.add(normalized)
+        capabilities.append(text)
+
+    architecture = architecture or {}
+    add(architecture.get("modality"))
+    for modality in architecture.get("input_modalities") or []:
+        add(f"{modality}-input")
+    for modality in architecture.get("output_modalities") or []:
+        add(f"{modality}-output")
+
+    parameter_map = {
+        "tools": "tool-use",
+        "tool_choice": "tool-choice",
+        "response_format": "structured-output",
+        "reasoning": "reasoning",
+        "image_input": "image-input",
+        "audio_input": "audio-input",
+    }
+    for parameter in supported_parameters if isinstance(supported_parameters, list) else []:
+        normalized = str(parameter or "").strip().lower()
+        if not normalized:
+            continue
+        add(parameter_map.get(normalized, normalized.replace("_", "-")))
+    return capabilities
+
+
+def _refresh_model_card_metadata(*, force: bool = False) -> None:
+    with get_connection(ENGINE) as conn:
+        model_rows = fetch_all(
+            conn,
+            select(
+                models_table.c.id,
+                models_table.c.huggingface_repo_id,
+                models_table.c.model_card_verified_at,
+                models_table.c.model_card_url,
+                models_table.c.license_id,
+                models_table.c.license_name,
+                models_table.c.capabilities_json,
+                models_table.c.intended_use_short,
+                models_table.c.limitations_short,
+                models_table.c.training_data_summary,
+                models_table.c.training_cutoff,
+            ).where(
+                models_table.c.active == 1,
+                models_table.c.huggingface_repo_id.is_not(None),
+            ),
+        )
+
+    if not model_rows:
+        return
+
+    now = datetime.now(timezone.utc)
+    rows_by_repo: dict[str, list[dict[str, Any]]] = {}
+    for row in model_rows:
+        repo_id = _clean_text(row.get("huggingface_repo_id"))
+        if not repo_id:
+            continue
+        rows_by_repo.setdefault(repo_id, []).append(row)
+
+    verified_at = utc_now_iso()
+    with httpx.Client(headers=HTTP_HEADERS, follow_redirects=True, timeout=30.0) as client:
+        for repo_id, rows in rows_by_repo.items():
+            if not force and not any(_needs_model_card_refresh(row, now=now) for row in rows):
+                continue
+            try:
+                values = _fetch_huggingface_model_card_values(client, repo_id, verified_at=verified_at)
+            except Exception:
+                continue
+            if not values:
+                continue
+            with ENGINE.begin() as conn:
+                for row in rows:
+                    merged_values = dict(values)
+                    existing_capabilities = _decode_json_string_list(row.get("capabilities_json"))
+                    if existing_capabilities:
+                        merged_capabilities = _merge_string_lists(
+                            existing_capabilities,
+                            _decode_json_string_list(merged_values.get("capabilities_json")),
+                        )
+                        if merged_capabilities:
+                            merged_values["capabilities_json"] = json.dumps(merged_capabilities, ensure_ascii=True)
+                    conn.execute(
+                        update(models_table)
+                        .where(models_table.c.id == row["id"])
+                        .values(**merged_values)
+                    )
+
+
+def _needs_model_card_refresh(row: dict[str, Any], *, now: datetime) -> bool:
+    verified_at = _parse_iso_datetime(row.get("model_card_verified_at"))
+    if verified_at is None:
+        return True
+    if verified_at <= now - timedelta(days=MODEL_CARD_REFRESH_STALE_DAYS):
+        return True
+    if not _clean_text(row.get("model_card_url")):
+        return True
+    if not (_clean_text(row.get("license_id")) or _clean_text(row.get("license_name"))):
+        return True
+    if not _decode_json_string_list(row.get("capabilities_json")):
+        return True
+    if not _clean_text(row.get("intended_use_short")) and not _clean_text(row.get("limitations_short")):
+        return True
+    return False
+
+
+def _fetch_huggingface_model_card_values(
+    client: httpx.Client,
+    repo_id: str,
+    *,
+    verified_at: str,
+) -> dict[str, Any]:
+    info = _fetch_huggingface_model_info(client, repo_id)
+    siblings = info.get("siblings") if isinstance(info.get("siblings"), list) else []
+    readme_text = ""
+    if any(str(sibling.get("rfilename") or "").strip().lower() == "readme.md" for sibling in siblings if isinstance(sibling, dict)):
+        try:
+            readme_text = _fetch_huggingface_readme(client, repo_id)
+        except Exception:
+            # Keep partial model-card metadata from the structured API even if raw README access is blocked.
+            readme_text = ""
+    return _build_huggingface_model_card_values(
+        info,
+        readme_text,
+        repo_id=repo_id,
+        verified_at=verified_at,
+    )
+
+
+def _fetch_huggingface_model_info(client: httpx.Client, repo_id: str) -> dict[str, Any]:
+    response = client.get(
+        HUGGINGFACE_MODEL_API_URL_TEMPLATE.format(repo_id=repo_id),
+        params={"full": "true", "cardData": "true"},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError(f"Hugging Face API returned invalid payload for {repo_id}")
+    return payload
+
+
+def _fetch_huggingface_readme(client: httpx.Client, repo_id: str) -> str:
+    response = client.get(HUGGINGFACE_RAW_README_URL_TEMPLATE.format(repo_id=repo_id))
+    response.raise_for_status()
+    return response.text
+
+
+def _build_huggingface_model_card_values(
+    info: dict[str, Any],
+    readme_text: str,
+    *,
+    repo_id: str,
+    verified_at: str,
+) -> dict[str, Any]:
+    card_data = info.get("cardData") if isinstance(info.get("cardData"), dict) else {}
+    readme_body = _strip_readme_frontmatter(readme_text)
+    documentation_url, repo_url, paper_url = _extract_huggingface_external_urls(readme_body)
+    paper_url = paper_url or _extract_arxiv_paper_url(info.get("tags"))
+    base_models = _extract_huggingface_base_models(card_data, info.get("tags"))
+    supported_languages = _normalize_string_list(card_data.get("language"))
+    capabilities = _derive_huggingface_capabilities(info, card_data)
+    intended_use = _extract_markdown_section_summary(
+        readme_body,
+        heading_keywords=(
+            "intended use",
+            "recommended use",
+            "use cases",
+            "uses",
+            "how to use",
+            "usage",
+        ),
+    ) or _extract_markdown_intro_summary(readme_body)
+    limitations = _extract_markdown_section_summary(
+        readme_body,
+        heading_keywords=(
+            "limitations",
+            "limitation",
+            "risks",
+            "risk",
+            "bias",
+            "biases",
+            "safety",
+            "out of scope",
+            "out-of-scope",
+        ),
+    )
+    training_data_summary = _extract_markdown_section_summary(
+        readme_body,
+        heading_keywords=(
+            "training data",
+            "training dataset",
+            "datasets",
+            "data",
+        ),
+    )
+    training_cutoff = _extract_training_cutoff(readme_body)
+    license_id = _clean_text(card_data.get("license"))
+    license_name = _clean_text(card_data.get("license_name")) or license_id
+    license_url = _clean_text(card_data.get("license_link"))
+
+    values: dict[str, Any] = {
+        "huggingface_repo_id": repo_id,
+        "model_card_url": HUGGINGFACE_MODEL_CARD_URL_TEMPLATE.format(repo_id=repo_id),
+        "model_card_source": "huggingface",
+        "model_card_verified_at": verified_at,
+    }
+    if documentation_url:
+        values["documentation_url"] = documentation_url
+    if repo_url:
+        values["repo_url"] = repo_url
+    if paper_url:
+        values["paper_url"] = paper_url
+    if license_id:
+        values["license_id"] = license_id
+    if license_name:
+        values["license_name"] = license_name
+    if license_url:
+        values["license_url"] = license_url
+    if base_models:
+        values["base_models_json"] = json.dumps(base_models, ensure_ascii=True)
+    if supported_languages:
+        values["supported_languages_json"] = json.dumps(supported_languages, ensure_ascii=True)
+    if capabilities:
+        values["capabilities_json"] = json.dumps(capabilities, ensure_ascii=True)
+    if intended_use:
+        values["intended_use_short"] = intended_use
+    if limitations:
+        values["limitations_short"] = limitations
+    if training_data_summary:
+        values["training_data_summary"] = training_data_summary
+    if training_cutoff:
+        values["training_cutoff"] = training_cutoff
+    return values
+
+
+def _extract_huggingface_external_urls(readme_text: str) -> tuple[str | None, str | None, str | None]:
+    documentation_url: str | None = None
+    repo_url: str | None = None
+    paper_url: str | None = None
+
+    for label, url in _extract_markdown_links(readme_text):
+        normalized_label = label.lower()
+        parsed = urlparse(url)
+        hostname = (parsed.hostname or "").lower()
+        if documentation_url is None and (
+            "doc" in normalized_label
+            or "guide" in normalized_label
+            or "api" in normalized_label
+            or "/docs" in parsed.path
+        ):
+            documentation_url = url
+            continue
+        if repo_url is None and (
+            "github" in normalized_label
+            or "gitlab" in normalized_label
+            or "repo" in normalized_label
+            or hostname in {"github.com", "gitlab.com"}
+        ):
+            repo_url = url
+            continue
+        if paper_url is None and (
+            "paper" in normalized_label
+            or "arxiv" in normalized_label
+            or hostname in {"arxiv.org", "doi.org"}
+        ):
+            paper_url = url
+    return documentation_url, repo_url, paper_url
+
+
+def _extract_markdown_links(text: str) -> list[tuple[str, str]]:
+    links: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for pattern in (_MARKDOWN_HTML_LINK_RE, _MARKDOWN_LINK_RE):
+        for match in pattern.findall(text or ""):
+            url, label = match if pattern is _MARKDOWN_HTML_LINK_RE else (match[1], match[0])
+            cleaned_url = _clean_text(url)
+            cleaned_label = _strip_markup_to_text(label)
+            if not cleaned_url or cleaned_url in seen:
+                continue
+            seen.add(cleaned_url)
+            links.append((cleaned_label or cleaned_url, cleaned_url))
+    return links
+
+
+def _extract_arxiv_paper_url(tags: Any) -> str | None:
+    for tag in tags if isinstance(tags, list) else []:
+        text = str(tag or "").strip()
+        if not text.lower().startswith("arxiv:"):
+            continue
+        arxiv_id = text.split(":", 1)[1].strip()
+        if arxiv_id:
+            return f"https://arxiv.org/abs/{arxiv_id}"
+    return None
+
+
+def _extract_huggingface_base_models(card_data: dict[str, Any], tags: Any) -> list[str]:
+    base_models = _normalize_string_list(card_data.get("base_model"))
+    if base_models:
+        return base_models
+
+    values: list[str] = []
+    for tag in tags if isinstance(tags, list) else []:
+        text = str(tag or "").strip()
+        if not text.lower().startswith("base_model:"):
+            continue
+        candidate = text.split(":", 1)[1].strip()
+        if candidate.startswith("finetune:"):
+            candidate = candidate.split(":", 1)[1].strip()
+        if candidate:
+            values.append(candidate)
+    return _merge_string_lists(values)
+
+
+def _derive_huggingface_capabilities(info: dict[str, Any], card_data: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for candidate in (
+        card_data.get("pipeline_tag"),
+        info.get("pipeline_tag"),
+    ):
+        text = _clean_text(candidate)
+        if text:
+            values.append(text)
+
+    useful_tags = {
+        "chat",
+        "conversational",
+        "reasoning",
+        "image-text-to-text",
+        "visual-question-answering",
+        "text-generation",
+        "text2text-generation",
+        "text-to-image",
+        "text-to-video",
+        "automatic-speech-recognition",
+        "text-to-speech",
+        "audio-text-to-text",
+    }
+    for tag in info.get("tags") if isinstance(info.get("tags"), list) else []:
+        text = str(tag or "").strip()
+        if text.lower() in useful_tags:
+            values.append(text)
+    return _merge_string_lists(values)
+
+
+def _extract_markdown_section_summary(readme_text: str, *, heading_keywords: tuple[str, ...]) -> str | None:
+    for heading, content in _iter_markdown_sections(readme_text):
+        normalized_heading = heading.lower()
+        if not any(keyword in normalized_heading for keyword in heading_keywords):
+            continue
+        summary = _shorten_summary(_strip_markup_to_text(content))
+        if summary:
+            return summary
+    return None
+
+
+def _extract_markdown_intro_summary(readme_text: str) -> str | None:
+    text = _clean_text(readme_text)
+    if not text:
+        return None
+    body = _MARKDOWN_HEADING_RE.split(readme_text, maxsplit=1)[0]
+    summary = _shorten_summary(_strip_markup_to_text(body))
+    return summary
+
+
+def _extract_training_cutoff(readme_text: str) -> str | None:
+    match = _TRAINING_CUTOFF_RE.search(readme_text or "")
+    if not match:
+        return None
+    return _shorten_summary(_strip_markup_to_text(match.group(1)), limit=120)
+
+
+def _strip_readme_frontmatter(text: str) -> str:
+    cleaned = str(text or "")
+    return _README_FRONTMATTER_RE.sub("", cleaned, count=1)
+
+
+def _iter_markdown_sections(text: str) -> Iterable[tuple[str, str]]:
+    cleaned = str(text or "")
+    matches = list(_MARKDOWN_HEADING_RE.finditer(cleaned))
+    if not matches:
+        if cleaned.strip():
+            yield "", cleaned
+        return
+
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(cleaned)
+        heading = _strip_markup_to_text(match.group(2))
+        content = cleaned[start:end].strip()
+        if content:
+            yield heading, content
+
+
+def _strip_markup_to_text(text: Any) -> str:
+    raw = str(text or "")
+    stripped = raw.strip()
+    if not stripped:
+        return ""
+    if re.fullmatch(r"https?://\S+", stripped, re.IGNORECASE):
+        return stripped
+    # Avoid sending plain text that merely resembles a path or filename through BeautifulSoup.
+    if "<" not in stripped and ">" not in stripped and "&" not in stripped:
+        html_stripped = stripped
+    else:
+        soup = BeautifulSoup(raw, "html.parser")
+        html_stripped = soup.get_text(" ", strip=True)
+    markdown_stripped = re.sub(r"`([^`]+)`", r"\1", html_stripped)
+    markdown_stripped = re.sub(r"\*\*([^*]+)\*\*", r"\1", markdown_stripped)
+    markdown_stripped = re.sub(r"\*([^*]+)\*", r"\1", markdown_stripped)
+    markdown_stripped = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1", markdown_stripped)
+    markdown_stripped = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", r"\1", markdown_stripped)
+    markdown_stripped = re.sub(r"^>\s*", "", markdown_stripped, flags=re.M)
+    markdown_stripped = re.sub(r"\s+", " ", markdown_stripped)
+    return markdown_stripped.strip()
+
+
+def _shorten_summary(text: Any, *, limit: int = MODEL_CARD_SUMMARY_MAX_LENGTH) -> str | None:
+    cleaned = _clean_text(text)
+    if not cleaned:
+        return None
+    if len(cleaned) <= limit:
+        return cleaned
+    trimmed = cleaned[:limit].rsplit(" ", 1)[0].rstrip(" ,;:.")
+    return f"{trimmed}..."
+
+
+def _normalize_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, list):
+        values = [str(item) for item in value]
+    else:
+        values = [str(value)]
+    return _merge_string_lists(values)
+
+
+def _merge_string_lists(*lists: list[str] | None) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for values in lists:
+        for item in values or []:
+            cleaned = _clean_text(item)
+            if not cleaned:
+                continue
+            normalized = cleaned.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            merged.append(cleaned)
+    return merged
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    text = _clean_text(value)
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _import_openrouter_provisional_models(
@@ -4035,7 +4565,13 @@ def _has_provider_conflict(group: list[dict[str, Any]]) -> bool:
 def _choose_canonical_model(group: list[dict[str, Any]], score_counts: dict[str, int]) -> dict[str, Any]:
     def sort_key(row: dict[str, Any]) -> tuple[Any, ...]:
         name = str(row.get("name") or row.get("id") or "")
-        metadata_fields = int(bool(row.get("release_date"))) + int(bool(row.get("context_window")))
+        metadata_fields = (
+            int(bool(row.get("release_date")))
+            + int(bool(row.get("context_window")))
+            + int(bool(row.get("license_id") or row.get("license_name")))
+            + int(bool(row.get("model_card_url")))
+            + int(bool(_decode_json_string_list(row.get("capabilities_json"))))
+        )
         known_provider = int(
             bool(str(row.get("provider") or "").strip())
             and str(row.get("provider") or "").strip().lower() != "unknown"
@@ -4088,6 +4624,45 @@ def _canonical_model_enrichment(group: list[dict[str, Any]], canonical: dict[str
         for row in group:
             if row.get("context_window"):
                 payload["context_window"] = row["context_window"]
+                break
+
+    merge_fields = (
+        "context_window_tokens",
+        "max_output_tokens",
+        "price_input_per_mtok",
+        "price_output_per_mtok",
+        "openrouter_model_id",
+        "openrouter_canonical_slug",
+        "openrouter_added_at",
+        "huggingface_repo_id",
+        "metadata_source_name",
+        "metadata_source_url",
+        "metadata_verified_at",
+        "model_card_url",
+        "model_card_source",
+        "model_card_verified_at",
+        "documentation_url",
+        "repo_url",
+        "paper_url",
+        "license_id",
+        "license_name",
+        "license_url",
+        "base_models_json",
+        "supported_languages_json",
+        "capabilities_json",
+        "intended_use_short",
+        "limitations_short",
+        "training_data_summary",
+        "training_cutoff",
+    )
+    for field_name in merge_fields:
+        canonical_value = canonical.get(field_name)
+        if canonical_value not in (None, "", "[]"):
+            continue
+        for row in group:
+            row_value = row.get(field_name)
+            if row_value not in (None, "", "[]"):
+                payload[field_name] = row_value
                 break
 
     suggested_name = _suggest_display_name(preferred_name_value)
@@ -4262,6 +4837,21 @@ def _serialize_model(
     payload["provider_origin_basis"] = provider_metadata.get("origin_basis") if provider_metadata is not None else None
     payload["provider_origin_source_url"] = provider_metadata.get("source_url") if provider_metadata is not None else None
     payload["provider_origin_verified_at"] = provider_metadata.get("verified_at") if provider_metadata is not None else None
+    payload["base_models"] = _decode_json_string_list(payload.pop("base_models_json", None))
+    payload["supported_languages"] = _decode_json_string_list(payload.pop("supported_languages_json", None))
+    payload["capabilities"] = _decode_json_string_list(payload.pop("capabilities_json", None))
+    payload["license_id"] = _clean_text(payload.get("license_id"))
+    payload["license_name"] = _clean_text(payload.get("license_name"))
+    payload["license_url"] = _clean_text(payload.get("license_url"))
+    payload["model_card_url"] = _clean_text(payload.get("model_card_url"))
+    payload["model_card_source"] = _clean_text(payload.get("model_card_source"))
+    payload["documentation_url"] = _clean_text(payload.get("documentation_url"))
+    payload["repo_url"] = _clean_text(payload.get("repo_url"))
+    payload["paper_url"] = _clean_text(payload.get("paper_url"))
+    payload["intended_use_short"] = _clean_text(payload.get("intended_use_short"))
+    payload["limitations_short"] = _clean_text(payload.get("limitations_short"))
+    payload["training_data_summary"] = _clean_text(payload.get("training_data_summary"))
+    payload["training_cutoff"] = _clean_text(payload.get("training_cutoff"))
     payload["discovered_at"] = payload.get("discovered_at")
     payload["discovered_update_log_id"] = payload.get("discovered_update_log_id")
     payload["use_case_approvals"] = {
@@ -4570,6 +5160,29 @@ def _model_summary(model: dict[str, Any]) -> dict[str, Any]:
         "context_window_tokens": model.get("context_window_tokens"),
         "max_output_tokens": model.get("max_output_tokens"),
         "openrouter_added_at": model.get("openrouter_added_at"),
+        "huggingface_repo_id": model.get("huggingface_repo_id"),
+        "model_card_url": model.get("model_card_url"),
+        "model_card_source": model.get("model_card_source"),
+        "model_card_verified_at": model.get("model_card_verified_at"),
+        "documentation_url": model.get("documentation_url"),
+        "repo_url": model.get("repo_url"),
+        "paper_url": model.get("paper_url"),
+        "license_id": _clean_text(model.get("license_id")),
+        "license_name": _clean_text(model.get("license_name")),
+        "license_url": _clean_text(model.get("license_url")),
+        "base_models": _decode_json_string_list(model.get("base_models_json"))
+        if "base_models_json" in model
+        else list(model.get("base_models", []) or []),
+        "supported_languages": _decode_json_string_list(model.get("supported_languages_json"))
+        if "supported_languages_json" in model
+        else list(model.get("supported_languages", []) or []),
+        "capabilities": _decode_json_string_list(model.get("capabilities_json"))
+        if "capabilities_json" in model
+        else list(model.get("capabilities", []) or []),
+        "intended_use_short": _clean_text(model.get("intended_use_short")),
+        "limitations_short": _clean_text(model.get("limitations_short")),
+        "training_data_summary": _clean_text(model.get("training_data_summary")),
+        "training_cutoff": _clean_text(model.get("training_cutoff")),
         "openrouter_global_rank": model.get("openrouter_global_rank"),
         "openrouter_global_total_tokens": model.get("openrouter_global_total_tokens"),
         "openrouter_global_share": model.get("openrouter_global_share"),
