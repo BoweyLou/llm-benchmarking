@@ -8,15 +8,20 @@ from sqlalchemy import insert, select, update
 from .database import (
     audit_runs as audit_runs_table,
     audit_findings as audit_findings_table,
+    benchmarks as benchmarks_table,
     fetch_all,
     fetch_one,
     get_connection,
+    model_use_case_approvals as model_use_case_approvals_table,
+    models as models_table,
     raw_source_records as raw_source_records_table,
     scores as scores_table,
     source_runs as source_runs_table,
     update_log as update_log_table,
     utc_now_iso,
 )
+from .sources import get_source_adapters
+from .sources.base import RawSourceRecord
 
 MIN_EXPECTED_RECORDS = {
     "artificial_analysis": 100,
@@ -34,6 +39,7 @@ DRIFT_MIN_BASELINE_RECORDS = 20
 DRIFT_BLOCKER_DROP_THRESHOLD = -0.5
 DRIFT_WARNING_DROP_THRESHOLD = -0.2
 DRIFT_WARNING_SPIKE_THRESHOLD = 1.0
+SPOT_CHECK_SAMPLE_SIZE = 3
 
 
 def run_audit(engine, update_log_id: int) -> dict[str, Any]:
@@ -185,6 +191,30 @@ def run_audit(engine, update_log_id: int) -> dict[str, Any]:
                 )
             )
 
+        swebench_trust_violations = [
+            dict(row._mapping)
+            for row in conn.exec_driver_sql(
+                """
+                SELECT id, model_id, source_type, verified
+                FROM latest_scores
+                WHERE benchmark_id = 'swebench_verified'
+                  AND source_type != 'secondary'
+                """
+            ).fetchall()
+        ]
+        if swebench_trust_violations:
+            findings.append(
+                _finding(
+                    audit_run_id,
+                    "blocker",
+                    "swebench_trust_labeling",
+                    "SWE-bench Verified rows must remain secondary because they are derived from official system submissions.",
+                    {"count": len(swebench_trust_violations), "sample": swebench_trust_violations[:10]},
+                )
+            )
+
+        findings.extend(_run_source_spot_checks(conn, audit_run_id, source_runs))
+
         previous_run = _load_previous_comparable_run(conn, update_log_id)
         if previous_run is not None:
             current_counts = {str(row["source_name"]): int(row.get("records_found") or 0) for row in source_runs}
@@ -216,17 +246,24 @@ def run_audit(engine, update_log_id: int) -> dict[str, Any]:
                     )
                 )
 
+        findings.extend(_run_new_model_review_checks(conn, audit_run_id, update_log_id))
+
     blocker_count = sum(1 for finding in findings if finding["severity"] == "blocker")
     warning_count = sum(1 for finding in findings if finding["severity"] == "warning")
     info_count = sum(1 for finding in findings if finding["severity"] == "info")
     status = "failed" if blocker_count else "warning" if warning_count else "passed"
     completed_at = utc_now_iso()
+    new_models_finding = next((finding for finding in findings if finding["check_name"] == "new_models_discovered"), None)
     summary = {
         "status": status,
         "finding_count": len(findings),
         "blocker_count": blocker_count,
         "warning_count": warning_count,
         "info_count": info_count,
+        "new_model_count": int(new_models_finding["details"].get("count") or 0) if new_models_finding else 0,
+        "family_delta_candidate_count": int(new_models_finding["details"].get("family_delta_candidate_count") or 0)
+        if new_models_finding
+        else 0,
     }
 
     with engine.begin() as conn:
@@ -266,6 +303,272 @@ def run_audit(engine, update_log_id: int) -> dict[str, Any]:
         "summary_json": summary,
         "findings": findings,
     }
+
+
+def _run_source_spot_checks(conn, audit_run_id: int, source_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    adapters_by_name = {adapter.source_id: adapter for adapter in get_source_adapters(include_phase_two=True)}
+
+    for source_run in source_runs:
+        source_name = str(source_run["source_name"])
+        adapter = adapters_by_name.get(source_name)
+        if adapter is None or str(source_run.get("status") or "") != "completed":
+            continue
+
+        raw_rows = fetch_all(
+            conn,
+            select(raw_source_records_table)
+            .where(raw_source_records_table.c.source_run_id == source_run["id"])
+            .order_by(raw_source_records_table.c.id.asc()),
+        )
+        if not raw_rows:
+            continue
+
+        raw_records = [_deserialize_raw_source_record(row, adapter.source_url) for row in raw_rows]
+        candidates = adapter.normalize(raw_records)
+        if not candidates:
+            continue
+
+        model_ids_by_identity = {}
+        for row in raw_rows:
+            normalized_model_id = row.get("normalized_model_id")
+            if not normalized_model_id:
+                continue
+            identity = (
+                str(row.get("raw_model_name") or ""),
+                str(row.get("raw_key") or ""),
+            )
+            model_ids_by_identity.setdefault(identity, str(normalized_model_id))
+
+        benchmark_ids = sorted({str(candidate.benchmark_id) for candidate in candidates})
+        benchmarks_by_id = {
+            str(row["id"]): dict(row)
+            for row in fetch_all(
+                conn,
+                select(
+                    benchmarks_table.c.id,
+                    benchmarks_table.c.higher_is_better,
+                ).where(benchmarks_table.c.id.in_(benchmark_ids)),
+            )
+        }
+
+        resolved_candidates: dict[tuple[str, str], tuple[str, Any]] = {}
+        for candidate in candidates:
+            identity = (candidate.raw_model_name, str(candidate.raw_model_key or ""))
+            model_id = model_ids_by_identity.get(identity)
+            if not model_id:
+                findings.append(
+                    _finding(
+                        audit_run_id,
+                        "blocker",
+                        "source_spot_check_missing_model",
+                        f"Spot check could not map a normalized model for source {source_name}.",
+                        {
+                            "source_run_id": source_run["id"],
+                            "source_name": source_name,
+                            "raw_model_name": candidate.raw_model_name,
+                            "raw_model_key": candidate.raw_model_key,
+                            "benchmark_id": candidate.benchmark_id,
+                        },
+                    )
+                )
+                continue
+
+            candidate_key = (model_id, candidate.benchmark_id)
+            existing = resolved_candidates.get(candidate_key)
+            if existing is not None:
+                benchmark = benchmarks_by_id.get(candidate.benchmark_id)
+                current_candidate = {
+                    "value": float(existing[1].value),
+                    "collected_at": str(existing[1].collected_at),
+                }
+                next_candidate = {
+                    "value": float(candidate.value),
+                    "collected_at": str(candidate.collected_at),
+                }
+                if not _is_better_candidate(next_candidate, current_candidate, benchmark):
+                    continue
+
+            resolved_candidates[candidate_key] = (model_id, candidate)
+
+        for model_id, candidate in list(resolved_candidates.values())[:SPOT_CHECK_SAMPLE_SIZE]:
+
+            latest = fetch_one(
+                conn,
+                select(
+                    scores_table.c.value,
+                    scores_table.c.source_type,
+                    scores_table.c.verified,
+                )
+                .where(scores_table.c.model_id == model_id)
+                .where(scores_table.c.benchmark_id == candidate.benchmark_id)
+                .order_by(scores_table.c.collected_at.desc(), scores_table.c.id.desc())
+                .limit(1),
+            )
+            if latest is None:
+                findings.append(
+                    _finding(
+                        audit_run_id,
+                        "blocker",
+                        "source_spot_check_missing_score",
+                        f"Spot check found no latest score for a sampled source candidate from {source_name}.",
+                        {
+                            "source_run_id": source_run["id"],
+                            "source_name": source_name,
+                            "model_id": model_id,
+                            "raw_model_name": candidate.raw_model_name,
+                            "benchmark_id": candidate.benchmark_id,
+                        },
+                    )
+                )
+                continue
+
+            value_mismatch = abs(float(latest["value"]) - float(candidate.value)) > 0.1
+            source_type_mismatch = str(latest["source_type"]) != candidate.source_type
+            verified_mismatch = bool(latest["verified"]) != bool(candidate.verified)
+            if not (value_mismatch or source_type_mismatch or verified_mismatch):
+                continue
+
+            findings.append(
+                _finding(
+                    audit_run_id,
+                    "blocker",
+                    "source_spot_check_mismatch",
+                    f"Sampled source candidate from {source_name} does not match the latest score row.",
+                    {
+                        "source_run_id": source_run["id"],
+                        "source_name": source_name,
+                        "model_id": model_id,
+                        "raw_model_name": candidate.raw_model_name,
+                        "benchmark_id": candidate.benchmark_id,
+                        "expected_value": candidate.value,
+                        "actual_value": latest["value"],
+                        "expected_source_type": candidate.source_type,
+                        "actual_source_type": latest["source_type"],
+                        "expected_verified": bool(candidate.verified),
+                        "actual_verified": bool(latest["verified"]),
+                    },
+                )
+            )
+
+    return findings
+
+
+def _run_new_model_review_checks(conn, audit_run_id: int, update_log_id: int) -> list[dict[str, Any]]:
+    new_models = fetch_all(
+        conn,
+        select(
+            models_table.c.id,
+            models_table.c.name,
+            models_table.c.provider,
+            models_table.c.family_id,
+            models_table.c.family_name,
+            models_table.c.canonical_model_id,
+            models_table.c.canonical_model_name,
+        )
+        .where(models_table.c.active == 1)
+        .where(models_table.c.discovered_update_log_id == update_log_id)
+        .order_by(models_table.c.provider.asc(), models_table.c.name.asc()),
+    )
+    if not new_models:
+        return []
+
+    family_ids = sorted({str(row.get("family_id") or "").strip() for row in new_models if str(row.get("family_id") or "").strip()})
+    approvals_by_family: dict[str, list[str]] = {}
+    if family_ids:
+        family_approval_rows = fetch_all(
+            conn,
+            select(
+                models_table.c.family_id,
+                model_use_case_approvals_table.c.use_case_id,
+            )
+            .select_from(
+                models_table.join(
+                    model_use_case_approvals_table,
+                    model_use_case_approvals_table.c.model_id == models_table.c.id,
+                )
+            )
+            .where(models_table.c.family_id.in_(family_ids))
+            .where(model_use_case_approvals_table.c.approved_for_use == 1)
+            .group_by(models_table.c.family_id, model_use_case_approvals_table.c.use_case_id),
+        )
+        for row in family_approval_rows:
+            family_id = str(row.get("family_id") or "").strip()
+            use_case_id = str(row.get("use_case_id") or "").strip()
+            if not family_id or not use_case_id:
+                continue
+            approvals_by_family.setdefault(family_id, []).append(use_case_id)
+
+    candidate_count = 0
+    sample = []
+    for row in new_models[:10]:
+        family_id = str(row.get("family_id") or "").strip()
+        suggested_use_cases = sorted(approvals_by_family.get(family_id, []))
+        if suggested_use_cases:
+            candidate_count += 1
+        sample.append(
+            {
+                "model_id": str(row.get("id") or ""),
+                "name": str(row.get("name") or ""),
+                "provider": str(row.get("provider") or ""),
+                "family_id": family_id or None,
+                "family_name": str(row.get("family_name") or "") or None,
+                "canonical_model_id": str(row.get("canonical_model_id") or "") or None,
+                "canonical_model_name": str(row.get("canonical_model_name") or "") or None,
+                "suggested_use_cases": suggested_use_cases,
+            }
+        )
+
+    return [
+        _finding(
+            audit_run_id,
+            "info",
+            "new_models_discovered",
+            f"{len(new_models)} new model(s) were discovered and need Admin review.",
+            {
+                "count": len(new_models),
+                "family_delta_candidate_count": candidate_count,
+                "sample": sample,
+            },
+        )
+    ]
+
+
+def _is_better_candidate(candidate: dict[str, Any], current_best: dict[str, Any], benchmark: dict[str, Any] | None) -> bool:
+    candidate_value = float(candidate["value"])
+    current_value = float(current_best["value"])
+    higher_is_better = bool(benchmark["higher_is_better"]) if benchmark is not None else True
+    if candidate_value != current_value:
+        return candidate_value > current_value if higher_is_better else candidate_value < current_value
+    return str(candidate.get("collected_at") or "") > str(current_best.get("collected_at") or "")
+
+
+def _deserialize_raw_source_record(row: dict[str, Any], default_source_url: str) -> RawSourceRecord:
+    payload = _load_json_mapping(row.get("payload_json"))
+    metadata = _load_json_mapping(row.get("notes"))
+    return RawSourceRecord(
+        source_id="",
+        benchmark_id=str(row.get("benchmark_id") or ""),
+        raw_model_name=str(row.get("raw_model_name") or ""),
+        raw_value=str(row.get("raw_value") or ""),
+        source_url=str(row.get("source_url") or default_source_url),
+        collected_at=str(row.get("collected_at") or ""),
+        raw_model_key=str(row.get("raw_key") or "") or None,
+        payload=payload,
+        metadata=metadata,
+    )
+
+
+def _load_json_mapping(value: Any) -> dict[str, Any]:
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def get_audit_run(engine, update_log_id: int) -> dict[str, Any] | None:

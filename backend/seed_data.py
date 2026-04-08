@@ -3,15 +3,193 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+import json
+from pathlib import Path
+import re
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
 
-from .database import benchmarks, models, scores, utc_now_iso
+from .database import benchmarks, models, providers, scores, utc_now_iso
+
+PROVIDER_ORIGIN_VERIFIED_AT = "2026-04-02T00:00:00Z"
+PROVIDER_ORIGIN_BASELINE_PATH = Path(__file__).with_name("provider_origin_baseline.json")
+INTERNAL_VIEW_BENCHMARK_ID = "internal_view"
+
+
+def provider_id_from_name(name: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    return normalized or "unknown-provider"
+
+
+def _clean_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text_value = str(value).strip()
+    return text_value or None
+
+
+def normalize_origin_countries(
+    raw_countries: Iterable[Mapping[str, Any]] | None,
+    fallback_country_code: str | None = None,
+    fallback_country_name: str | None = None,
+) -> list[dict[str, str | None]]:
+    normalized: list[dict[str, str | None]] = []
+    seen: set[tuple[str | None, str]] = set()
+
+    for item in raw_countries or []:
+        raw_code = _clean_optional_text(item.get("code"))
+        raw_name = _clean_optional_text(item.get("name"))
+        if raw_code is not None:
+            raw_code = raw_code.upper()
+            if len(raw_code) != 2 or not raw_code.isalpha():
+                raise ValueError(f"Invalid provider origin country code: {raw_code}")
+        if raw_name is None and raw_code is not None:
+            raw_name = raw_code
+        if raw_name is None:
+            continue
+        key = (raw_code, raw_name.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append({"code": raw_code, "name": raw_name})
+
+    if normalized:
+        return normalized
+
+    raw_code = _clean_optional_text(fallback_country_code)
+    raw_name = _clean_optional_text(fallback_country_name)
+    if raw_code is not None:
+        raw_code = raw_code.upper()
+        if len(raw_code) != 2 or not raw_code.isalpha():
+            raise ValueError(f"Invalid provider origin country code: {raw_code}")
+    if raw_name is None and raw_code is not None:
+        raw_name = raw_code
+    if raw_name is None:
+        return []
+    return [{"code": raw_code, "name": raw_name}]
+
+
+def derive_provider_origin_fields(origin_countries: Iterable[Mapping[str, Any]] | None) -> tuple[str | None, str | None]:
+    countries = normalize_origin_countries(origin_countries)
+    if not countries:
+        return None, None
+    if len(countries) == 1:
+        return countries[0].get("code"), countries[0].get("name")
+    names = [str(country.get("name") or "").strip() for country in countries if str(country.get("name") or "").strip()]
+    return None, ", ".join(dict.fromkeys(names)) or None
+
+
+def load_provider_origin_baseline(path: Path | None = None) -> list[dict[str, Any]]:
+    baseline_path = path or PROVIDER_ORIGIN_BASELINE_PATH
+    if not baseline_path.exists():
+        return []
+
+    raw_payload = json.loads(baseline_path.read_text(encoding="utf-8"))
+    if not isinstance(raw_payload, list):
+        raise ValueError("Provider origin baseline must be a JSON array.")
+
+    normalized_payload: list[dict[str, Any]] = []
+    for item in raw_payload:
+        if not isinstance(item, Mapping):
+            continue
+        provider_id = _clean_optional_text(item.get("id"))
+        provider_name = _clean_optional_text(item.get("name"))
+        if provider_id is None or provider_name is None:
+            continue
+        origin_countries = normalize_origin_countries(
+            item.get("origin_countries"),
+            _clean_optional_text(item.get("country_code")),
+            _clean_optional_text(item.get("country_name")),
+        )
+        country_code, country_name = derive_provider_origin_fields(origin_countries)
+        normalized_payload.append(
+            {
+                "id": provider_id,
+                "name": provider_name,
+                "country_code": country_code,
+                "country_name": country_name,
+                "origin_countries_json": json.dumps(origin_countries, separators=(",", ":")),
+                "origin_basis": _clean_optional_text(item.get("origin_basis")),
+                "source_url": _clean_optional_text(item.get("source_url")),
+                "verified_at": _clean_optional_text(item.get("verified_at")),
+                "active": 1 if item.get("active", True) else 0,
+            }
+        )
+
+    return normalized_payload
+
+
+def apply_provider_origin_baseline(target: Connection | Engine) -> int:
+    if isinstance(target, Engine):
+        with target.begin() as conn:
+            return apply_provider_origin_baseline(conn)
+
+    rows = load_provider_origin_baseline()
+    if not rows:
+        return 0
+
+    stmt = sqlite_insert(providers).values(rows)
+    update_columns = {
+        column.name: getattr(stmt.excluded, column.name)
+        for column in providers.columns
+        if column.name != "id"
+    }
+    stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=update_columns)
+    target.execute(stmt)
+    return len(rows)
+
+
+def export_provider_origin_baseline(target: Connection | Engine, path: Path | None = None) -> Path:
+    baseline_path = path or PROVIDER_ORIGIN_BASELINE_PATH
+    if isinstance(target, Engine):
+        with target.begin() as conn:
+            return export_provider_origin_baseline(conn, baseline_path)
+
+    rows = (
+        target.execute(select(providers).where(providers.c.active == 1).order_by(providers.c.name.asc()))
+        .mappings()
+        .all()
+    )
+    payload: list[dict[str, Any]] = []
+    for row in rows:
+        origin_countries = normalize_origin_countries(
+            json.loads(str(row.get("origin_countries_json") or "[]")),
+            row.get("country_code"),
+            row.get("country_name"),
+        )
+        payload.append(
+            {
+                "id": str(row["id"]),
+                "name": str(row["name"]),
+                "origin_countries": origin_countries,
+                "origin_basis": _clean_optional_text(row.get("origin_basis")),
+                "source_url": _clean_optional_text(row.get("source_url")),
+                "verified_at": _clean_optional_text(row.get("verified_at")),
+                "active": bool(row.get("active", 1)),
+            }
+        )
+
+    baseline_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    return baseline_path
 
 BENCHMARKS: list[dict[str, Any]] = [
+    {
+        "id": INTERNAL_VIEW_BENCHMARK_ID,
+        "name": "Internal View",
+        "short": "Internal",
+        "source": "Internal",
+        "url": "",
+        "category": "Internal Assessment",
+        "metric": "Internal Score",
+        "higher_is_better": 1,
+        "tier": 2,
+        "scraper_id": "InternalManualBenchmark",
+        "description": "Optional internal assessment signal entered manually to reflect business context, rollout preferences, or operator experience.",
+        "active": 1,
+    },
     {
         "id": "aa_intelligence",
         "name": "AA Intelligence Index",
@@ -35,7 +213,7 @@ BENCHMARKS: list[dict[str, Any]] = [
         "category": "Reasoning & Math",
         "metric": "Accuracy %",
         "higher_is_better": 1,
-        "tier": 2,
+        "tier": 1,
         "scraper_id": "EpochGpqaAdapter",
         "description": "Graduate-level science questions. Highly resistant to contamination.",
         "active": 1,
@@ -49,9 +227,9 @@ BENCHMARKS: list[dict[str, Any]] = [
         "category": "Multimodal",
         "metric": "Accuracy %",
         "higher_is_better": 1,
-        "tier": 2,
+        "tier": 3,
         "scraper_id": "MmmuAdapter",
-        "description": "College-level multimodal questions across many subjects.",
+        "description": "Useful academic multimodal signal, but the public leaderboard updates slowly and this ingestion uses the validation split rather than a fresh held-out test feed.",
         "active": 1,
     },
     {
@@ -63,23 +241,23 @@ BENCHMARKS: list[dict[str, Any]] = [
         "category": "Coding",
         "metric": "% Issues Resolved",
         "higher_is_better": 1,
-        "tier": 1,
+        "tier": 2,
         "scraper_id": "SwebenchAdapter",
-        "description": "Real GitHub issue resolution. Strong coding benchmark for production relevance.",
+        "description": "Derived from the official SWE-bench Verified board using the best single-model system submission per model. Strong coding evidence, but still agent-derived rather than a pure model-only eval.",
         "active": 1,
     },
     {
         "id": "ifeval",
         "name": "IFEval",
         "short": "IFEval",
-        "source": "Google Research",
+        "source": "LLM Stats / ZeroEval",
         "url": "https://llm-stats.com/benchmarks/ifeval",
         "category": "Instruction Following",
         "metric": "Prompt Accuracy %",
         "higher_is_better": 1,
-        "tier": 2,
+        "tier": 3,
         "scraper_id": "IfevalAdapter",
-        "description": "Machine-scoreable instruction constraints. Predictive of enterprise reliability.",
+        "description": "Instruction-following signal pulled from a live feed that is currently overwhelmingly self-reported and unverified. Useful context, but lower-trust than primary benchmark publishers.",
         "active": 1,
     },
     {
@@ -91,9 +269,9 @@ BENCHMARKS: list[dict[str, Any]] = [
         "category": "Retrieval & Grounding",
         "metric": "Factual Consistency %",
         "higher_is_better": 1,
-        "tier": 2,
+        "tier": 3,
         "scraper_id": "VectaraHallucinationAdapter",
-        "description": "Factual consistency to provided source text. RAG-adjacent faithfulness signal, not retrieval relevance.",
+        "description": "Grounded summarization faithfulness to supplied source text. Useful directional evidence, but narrower than end-to-end retrieval relevance or enterprise RAG quality.",
         "active": 1,
     },
     {
@@ -105,9 +283,9 @@ BENCHMARKS: list[dict[str, Any]] = [
         "category": "Retrieval & Grounding",
         "metric": "Hallucination Rate %",
         "higher_is_better": 0,
-        "tier": 2,
+        "tier": 3,
         "scraper_id": "FaithJudgeAdapter",
-        "description": "Overall hallucination rate across RAG tasks on FaithBench and RagTruth. Lower is better.",
+        "description": "Small vendor-run hallucination benchmark across FaithBench and RagTruth tasks with supplied context. Useful directional signal, but coverage is narrow and not a retrieval relevance eval.",
         "active": 1,
     },
     {
@@ -133,9 +311,9 @@ BENCHMARKS: list[dict[str, Any]] = [
         "category": "Safety & Compliance",
         "metric": "Grade (0-100)",
         "higher_is_better": 1,
-        "tier": 1,
+        "tier": 2,
         "scraper_id": "AILuminateAdapter",
-        "description": "Private test sets. English/French results are public HTML; other families remain anonymized.",
+        "description": "Official MLCommons safety benchmark, but the public named results are coarse grade bands and mix bare models with broader AI systems.",
         "active": 1,
     },
     {
@@ -178,6 +356,59 @@ BENCHMARKS: list[dict[str, Any]] = [
         "tier": 1,
         "scraper_id": "ChatbotArenaAdapter",
         "description": "ELO from blind human preference votes.",
+        "active": 1,
+    },
+]
+
+PROVIDERS: list[dict[str, Any]] = [
+    {
+        "id": provider_id_from_name("OpenAI"),
+        "name": "OpenAI",
+        "country_code": "US",
+        "country_name": "United States",
+        "origin_basis": "Official OpenAI document listing San Francisco, California.",
+        "source_url": "https://cdn.openai.com/global-affairs/openai-doe-rfi-5-7-2025.pdf",
+        "verified_at": PROVIDER_ORIGIN_VERIFIED_AT,
+        "active": 1,
+    },
+    {
+        "id": provider_id_from_name("Anthropic"),
+        "name": "Anthropic",
+        "country_code": "US",
+        "country_name": "United States",
+        "origin_basis": "Official Anthropic privacy notice listing San Francisco, California.",
+        "source_url": "https://www-cdn.anthropic.com/8fd65f023a39d74220c5ebff85c788875c05533f.pdf",
+        "verified_at": PROVIDER_ORIGIN_VERIFIED_AT,
+        "active": 1,
+    },
+    {
+        "id": provider_id_from_name("Google"),
+        "name": "Google",
+        "country_code": "US",
+        "country_name": "United States",
+        "origin_basis": "Official Google company information and locations pages.",
+        "source_url": "https://about.google/company-info/locations/",
+        "verified_at": PROVIDER_ORIGIN_VERIFIED_AT,
+        "active": 1,
+    },
+    {
+        "id": provider_id_from_name("Inception Labs"),
+        "name": "Inception Labs",
+        "country_code": "US",
+        "country_name": "United States",
+        "origin_basis": "Official Inception Labs legal documentation for the company.",
+        "source_url": "https://www.inceptionlabs.ai/docs/terms-of-use",
+        "verified_at": PROVIDER_ORIGIN_VERIFIED_AT,
+        "active": 1,
+    },
+    {
+        "id": provider_id_from_name("Zhipu AI"),
+        "name": "Zhipu AI",
+        "country_code": "CN",
+        "country_name": "China",
+        "origin_basis": "Official Zhipu agreement naming the Beijing legal entity.",
+        "source_url": "https://docs.bigmodel.cn/cn/terms/recharge-agreement",
+        "verified_at": PROVIDER_ORIGIN_VERIFIED_AT,
         "active": 1,
     },
 ]
@@ -332,12 +563,12 @@ USE_CASES: list[dict[str, Any]] = [
         "segment": "core",
         "status": "ready",
         "min_coverage": 0.5,
-        "required_benchmarks": ["ailuminate"],
+        "required_benchmarks": [],
         "benchmark_notes": {
-            "ailuminate": "Safety and hazard-resistance coverage for enterprise deployment readiness.",
-            "aa_intelligence": "General capability context alongside safety.",
+            "ailuminate": "Low-confidence safety context from coarse public MLCommons grades.",
+            "aa_intelligence": "Primary fallback capability context while safety evidence remains thin.",
         },
-        "weights": {"ailuminate": 0.70, "aa_intelligence": 0.30},
+        "weights": {"aa_intelligence": 0.80, "ailuminate": 0.20},
     },
     {
         "id": "cost_efficiency",
@@ -363,12 +594,12 @@ USE_CASES: list[dict[str, Any]] = [
         "segment": "core",
         "status": "ready",
         "min_coverage": 0.5,
-        "required_benchmarks": ["mmmu"],
+        "required_benchmarks": [],
         "benchmark_notes": {
-            "mmmu": "Document, chart, and image reasoning signal for multimodal enterprise work.",
-            "aa_intelligence": "General capability context for multimodal selection.",
+            "mmmu": "Low-confidence multimodal context from a slowly updated academic leaderboard.",
+            "aa_intelligence": "Primary capability anchor until stronger multimodal evidence is added.",
         },
-        "weights": {"mmmu": 0.65, "aa_intelligence": 0.35},
+        "weights": {"aa_intelligence": 0.85, "mmmu": 0.15},
     },
     {
         "id": "instruction_following",
@@ -378,12 +609,13 @@ USE_CASES: list[dict[str, Any]] = [
         "segment": "core",
         "status": "ready",
         "min_coverage": 0.5,
-        "required_benchmarks": ["ifeval"],
+        "required_benchmarks": [],
         "benchmark_notes": {
-            "ifeval": "Constraint-following and formatting obedience.",
-            "chatbot_arena": "Helpfulness and response quality context.",
+            "ifeval": "Low-confidence context from a feed dominated by self-reported scores.",
+            "chatbot_arena": "Response quality context.",
+            "aa_intelligence": "Primary fallback for overall instruction-heavy task competence.",
         },
-        "weights": {"ifeval": 0.75, "chatbot_arena": 0.25},
+        "weights": {"aa_intelligence": 0.55, "chatbot_arena": 0.30, "ifeval": 0.15},
     },
     {
         "id": "speed",
@@ -408,22 +640,22 @@ USE_CASES: list[dict[str, Any]] = [
         "segment": "enterprise",
         "status": "preview",
         "min_coverage": 0.55,
-        "required_benchmarks": ["terminal_bench", "ifeval", "ailuminate"],
+        "required_benchmarks": ["terminal_bench"],
         "benchmark_notes": {
             "terminal_bench": "Agent-derived workflow evidence from verified single-model submissions.",
-            "ifeval": "Instruction fidelity under structured enterprise prompts.",
-            "ailuminate": "Safety and policy compliance under enterprise guardrails.",
+            "ifeval": "Low-confidence instruction-following context only.",
+            "ailuminate": "Low-confidence safety context only.",
             "aa_intelligence": "General capability context.",
             "aa_cost": "Operational spend for high-volume automation.",
             "aa_speed": "Latency for interactive workflows.",
         },
         "weights": {
-            "terminal_bench": 0.35,
-            "ifeval": 0.20,
-            "ailuminate": 0.15,
-            "aa_intelligence": 0.15,
+            "terminal_bench": 0.50,
+            "aa_intelligence": 0.25,
             "aa_cost": 0.10,
             "aa_speed": 0.05,
+            "ifeval": 0.05,
+            "ailuminate": 0.05,
         },
     },
     {
@@ -434,20 +666,20 @@ USE_CASES: list[dict[str, Any]] = [
         "segment": "enterprise",
         "status": "preview",
         "min_coverage": 0.5,
-        "required_benchmarks": ["chatbot_arena", "ifeval", "ailuminate"],
+        "required_benchmarks": ["chatbot_arena"],
         "benchmark_notes": {
             "chatbot_arena": "Preference and conversational quality for support-style interactions.",
-            "ifeval": "Ability to obey policy and format constraints in scripted support flows.",
-            "ailuminate": "Safety and refusal quality for customer-facing deployments.",
+            "ifeval": "Low-confidence policy/format-following context only.",
+            "ailuminate": "Low-confidence public safety context only.",
             "aa_cost": "Unit economics for support at scale.",
             "aa_speed": "Latency for interactive service conversations.",
         },
         "weights": {
-            "chatbot_arena": 0.30,
-            "ifeval": 0.25,
-            "ailuminate": 0.20,
-            "aa_cost": 0.15,
+            "chatbot_arena": 0.55,
+            "aa_cost": 0.20,
             "aa_speed": 0.10,
+            "ifeval": 0.10,
+            "ailuminate": 0.05,
         },
     },
     {
@@ -458,20 +690,20 @@ USE_CASES: list[dict[str, Any]] = [
         "segment": "enterprise",
         "status": "ready",
         "min_coverage": 0.5,
-        "required_benchmarks": ["mmmu", "ifeval"],
+        "required_benchmarks": [],
         "benchmark_notes": {
-            "mmmu": "Vision-language and document reasoning for forms, charts, and screenshots.",
-            "ifeval": "Structured instruction following for extraction and policy QA.",
+            "mmmu": "Low-confidence multimodal context for forms, charts, and screenshots.",
+            "ifeval": "Low-confidence instruction-following context for extraction and policy QA.",
             "aa_intelligence": "General capability context for mixed document tasks.",
-            "ailuminate": "Safety and compliance context when document content is sensitive.",
+            "ailuminate": "Low-confidence safety context when document content is sensitive.",
             "aa_speed": "Throughput for bulk processing.",
         },
         "weights": {
-            "mmmu": 0.35,
-            "ifeval": 0.25,
-            "aa_intelligence": 0.20,
+            "aa_intelligence": 0.50,
+            "aa_speed": 0.20,
+            "mmmu": 0.15,
             "ailuminate": 0.10,
-            "aa_speed": 0.10,
+            "ifeval": 0.05,
         },
     },
     {
@@ -482,20 +714,22 @@ USE_CASES: list[dict[str, Any]] = [
         "segment": "enterprise",
         "status": "preview",
         "min_coverage": 0.55,
-        "required_benchmarks": ["rag_groundedness", "rag_task_faithfulness", "ifeval"],
+        "required_benchmarks": [],
         "benchmark_notes": {
-            "rag_groundedness": "Vectara factual consistency to supplied source text. RAG-adjacent faithfulness signal, not retrieval relevance.",
-            "rag_task_faithfulness": "FaithJudge direct hallucination rate across RAG tasks on supplied contexts. Lower is better, but it still does not measure retrieval relevance.",
-            "ifeval": "Instruction fidelity for organizing, ranking, and shaping retrieved context.",
-            "aa_intelligence": "General capability context for synthesis and analysis once retrieval is assembled.",
+            "rag_groundedness": "Low-confidence groundedness context only; it is not a retrieval relevance eval.",
+            "rag_task_faithfulness": "Low-confidence hallucination context only; it does not measure retrieval quality directly.",
+            "ifeval": "Low-confidence instruction-following context only.",
+            "aa_intelligence": "Primary capability anchor for synthesis and analysis once retrieval is assembled.",
             "chatbot_arena": "Answer quality after retrieval is assembled.",
+            "gpqa_diamond": "Reasoning quality once retrieved material is available.",
         },
         "weights": {
-            "rag_task_faithfulness": 0.35,
-            "rag_groundedness": 0.25,
-            "ifeval": 0.15,
-            "aa_intelligence": 0.15,
-            "chatbot_arena": 0.10,
+            "aa_intelligence": 0.50,
+            "chatbot_arena": 0.20,
+            "gpqa_diamond": 0.20,
+            "rag_task_faithfulness": 0.05,
+            "rag_groundedness": 0.03,
+            "ifeval": 0.02,
         },
     },
     {
@@ -506,18 +740,18 @@ USE_CASES: list[dict[str, Any]] = [
         "segment": "enterprise",
         "status": "ready",
         "min_coverage": 0.5,
-        "required_benchmarks": ["ailuminate"],
+        "required_benchmarks": [],
         "benchmark_notes": {
-            "ailuminate": "Primary safety and policy compliance evidence for regulated deployment.",
-            "ifeval": "Structured instruction following for policy and rollout controls.",
+            "ailuminate": "Low-confidence public safety context only.",
+            "ifeval": "Low-confidence instruction-following context for policy and rollout controls.",
             "aa_intelligence": "General capability context for procurement tradeoffs.",
             "aa_cost": "Operational spend and vendor economics.",
         },
         "weights": {
-            "ailuminate": 0.40,
-            "ifeval": 0.25,
-            "aa_intelligence": 0.20,
-            "aa_cost": 0.15,
+            "aa_intelligence": 0.60,
+            "aa_cost": 0.25,
+            "ailuminate": 0.10,
+            "ifeval": 0.05,
         },
     },
     {
@@ -532,14 +766,14 @@ USE_CASES: list[dict[str, Any]] = [
         "benchmark_notes": {
             "terminal_bench": "Agent-derived workflow evidence for terminal and tool execution.",
             "swebench_verified": "Repo-level bug fixing and code-change execution.",
-            "ifeval": "Instruction fidelity for build, deploy, and change-management steps.",
+            "ifeval": "Low-confidence instruction-following context for build and change-management steps.",
             "aa_intelligence": "General reasoning context for engineering workflows.",
         },
         "weights": {
             "terminal_bench": 0.40,
-            "swebench_verified": 0.30,
-            "ifeval": 0.15,
-            "aa_intelligence": 0.15,
+            "swebench_verified": 0.35,
+            "aa_intelligence": 0.20,
+            "ifeval": 0.05,
         },
     },
     {
@@ -550,20 +784,20 @@ USE_CASES: list[dict[str, Any]] = [
         "segment": "enterprise",
         "status": "preview",
         "min_coverage": 0.55,
-        "required_benchmarks": ["terminal_bench", "ifeval"],
+        "required_benchmarks": ["terminal_bench"],
         "benchmark_notes": {
             "terminal_bench": "Agent-derived workflow evidence for multi-step execution.",
-            "ifeval": "Structured instruction following for operational procedures.",
-            "ailuminate": "Safety and guardrails for actions that touch business systems.",
+            "ifeval": "Low-confidence instruction-following context for operational procedures.",
+            "ailuminate": "Low-confidence safety context for actions that touch business systems.",
             "aa_cost": "Operating cost for high-volume workflow execution.",
             "aa_speed": "Latency and throughput for queue-driven work.",
         },
         "weights": {
-            "terminal_bench": 0.35,
-            "ifeval": 0.20,
-            "ailuminate": 0.20,
+            "terminal_bench": 0.60,
             "aa_cost": 0.15,
             "aa_speed": 0.10,
+            "ifeval": 0.10,
+            "ailuminate": 0.05,
         },
     },
     {
@@ -578,16 +812,16 @@ USE_CASES: list[dict[str, Any]] = [
         "benchmark_notes": {
             "aa_cost": "Primary economic signal for cheap first-pass routing.",
             "aa_speed": "Latency and throughput for triage and extraction.",
-            "ifeval": "Reliability for formatting, extraction, and routing rules.",
+            "ifeval": "Low-confidence reliability context for formatting and routing rules.",
             "chatbot_arena": "Output quality when a small model handles first-pass work.",
-            "ailuminate": "Guardrails so routing choices stay safe in enterprise settings.",
+            "ailuminate": "Low-confidence safety context only.",
         },
         "weights": {
-            "aa_cost": 0.35,
-            "aa_speed": 0.30,
-            "ifeval": 0.20,
-            "chatbot_arena": 0.10,
-            "ailuminate": 0.05,
+            "aa_cost": 0.45,
+            "aa_speed": 0.35,
+            "chatbot_arena": 0.15,
+            "ifeval": 0.03,
+            "ailuminate": 0.02,
         },
     },
 ]
@@ -705,18 +939,35 @@ def _has_rows(conn: Connection, table) -> bool:
     return bool(count)
 
 
-def _upsert_rows(conn: Connection, table, rows: Iterable[Mapping[str, Any]]) -> None:
+def _upsert_rows(
+    conn: Connection,
+    table,
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    preserve_columns: Iterable[str] = (),
+) -> None:
     rows_list = list(rows)
     if not rows_list:
         return
 
     stmt = sqlite_insert(table).values(rows_list)
+    preserved = set(preserve_columns)
     update_columns = {
         column.name: getattr(stmt.excluded, column.name)
         for column in table.columns
-        if column.name != "id"
+        if column.name != "id" and column.name not in preserved
     }
     stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=update_columns)
+    conn.execute(stmt)
+
+
+def _insert_rows_if_missing(conn: Connection, table, rows: Iterable[Mapping[str, Any]]) -> None:
+    rows_list = list(rows)
+    if not rows_list:
+        return
+
+    stmt = sqlite_insert(table).values(rows_list)
+    stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
     conn.execute(stmt)
 
 
@@ -728,7 +979,20 @@ def seed_reference_data(target: Connection | Engine, *, include_seed_scores: boo
 
     conn = target
     _upsert_rows(conn, benchmarks, BENCHMARKS)
-    _upsert_rows(conn, models, MODELS)
+    _insert_rows_if_missing(conn, providers, PROVIDERS)
+    apply_provider_origin_baseline(conn)
+    _upsert_rows(
+        conn,
+        models,
+        [
+            {
+                **row,
+                "provider_id": row.get("provider_id") or provider_id_from_name(str(row.get("provider") or "")),
+            }
+            for row in MODELS
+        ],
+        preserve_columns=("approved_for_use", "approval_notes", "approval_updated_at"),
+    )
 
     if include_seed_scores and not _has_rows(conn, scores):
         collected_at = "2026-03-31T00:00:00Z"
@@ -747,8 +1011,17 @@ def seed_reference_data(target: Connection | Engine, *, include_seed_scores: boo
 __all__ = [
     "AILUMINATE_GRADE_TO_SCORE",
     "BENCHMARKS",
+    "INTERNAL_VIEW_BENCHMARK_ID",
     "MODELS",
+    "PROVIDERS",
+    "PROVIDER_ORIGIN_BASELINE_PATH",
     "SEED_SCORES",
     "USE_CASES",
+    "apply_provider_origin_baseline",
+    "derive_provider_origin_fields",
+    "export_provider_origin_baseline",
+    "load_provider_origin_baseline",
+    "normalize_origin_countries",
+    "provider_id_from_name",
     "seed_reference_data",
 ]

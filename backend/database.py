@@ -34,16 +34,108 @@ benchmarks = Table(
     Column("active", Integer, nullable=False, server_default=text("1")),
 )
 
+providers = Table(
+    "providers",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("name", String, nullable=False, unique=True),
+    Column("country_code", String),
+    Column("country_name", String),
+    Column("origin_countries_json", Text, nullable=False, server_default=text("'[]'")),
+    Column("origin_basis", String),
+    Column("source_url", String),
+    Column("verified_at", String),
+    Column("active", Integer, nullable=False, server_default=text("1")),
+)
+
+model_use_case_approvals = Table(
+    "model_use_case_approvals",
+    metadata,
+    Column("model_id", String, ForeignKey("models.id"), primary_key=True),
+    Column("use_case_id", String, primary_key=True),
+    Column("approved_for_use", Integer, nullable=False, server_default=text("0")),
+    Column("approval_notes", Text),
+    Column("approval_updated_at", String),
+    Column("recommendation_status", String, nullable=False, server_default=text("'unrated'")),
+    Column("recommendation_notes", Text),
+    Column("recommendation_updated_at", String),
+)
+
 models = Table(
     "models",
     metadata,
     Column("id", String, primary_key=True),
     Column("name", String, nullable=False),
+    Column("provider_id", String, ForeignKey("providers.id")),
     Column("provider", String, nullable=False),
     Column("type", String, nullable=False, server_default=text("'proprietary'")),
+    Column("catalog_status", String, nullable=False, server_default=text("'tracked'")),
     Column("release_date", String),
     Column("context_window", String),
+    Column("context_window_tokens", Integer),
+    Column("max_output_tokens", Integer),
+    Column("price_input_per_mtok", Float),
+    Column("price_output_per_mtok", Float),
+    Column("openrouter_model_id", String),
+    Column("openrouter_canonical_slug", String),
+    Column("openrouter_added_at", String),
+    Column("metadata_source_name", String),
+    Column("metadata_source_url", String),
+    Column("metadata_verified_at", String),
+    Column("openrouter_global_rank", Integer),
+    Column("openrouter_global_total_tokens", Integer),
+    Column("openrouter_global_share", Float),
+    Column("openrouter_global_change_ratio", Float),
+    Column("openrouter_global_request_count", Integer),
+    Column("openrouter_programming_rank", Integer),
+    Column("openrouter_programming_total_tokens", Integer),
+    Column("openrouter_programming_volume", Float),
+    Column("openrouter_programming_request_count", Integer),
+    Column("market_source_name", String),
+    Column("market_source_url", String),
+    Column("market_verified_at", String),
+    Column("family_id", String),
+    Column("family_name", String),
+    Column("canonical_model_id", String),
+    Column("canonical_model_name", String),
+    Column("variant_label", String),
+    Column("discovered_at", String),
+    Column("discovered_update_log_id", Integer),
+    Column("approved_for_use", Integer, nullable=False, server_default=text("0")),
+    Column("approval_notes", Text),
+    Column("approval_updated_at", String),
     Column("active", Integer, nullable=False, server_default=text("1")),
+)
+
+model_inference_destinations = Table(
+    "model_inference_destinations",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("model_id", String, ForeignKey("models.id"), nullable=False),
+    Column("destination_id", String, nullable=False),
+    Column("name", String, nullable=False),
+    Column("hyperscaler", String, nullable=False),
+    Column("availability_scope", String, nullable=False),
+    Column("availability_note", Text),
+    Column("location_scope", String, nullable=False),
+    Column("regions_json", Text, nullable=False, server_default=text("'[]'")),
+    Column("region_count", Integer, nullable=False, server_default=text("0")),
+    Column("deployment_modes_json", Text, nullable=False, server_default=text("'[]'")),
+    Column("pricing_label", String),
+    Column("pricing_note", Text),
+    Column("sources_json", Text, nullable=False, server_default=text("'[]'")),
+    Column("catalog_model_id", String),
+    Column("synced_at", String, nullable=False),
+)
+
+inference_sync_status = Table(
+    "inference_sync_status",
+    metadata,
+    Column("destination_id", String, primary_key=True),
+    Column("last_status", String, nullable=False, server_default=text("'pending'")),
+    Column("last_attempted_at", String),
+    Column("last_completed_at", String),
+    Column("detail_json", Text),
 )
 
 scores = Table(
@@ -61,6 +153,36 @@ scores = Table(
     Column("notes", Text),
 )
 
+use_case_benchmark_weights = Table(
+    "use_case_benchmark_weights",
+    metadata,
+    Column("use_case_id", String, primary_key=True),
+    Column("benchmark_id", String, ForeignKey("benchmarks.id"), primary_key=True),
+    Column("weight", Float, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+
+model_market_snapshots = Table(
+    "model_market_snapshots",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("source_name", String, nullable=False),
+    Column("scope", String, nullable=False),
+    Column("category_slug", String, nullable=False, server_default=text("''")),
+    Column("snapshot_date", String, nullable=False),
+    Column("model_id", String, ForeignKey("models.id"), nullable=False),
+    Column("openrouter_slug", String),
+    Column("rank", Integer, nullable=False),
+    Column("total_tokens", Integer),
+    Column("share", Float),
+    Column("change_ratio", Float),
+    Column("request_count", Integer),
+    Column("volume", Float),
+    Column("source_url", String),
+    Column("payload_json", Text, nullable=False),
+    Column("collected_at", String, nullable=False),
+)
+
 update_log = Table(
     "update_log",
     metadata,
@@ -72,6 +194,12 @@ update_log = Table(
     Column("scores_added", Integer, server_default=text("0")),
     Column("scores_updated", Integer, server_default=text("0")),
     Column("errors", Text),
+    Column("current_step_key", String),
+    Column("current_step_label", String),
+    Column("current_step_started_at", String),
+    Column("current_step_index", Integer, nullable=False, server_default=text("0")),
+    Column("total_steps", Integer, nullable=False, server_default=text("0")),
+    Column("steps_json", Text),
 )
 
 source_runs = Table(
@@ -136,8 +264,13 @@ audit_findings = Table(
 
 TABLES: tuple[Table, ...] = (
     benchmarks,
+    providers,
     models,
+    model_inference_destinations,
+    inference_sync_status,
     scores,
+    use_case_benchmark_weights,
+    model_market_snapshots,
     update_log,
     source_runs,
     raw_source_records,
@@ -188,14 +321,107 @@ def _create_schema_sql() -> list[str]:
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS providers (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            country_code TEXT,
+            country_name TEXT,
+            origin_countries_json TEXT NOT NULL DEFAULT '[]',
+            origin_basis TEXT,
+            source_url TEXT,
+            verified_at TEXT,
+            active INTEGER NOT NULL DEFAULT 1
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS models (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            provider_id TEXT REFERENCES providers(id),
             provider TEXT NOT NULL,
             type TEXT NOT NULL DEFAULT 'proprietary',
+            catalog_status TEXT NOT NULL DEFAULT 'tracked',
             release_date TEXT,
             context_window TEXT,
+            context_window_tokens INTEGER,
+            max_output_tokens INTEGER,
+            price_input_per_mtok REAL,
+            price_output_per_mtok REAL,
+            openrouter_model_id TEXT,
+            openrouter_canonical_slug TEXT,
+            openrouter_added_at TEXT,
+            metadata_source_name TEXT,
+            metadata_source_url TEXT,
+            metadata_verified_at TEXT,
+            openrouter_global_rank INTEGER,
+            openrouter_global_total_tokens INTEGER,
+            openrouter_global_share REAL,
+            openrouter_global_change_ratio REAL,
+            openrouter_global_request_count INTEGER,
+            openrouter_programming_rank INTEGER,
+            openrouter_programming_total_tokens INTEGER,
+            openrouter_programming_volume REAL,
+            openrouter_programming_request_count INTEGER,
+            market_source_name TEXT,
+            market_source_url TEXT,
+            market_verified_at TEXT,
+            family_id TEXT,
+            family_name TEXT,
+            canonical_model_id TEXT,
+            canonical_model_name TEXT,
+            variant_label TEXT,
+            discovered_at TEXT,
+            discovered_update_log_id INTEGER REFERENCES update_log(id),
+            approved_for_use INTEGER NOT NULL DEFAULT 0,
+            approval_notes TEXT,
+            approval_updated_at TEXT,
             active INTEGER NOT NULL DEFAULT 1
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS model_use_case_approvals (
+            model_id TEXT NOT NULL REFERENCES models(id),
+            use_case_id TEXT NOT NULL,
+            approved_for_use INTEGER NOT NULL DEFAULT 0,
+            approval_notes TEXT,
+            approval_updated_at TEXT,
+            recommendation_status TEXT NOT NULL DEFAULT 'unrated',
+            recommendation_notes TEXT,
+            recommendation_updated_at TEXT,
+            PRIMARY KEY (model_id, use_case_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS model_inference_destinations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_id TEXT NOT NULL REFERENCES models(id),
+            destination_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            hyperscaler TEXT NOT NULL,
+            availability_scope TEXT NOT NULL,
+            availability_note TEXT,
+            location_scope TEXT NOT NULL,
+            regions_json TEXT NOT NULL DEFAULT '[]',
+            region_count INTEGER NOT NULL DEFAULT 0,
+            deployment_modes_json TEXT NOT NULL DEFAULT '[]',
+            pricing_label TEXT,
+            pricing_note TEXT,
+            sources_json TEXT NOT NULL DEFAULT '[]',
+            catalog_model_id TEXT,
+            synced_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_model_inference_destinations_unique
+        ON model_inference_destinations (model_id, destination_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS inference_sync_status (
+            destination_id TEXT PRIMARY KEY,
+            last_status TEXT NOT NULL DEFAULT 'pending',
+            last_attempted_at TEXT,
+            last_completed_at TEXT,
+            detail_json TEXT
         )
         """,
         """
@@ -213,6 +439,39 @@ def _create_schema_sql() -> list[str]:
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS use_case_benchmark_weights (
+            use_case_id TEXT NOT NULL,
+            benchmark_id TEXT NOT NULL REFERENCES benchmarks(id),
+            weight REAL NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (use_case_id, benchmark_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS model_market_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_name TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            category_slug TEXT NOT NULL DEFAULT '',
+            snapshot_date TEXT NOT NULL,
+            model_id TEXT NOT NULL REFERENCES models(id),
+            openrouter_slug TEXT,
+            rank INTEGER NOT NULL,
+            total_tokens INTEGER,
+            share REAL,
+            change_ratio REAL,
+            request_count INTEGER,
+            volume REAL,
+            source_url TEXT,
+            payload_json TEXT NOT NULL,
+            collected_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_model_market_snapshots_unique
+        ON model_market_snapshots (source_name, scope, category_slug, snapshot_date, model_id)
+        """,
+        """
         CREATE TABLE IF NOT EXISTS update_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             started_at TEXT NOT NULL,
@@ -221,7 +480,13 @@ def _create_schema_sql() -> list[str]:
             status TEXT NOT NULL DEFAULT 'running',
             scores_added INTEGER DEFAULT 0,
             scores_updated INTEGER DEFAULT 0,
-            errors TEXT
+            errors TEXT,
+            current_step_key TEXT,
+            current_step_label TEXT,
+            current_step_started_at TEXT,
+            current_step_index INTEGER NOT NULL DEFAULT 0,
+            total_steps INTEGER NOT NULL DEFAULT 0,
+            steps_json TEXT
         )
         """,
         """
@@ -339,6 +604,171 @@ def _ensure_schema_migrations(conn: Connection) -> None:
             "ADD COLUMN resolution_status TEXT NOT NULL DEFAULT 'resolved'"
         )
 
+    provider_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(providers)").fetchall()
+    }
+    expected_provider_columns = {
+        "origin_countries_json": "ALTER TABLE providers ADD COLUMN origin_countries_json TEXT NOT NULL DEFAULT '[]'",
+    }
+    for column_name, statement in expected_provider_columns.items():
+        if column_name not in provider_columns:
+            conn.exec_driver_sql(statement)
+
+    model_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(models)").fetchall()
+    }
+    expected_model_columns = {
+        "provider_id": "ALTER TABLE models ADD COLUMN provider_id TEXT",
+        "catalog_status": "ALTER TABLE models ADD COLUMN catalog_status TEXT NOT NULL DEFAULT 'tracked'",
+        "context_window_tokens": "ALTER TABLE models ADD COLUMN context_window_tokens INTEGER",
+        "max_output_tokens": "ALTER TABLE models ADD COLUMN max_output_tokens INTEGER",
+        "price_input_per_mtok": "ALTER TABLE models ADD COLUMN price_input_per_mtok REAL",
+        "price_output_per_mtok": "ALTER TABLE models ADD COLUMN price_output_per_mtok REAL",
+        "openrouter_model_id": "ALTER TABLE models ADD COLUMN openrouter_model_id TEXT",
+        "openrouter_canonical_slug": "ALTER TABLE models ADD COLUMN openrouter_canonical_slug TEXT",
+        "openrouter_added_at": "ALTER TABLE models ADD COLUMN openrouter_added_at TEXT",
+        "metadata_source_name": "ALTER TABLE models ADD COLUMN metadata_source_name TEXT",
+        "metadata_source_url": "ALTER TABLE models ADD COLUMN metadata_source_url TEXT",
+        "metadata_verified_at": "ALTER TABLE models ADD COLUMN metadata_verified_at TEXT",
+        "openrouter_global_rank": "ALTER TABLE models ADD COLUMN openrouter_global_rank INTEGER",
+        "openrouter_global_total_tokens": "ALTER TABLE models ADD COLUMN openrouter_global_total_tokens INTEGER",
+        "openrouter_global_share": "ALTER TABLE models ADD COLUMN openrouter_global_share REAL",
+        "openrouter_global_change_ratio": "ALTER TABLE models ADD COLUMN openrouter_global_change_ratio REAL",
+        "openrouter_global_request_count": "ALTER TABLE models ADD COLUMN openrouter_global_request_count INTEGER",
+        "openrouter_programming_rank": "ALTER TABLE models ADD COLUMN openrouter_programming_rank INTEGER",
+        "openrouter_programming_total_tokens": "ALTER TABLE models ADD COLUMN openrouter_programming_total_tokens INTEGER",
+        "openrouter_programming_volume": "ALTER TABLE models ADD COLUMN openrouter_programming_volume REAL",
+        "openrouter_programming_request_count": "ALTER TABLE models ADD COLUMN openrouter_programming_request_count INTEGER",
+        "market_source_name": "ALTER TABLE models ADD COLUMN market_source_name TEXT",
+        "market_source_url": "ALTER TABLE models ADD COLUMN market_source_url TEXT",
+        "market_verified_at": "ALTER TABLE models ADD COLUMN market_verified_at TEXT",
+        "family_id": "ALTER TABLE models ADD COLUMN family_id TEXT",
+        "family_name": "ALTER TABLE models ADD COLUMN family_name TEXT",
+        "canonical_model_id": "ALTER TABLE models ADD COLUMN canonical_model_id TEXT",
+        "canonical_model_name": "ALTER TABLE models ADD COLUMN canonical_model_name TEXT",
+        "variant_label": "ALTER TABLE models ADD COLUMN variant_label TEXT",
+        "discovered_at": "ALTER TABLE models ADD COLUMN discovered_at TEXT",
+        "discovered_update_log_id": "ALTER TABLE models ADD COLUMN discovered_update_log_id INTEGER",
+        "approved_for_use": "ALTER TABLE models ADD COLUMN approved_for_use INTEGER NOT NULL DEFAULT 0",
+        "approval_notes": "ALTER TABLE models ADD COLUMN approval_notes TEXT",
+        "approval_updated_at": "ALTER TABLE models ADD COLUMN approval_updated_at TEXT",
+    }
+    for column_name, statement in expected_model_columns.items():
+        if column_name not in model_columns:
+            conn.exec_driver_sql(statement)
+
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS model_market_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_name TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            category_slug TEXT NOT NULL DEFAULT '',
+            snapshot_date TEXT NOT NULL,
+            model_id TEXT NOT NULL REFERENCES models(id),
+            openrouter_slug TEXT,
+            rank INTEGER NOT NULL,
+            total_tokens INTEGER,
+            share REAL,
+            change_ratio REAL,
+            request_count INTEGER,
+            volume REAL,
+            source_url TEXT,
+            payload_json TEXT NOT NULL,
+            collected_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.exec_driver_sql(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_model_market_snapshots_unique
+        ON model_market_snapshots (source_name, scope, category_slug, snapshot_date, model_id)
+        """
+    )
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS model_inference_destinations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_id TEXT NOT NULL REFERENCES models(id),
+            destination_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            hyperscaler TEXT NOT NULL,
+            availability_scope TEXT NOT NULL,
+            availability_note TEXT,
+            location_scope TEXT NOT NULL,
+            regions_json TEXT NOT NULL DEFAULT '[]',
+            region_count INTEGER NOT NULL DEFAULT 0,
+            deployment_modes_json TEXT NOT NULL DEFAULT '[]',
+            pricing_label TEXT,
+            pricing_note TEXT,
+            sources_json TEXT NOT NULL DEFAULT '[]',
+            catalog_model_id TEXT,
+            synced_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.exec_driver_sql(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_model_inference_destinations_unique
+        ON model_inference_destinations (model_id, destination_id)
+        """
+    )
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS inference_sync_status (
+            destination_id TEXT PRIMARY KEY,
+            last_status TEXT NOT NULL DEFAULT 'pending',
+            last_attempted_at TEXT,
+            last_completed_at TEXT,
+            detail_json TEXT
+        )
+        """
+    )
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS model_use_case_approvals (
+            model_id TEXT NOT NULL REFERENCES models(id),
+            use_case_id TEXT NOT NULL,
+            approved_for_use INTEGER NOT NULL DEFAULT 0,
+            approval_notes TEXT,
+            approval_updated_at TEXT,
+            recommendation_status TEXT NOT NULL DEFAULT 'unrated',
+            recommendation_notes TEXT,
+            recommendation_updated_at TEXT,
+            PRIMARY KEY (model_id, use_case_id)
+        )
+        """
+    )
+    approval_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(model_use_case_approvals)").fetchall()
+    }
+    expected_approval_columns = {
+        "recommendation_status": "ALTER TABLE model_use_case_approvals ADD COLUMN recommendation_status TEXT NOT NULL DEFAULT 'unrated'",
+        "recommendation_notes": "ALTER TABLE model_use_case_approvals ADD COLUMN recommendation_notes TEXT",
+        "recommendation_updated_at": "ALTER TABLE model_use_case_approvals ADD COLUMN recommendation_updated_at TEXT",
+    }
+    for column_name, statement in expected_approval_columns.items():
+        if column_name not in approval_columns:
+            conn.exec_driver_sql(statement)
+    update_log_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(update_log)").fetchall()
+    }
+    expected_update_log_columns = {
+        "current_step_key": "ALTER TABLE update_log ADD COLUMN current_step_key TEXT",
+        "current_step_label": "ALTER TABLE update_log ADD COLUMN current_step_label TEXT",
+        "current_step_started_at": "ALTER TABLE update_log ADD COLUMN current_step_started_at TEXT",
+        "current_step_index": "ALTER TABLE update_log ADD COLUMN current_step_index INTEGER NOT NULL DEFAULT 0",
+        "total_steps": "ALTER TABLE update_log ADD COLUMN total_steps INTEGER NOT NULL DEFAULT 0",
+        "steps_json": "ALTER TABLE update_log ADD COLUMN steps_json TEXT",
+    }
+    for column_name, statement in expected_update_log_columns.items():
+        if column_name not in update_log_columns:
+            conn.exec_driver_sql(statement)
+
 
 @contextmanager
 def get_connection(engine: Engine | None = None) -> Iterator[Connection]:
@@ -381,13 +811,19 @@ __all__ = [
     "get_connection",
     "get_engine",
     "init_db",
+    "inference_sync_status",
     "metadata",
     "models",
+    "model_inference_destinations",
+    "model_market_snapshots",
+    "model_use_case_approvals",
+    "providers",
     "raw_source_records",
     "row_to_dict",
     "scores",
     "source_runs",
     "update_log",
+    "use_case_benchmark_weights",
     "utc_now",
     "utc_now_iso",
 ]

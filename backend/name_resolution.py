@@ -60,6 +60,7 @@ class NormalizedModel:
     provider: str | None
     exact_names: tuple[str, ...]
     aliases: tuple[str, ...]
+    signatures: tuple[str, ...]
 
 
 def normalize_text(value: str) -> str:
@@ -73,6 +74,23 @@ def normalize_text(value: str) -> str:
 
 def _compact_text(value: str) -> str:
     return normalize_text(value).replace(" ", "")
+
+
+def token_signature(value: str) -> str:
+    normalized = normalize_text(value)
+    if not normalized:
+        return ""
+    return " ".join(sorted(normalized.split()))
+
+
+def name_signatures(value: str) -> tuple[str, ...]:
+    signatures = {
+        signature
+        for variant in _name_variants(value)
+        for signature in (token_signature(variant),)
+        if signature
+    }
+    return tuple(sorted(signatures, key=lambda item: (len(item.split()), len(item), item)))
 
 
 def _name_variants(value: str) -> tuple[str, ...]:
@@ -107,7 +125,7 @@ def _name_variants(value: str) -> tuple[str, ...]:
 
 def _candidate_strings(model: Mapping[str, Any]) -> tuple[str, ...]:
     candidates: list[str] = []
-    for key in ("name",):
+    for key in ("name", "canonical_model_name", "family_name", "variant_label"):
         raw = model.get(key)
         if isinstance(raw, str) and raw.strip():
             candidates.append(raw)
@@ -139,14 +157,22 @@ def normalize_model_entry(model: Mapping[str, Any]) -> NormalizedModel:
         if normalized
     }
     alias_set.update(exact_name_set)
+    signature_set = {
+        signature
+        for candidate in candidate_strings
+        for signature in name_signatures(candidate)
+        if signature
+    }
     exact_names = tuple(sorted(exact_name_set))
     aliases = tuple(sorted(alias_set))
+    signatures = tuple(sorted(signature_set, key=lambda item: (len(item.split()), len(item), item)))
     return NormalizedModel(
         model_id=model_id,
         name=name,
         provider=provider_str,
         exact_names=exact_names,
         aliases=aliases,
+        signatures=signatures,
     )
 
 
@@ -179,8 +205,15 @@ def resolve_model_name(raw_name: str, models: Iterable[Mapping[str, Any]], *, th
         for alias in (normalize_text(variant), _compact_text(variant))
         if alias
     }
+    raw_signatures = {
+        signature
+        for variant in _name_variants(raw_name)
+        for signature in (token_signature(variant),)
+        if signature
+    }
     exact: list[NormalizedModel] = []
     alias_matches: list[NormalizedModel] = []
+    signature_matches: list[NormalizedModel] = []
 
     for candidate in candidates:
         if any(alias in raw_aliases for alias in candidate.exact_names):
@@ -188,6 +221,9 @@ def resolve_model_name(raw_name: str, models: Iterable[Mapping[str, Any]], *, th
             continue
         if any(alias in raw_aliases for alias in candidate.aliases):
             alias_matches.append(candidate)
+            continue
+        if any(signature in raw_signatures for signature in candidate.signatures):
+            signature_matches.append(candidate)
 
     if exact:
         exact.sort(key=_exact_match_priority)
@@ -196,6 +232,10 @@ def resolve_model_name(raw_name: str, models: Iterable[Mapping[str, Any]], *, th
     if alias_matches:
         alias_matches.sort(key=_exact_match_priority)
         return alias_matches[0].model_id
+
+    if signature_matches:
+        signature_matches.sort(key=_exact_match_priority)
+        return signature_matches[0].model_id
 
     # Threshold is intentionally unused for now. Fuzzy matching created
     # cross-family and cross-generation collapses in live benchmark data.
@@ -210,7 +250,9 @@ def build_model_lookup(models: Iterable[Mapping[str, Any]]) -> dict[str, Normali
 __all__ = [
     "NormalizedModel",
     "build_model_lookup",
+    "name_signatures",
     "normalize_model_entry",
     "normalize_text",
     "resolve_model_name",
+    "token_signature",
 ]

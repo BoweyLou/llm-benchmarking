@@ -1,0 +1,808 @@
+[
+  {
+    "id": "42-b3yond-6ug",
+    "name": "42-b3yond-6ug",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "DARPA's Small Business Track announcement lists 42-b3yond-6ug as '42-b3yond-6ug, Net Shield LLC', a U.S. small business.",
+    "source_url": "https://www.darpa.mil/news/2024/small-business-ai-cyber-challenge",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "ai21-labs",
+    "name": "AI21 Labs",
+    "origin_countries": [
+      {
+        "code": "IL",
+        "name": "Israel"
+      }
+    ],
+    "origin_basis": "AI21's terms state the agreement is governed by the laws of Israel and subject to Tel Aviv-Jaffa courts.",
+    "source_url": "https://www.ai21.com/terms-of-service",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "agentica",
+    "name": "Agentica",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "The DeepSWE-Preview model card says the work was done as part of Berkeley Sky Computing Lab and Berkeley AI Research.",
+    "source_url": "https://huggingface.co/agentica-org/DeepSWE-Preview",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "agentless",
+    "name": "Agentless",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "The official Agentless site lists its contact address in Warrenville, Illinois, United States.",
+    "source_url": "https://www.agentless.us/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "alibaba",
+    "name": "Alibaba",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "Alibaba Group says it was founded in Hangzhou, China, and its principal executive offices are in Hangzhou, China.",
+    "source_url": "https://home.alibabagroup.com/en-US/faqs-corporate-information",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "alibaba-cloud-qwen-team",
+    "name": "Alibaba Cloud / Qwen Team",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "Qwen's official About page identifies the Qwen Team and links its API to Alibaba Cloud Aliyun, so I anchor the provider to China via Alibaba Cloud.",
+    "source_url": "https://qwenlm.github.io/about",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "allen-institute-for-ai-university-of-washington",
+    "name": "Allen Institute for AI,University of Washington",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Ai2 says it is Seattle-based and lists the University of Washington as a core partner, so the defensible country is the United States.",
+    "source_url": "https://allenai.org/about",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "amazon",
+    "name": "Amazon",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Amazon's official headquarters tour places Amazon's Puget Sound headquarters in Seattle, Washington.",
+    "source_url": "https://www.aboutamazon.com/news/amazon-offices/amazon-headquarters-tour-seattle",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "amazon-nova",
+    "name": "Amazon Nova",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Amazon Nova is an AWS/Amazon product, and Amazon's official headquarters materials place the company in Seattle, Washington, United States.",
+    "source_url": "https://aws.amazon.com/nova/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Anthropic's official submission lists its San Francisco, California address, placing the company in the United States.",
+    "source_url": "https://assets.anthropic.com/m/4e20a4ab6512e217/original/Anthropic-Response-to-OSTP-RFI-March-2025-Final-Submission-v3.pdf",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "baidu",
+    "name": "Baidu",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "Official Baidu contact and investor pages list Beijing, China as the headquarters location.",
+    "source_url": "https://home.baidu.com/contact.html",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "bytedance-seed",
+    "name": "ByteDance Seed",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "Official Seed privacy policy names Beijing Chuntian Zhiyun Technology Co., Ltd. in Beijing, China.",
+    "source_url": "https://seed.bytedance.com/privacy-policy",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "cohere",
+    "name": "Cohere",
+    "origin_countries": [
+      {
+        "code": "CA",
+        "name": "Canada"
+      }
+    ],
+    "origin_basis": "Official Cohere about and SaaS agreement pages place Cohere in Toronto, Ontario, Canada.",
+    "source_url": "https://cohere.com/about",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "Official DeepSeek privacy policy names Hangzhou DeepSeek Artificial Intelligence Co., Ltd. with a registered address in China.",
+    "source_url": "https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy-2025-02-14.html",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "google",
+    "name": "Google",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Official Google locations page lists Mountain View, California as Google\u2019s global HQ.",
+    "source_url": "https://about.google/company-info/locations/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "google-deepmind",
+    "name": "Google DeepMind",
+    "origin_countries": [
+      {
+        "code": "GB",
+        "name": "United Kingdom"
+      }
+    ],
+    "origin_basis": "Official Google DeepMind blog says the organization set up its headquarters in London in 2010.",
+    "source_url": "https://deepmind.google/blog/a-return-to-paris",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "google-deepmind-google",
+    "name": "Google DeepMind,Google",
+    "origin_countries": [
+      {
+        "code": "GB",
+        "name": "United Kingdom"
+      },
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Google DeepMind's official About page says the organization brings together Google Brain and DeepMind, so this combined provider row is stored as multi-origin rather than forced into one country.",
+    "source_url": "https://deepmind.google/about/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "ibm",
+    "name": "IBM",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Official IBM contact page lists the corporate address in Armonk, New York, United States.",
+    "source_url": "https://www.ibm.com/contact/global",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "inception-labs",
+    "name": "Inception Labs",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Official Inception terms list Inception AI, Inc. at a Palo Alto, California address.",
+    "source_url": "https://www.inceptionlabs.ai/docs/terms-of-use",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "inclusionai",
+    "name": "InclusionAI",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "The official InclusionAI homepage says InclusionAI is founded by Ant Group, so I anchor the provider to China via its parent group.",
+    "source_url": "https://inclusionai.github.io/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "kimi",
+    "name": "Kimi",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "Kimi's official China-facing platform presents Kimi as Moonshot AI's model platform, so I anchor the provider to China.",
+    "source_url": "https://platform.moonshot.cn/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "korea-telecom",
+    "name": "Korea Telecom",
+    "origin_countries": [
+      {
+        "code": "KR",
+        "name": "South Korea"
+      }
+    ],
+    "origin_basis": "KT's official company page calls it Korea's national telecommunications provider and says it has led Korea's ICT industry since 1981.",
+    "source_url": "https://corp.kt.com/eng/html/intro/main.html",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "lg-ai-research",
+    "name": "LG AI Research",
+    "origin_countries": [
+      {
+        "code": "KR",
+        "name": "South Korea"
+      }
+    ],
+    "origin_basis": "LG AI Research's official location page lists its Korean office in Seoul, so I anchor the provider to South Korea.",
+    "source_url": "https://www.lgresearch.ai/about/mission",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "liquid-ai",
+    "name": "Liquid AI",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Liquid AI's official site lists its headquarters at 314 Main St, Cambridge, MA 02142.",
+    "source_url": "https://www.liquid.ai/company/about",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "longcat",
+    "name": "LongCat",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "LongCat is released by Meituan's technical team, and Meituan is a mainland China company, so I anchor LongCat to China.",
+    "source_url": "https://tech.meituan.com/2025/09/01/longcat-flash-chat.html",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "meta",
+    "name": "Meta",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Meta's official investor materials say Meta Platforms, Inc. is incorporated in Delaware with headquarters in Menlo Park, California.",
+    "source_url": "https://investor.atmeta.com/files/doc_downloads/2024/05/2024-anti-slavery-and-human-trafficking-statement.pdf",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "meta-ai",
+    "name": "Meta AI",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Meta AI is a Meta product, and Meta's official investor materials place the parent company in Menlo Park, California, USA.",
+    "source_url": "https://ai.meta.com/opensourceAI/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "microsoft",
+    "name": "Microsoft",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Microsoft's official facts page lists Microsoft Corporation at One Microsoft Way in Redmond, Washington, USA.",
+    "source_url": "https://news.microsoft.com/facts-about-microsoft/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "microsoft-azure",
+    "name": "Microsoft Azure",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Azure's official legal/certified-program agreement is with Microsoft Corporation, and Microsoft's facts page places the company in Redmond, Washington, USA.",
+    "source_url": "https://azure.microsoft.com/en-us/support/legal/marketplace/certified-program-agreement",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "minimax",
+    "name": "MiniMax",
+    "origin_countries": [
+      {
+        "code": "SG",
+        "name": "Singapore"
+      }
+    ],
+    "origin_basis": "MiniMax's official app and web privacy policy says the website is operated by Nanonoble Pte. Ltd. with a registered address in Singapore.",
+    "source_url": "https://www.minimax.io/audio/doc/privacy-policy.html",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "mistral",
+    "name": "Mistral",
+    "origin_countries": [
+      {
+        "code": "FR",
+        "name": "France"
+      }
+    ],
+    "origin_basis": "Mistral AI describes itself as a French startup founded in April 2023.",
+    "source_url": "https://mistral.ai/about",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "mistral-ai",
+    "name": "Mistral AI",
+    "origin_countries": [
+      {
+        "code": "FR",
+        "name": "France"
+      }
+    ],
+    "origin_basis": "The legal notice lists Mistral AI as having its registered office in Paris, France.",
+    "source_url": "https://legal.mistral.ai/legal-notice",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "moonshot",
+    "name": "Moonshot",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "The official platform footer identifies \u5317\u4eac\u6708\u4e4b\u6697\u9762\u79d1\u6280\u6709\u9650\u516c\u53f8 and shows Beijing ICP registration.",
+    "source_url": "https://platform.moonshot.cn/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "moonshot-ai",
+    "name": "Moonshot AI",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "The official platform is branded for Moonshot AI and the footer identifies the Beijing-registered company.",
+    "source_url": "https://platform.moonshot.cn/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "motif-technologies",
+    "name": "Motif Technologies",
+    "origin_countries": [
+      {
+        "code": "TH",
+        "name": "Thailand"
+      }
+    ],
+    "origin_basis": "The company site lists Motif Technology Public Company Limited with an address in Bangkok.",
+    "source_url": "https://motiftech.com/about-us/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "nvidia",
+    "name": "NVIDIA",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "NVIDIA\u2019s official contact page lists NVIDIA Corporate in Santa Clara, California, USA.",
+    "source_url": "https://www.nvidia.com/object/map.html",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "nanbeige",
+    "name": "Nanbeige",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "The official org page says Nanbeige is an LLM research team at BOSS Zhipin, a Chinese company.",
+    "source_url": "https://huggingface.co/Nanbeige",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "nous-research-arcee-ai",
+    "name": "Nous Research,Arcee AI",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Arcee AI describes itself as a U.S. model lab, and Nous Research describes itself as part of the American open source AI movement.",
+    "source_url": "https://www.arcee.ai/about",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Manually reviewed",
+    "source_url": "https://example.com/openai-origin",
+    "verified_at": "2026-04-03T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "openhands",
+    "name": "OpenHands",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "The privacy policy gives All Hands AI\u2019s contact address in Cambridge, Massachusetts, USA.",
+    "source_url": "https://openhands.dev/privacy",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "perplexity",
+    "name": "Perplexity",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Perplexity Research\u2019s official careers page lists roles in Palo Alto and San Francisco, which places the company in the United States.",
+    "source_url": "https://research.perplexity.ai/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "prime-intellect",
+    "name": "Prime Intellect",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "The official imprint lists Prime Intellect, Inc. at 1111b South Governors Avenue, Dover, DE 19904, US.",
+    "source_url": "https://www.primeintellect.ai/imprint",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "qwen",
+    "name": "Qwen",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "Alibaba Cloud\u2019s official Qwen page identifies Qwen as an Alibaba Cloud product, and Alibaba Group\u2019s official locations page places Alibaba in Hangzhou, China.",
+    "source_url": "https://www.alibabacloud.com/solutions/generative-ai/qwen",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "reka-ai",
+    "name": "Reka AI",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Reka\u2019s official contact page lists Sunnyvale, California 94085.",
+    "source_url": "https://www.reka.ai/contact",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "swe-agent",
+    "name": "SWE-agent",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "SWE-agent's official documentation says the project is built and maintained by researchers from Princeton University and Stanford University.",
+    "source_url": "https://swe-agent.com/latest/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "sarvam",
+    "name": "Sarvam",
+    "origin_countries": [
+      {
+        "code": "IN",
+        "name": "India"
+      }
+    ],
+    "origin_basis": "Sarvam\u2019s terms say the platform is owned and operated by Axonwise Private Limited, incorporated under the laws of India, with a Bangalore registered office.",
+    "source_url": "https://www.sarvam.ai/terms-of-use",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "stepfun",
+    "name": "StepFun",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "StepFun\u2019s privacy summary names Shanghai StepFun Intelligent Technology Co., Ltd. with a registered address in Shanghai, China.",
+    "source_url": "https://stepfun.ai/legal/privacy-summary",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "swiss-ai-initiative",
+    "name": "Swiss AI Initiative",
+    "origin_countries": [
+      {
+        "code": "CH",
+        "name": "Switzerland"
+      }
+    ],
+    "origin_basis": "The official site presents it as the Swiss AI Initiative and the first initiative of the Swiss National AI Institute, centered on ETH and EPFL in Switzerland.",
+    "source_url": "https://www.swiss-ai.org/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "thudm",
+    "name": "THUDM",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "The official THUDM GitHub org lists FIT Building, Tsinghua University, and Tsinghua University is in Beijing, China.",
+    "source_url": "https://github.com/thudm",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "tii-uae",
+    "name": "TII UAE",
+    "origin_countries": [
+      {
+        "code": "AE",
+        "name": "United Arab Emirates"
+      }
+    ],
+    "origin_basis": "TII says it is part of Abu Dhabi Government\u2019s ATRC and operates from Abu Dhabi, UAE.",
+    "source_url": "https://www.tii.ae/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "tsinghua-university-university-of-illinois-urbana-champaign-uiuc-shanghai-ai-lab-peking-university-shanghai-jiao-tong-university-cuhk-shenzhen-research-institute",
+    "name": "Tsinghua University,University of Illinois Urbana-Champaign (UIUC),Shanghai AI Lab,Peking University,Shanghai Jiao Tong University,CUHK Shenzhen Research Institute",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      },
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "The paper affiliations span UIUC in the United States plus Tsinghua, Shanghai AI Lab, Peking University, Shanghai Jiao Tong University, and CUHK Shenzhen Research Institute in China, so this provider is stored as multi-origin.",
+    "source_url": "https://openreview.net/pdf/306f78b36587505a511ef1fcd6f76dfaf23a973d.pdf",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "upstage",
+    "name": "Upstage",
+    "origin_countries": [
+      {
+        "code": "KR",
+        "name": "South Korea"
+      }
+    ],
+    "origin_basis": "Official privacy policy lists Upstage Co., Ltd. at a Seoul address in Gangnam-gu.",
+    "source_url": "https://www.upstage.ai/privacy-policy/updated-mar-25-2026",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "xiaomi",
+    "name": "Xiaomi",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "Official investor relations contacts page lists Xiaomi Campus in Haidian District, Beijing.",
+    "source_url": "https://ir.mi.com/investor-resources/ir-contacts/",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "z-ai",
+    "name": "Z AI",
+    "origin_countries": [
+      {
+        "code": "SG",
+        "name": "Singapore"
+      }
+    ],
+    "origin_basis": "Official Z.ai privacy policy says the service is controlled from a registered address in Singapore.",
+    "source_url": "https://chat.z.ai/legal-agreement/privacy-policy",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "zhipu",
+    "name": "Zhipu",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "Official Bigmodel subscription agreement names Beijing Zhipu Huazhang Technology Co., Ltd.",
+    "source_url": "https://docs.bigmodel.cn/cn/terms/subscription-agreement",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "zhipu-ai",
+    "name": "Zhipu AI",
+    "origin_countries": [
+      {
+        "code": "CN",
+        "name": "China"
+      }
+    ],
+    "origin_basis": "Official Bigmodel subscription agreement names Beijing Zhipu Huazhang Technology Co., Ltd.",
+    "source_url": "https://docs.bigmodel.cn/cn/terms/subscription-agreement",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  },
+  {
+    "id": "xai",
+    "name": "xAI",
+    "origin_countries": [
+      {
+        "code": "US",
+        "name": "United States"
+      }
+    ],
+    "origin_basis": "Official company page says xAI operates from its Palo Alto headquarters.",
+    "source_url": "https://x.ai/about",
+    "verified_at": "2026-04-07T00:00:00Z",
+    "active": true
+  }
+]

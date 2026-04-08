@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Sequence
 
 import httpx
@@ -19,20 +18,23 @@ class SwebenchAdapter(BaseSourceAdapter):
         response.raise_for_status()
         payload = response.json()
 
-        leaderboard = self._select_bash_only_leaderboard(payload)
+        leaderboard = self._select_verified_leaderboard(payload)
         rows = leaderboard.get("results") or leaderboard.get("rows") or leaderboard.get("entries") or []
         fetched_at = utc_now_iso()
         raw_records: list[RawSourceRecord] = []
 
         for row in rows:
-            version = str(row.get("mini-swe-agent_version") or row.get("mini_swe_agent_version") or "").strip()
-            if not re.match(r"^2\.", version):
+            model_name = self._extract_model_name(row)
+            if not model_name:
                 continue
 
-            model_name = self._extract_model_name(row)
             raw_score = row.get("resolved")
             if not model_name or raw_score is None:
                 continue
+
+            tags = row.get("tags") or []
+            organization = self._extract_tag_value(tags, "Org: ")
+            system_attempts = self._extract_tag_value(tags, "System: ")
 
             raw_records.append(
                 RawSourceRecord(
@@ -45,9 +47,16 @@ class SwebenchAdapter(BaseSourceAdapter):
                     raw_model_key=model_name,
                     payload=row,
                     metadata={
-                        "mini_swe_agent_version": version,
-                        "verified": bool(row.get("verified", True)),
-                        "tags": row.get("tags") or [],
+                        "leaderboard_name": "Verified",
+                        "leaderboard_date": row.get("date"),
+                        "submission_name": row.get("name"),
+                        "organization": organization,
+                        "system_attempts": system_attempts,
+                        "os_model": bool(row.get("os_model")),
+                        "os_system": bool(row.get("os_system")),
+                        "verified": True,
+                        "single_model_submission": True,
+                        "tags": tags,
                     },
                 )
             )
@@ -84,25 +93,43 @@ class SwebenchAdapter(BaseSourceAdapter):
                     raw_value=record.raw_value,
                     source_url=record.source_url,
                     collected_at=record.collected_at,
-                    source_type="primary",
+                    source_type="secondary",
                     verified=bool(record.metadata.get("verified", True)),
-                    notes="Filtered from bash-only leaderboard with mini-SWE-agent v2 rows.",
+                    notes=(
+                        "Best single-model submission from the official SWE-bench Verified board: "
+                        f'{record.metadata.get("submission_name") or "Unknown submission"} '
+                        f'on {record.metadata.get("leaderboard_date") or "unknown date"}.'
+                    ),
                     metadata=dict(record.metadata),
                 )
             )
 
         return candidates
 
-    def _select_bash_only_leaderboard(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _select_verified_leaderboard(self, payload: dict[str, Any]) -> dict[str, Any]:
         leaderboards = payload.get("leaderboards") or []
         for item in leaderboards:
-            if str(item.get("name", "")).strip() == "bash-only":
+            if str(item.get("name", "")).strip() == "Verified":
                 return item
-        raise ValueError("Could not find bash-only leaderboard in SWE-bench payload.")
+        raise ValueError("Could not find Verified leaderboard in SWE-bench payload.")
 
     def _extract_model_name(self, row: dict[str, Any]) -> str:
-        tags = row.get("tags") or []
+        model_tags = self._extract_model_tags(row.get("tags") or [])
+        if len(model_tags) != 1:
+            return ""
+        return model_tags[0]
+
+    def _extract_model_tags(self, tags: list[Any]) -> list[str]:
+        values: list[str] = []
         for tag in tags:
             if isinstance(tag, str) and tag.startswith("Model: "):
-                return tag.split("Model: ", 1)[1].strip()
-        return str(row.get("name") or row.get("model") or row.get("model_name") or "").strip()
+                value = tag.split("Model: ", 1)[1].strip()
+                if value:
+                    values.append(value)
+        return values
+
+    def _extract_tag_value(self, tags: list[Any], prefix: str) -> str:
+        for tag in tags:
+            if isinstance(tag, str) and tag.startswith(prefix):
+                return tag.split(prefix, 1)[1].strip()
+        return ""

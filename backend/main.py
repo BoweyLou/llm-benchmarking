@@ -4,14 +4,27 @@ from fastapi import FastAPI, HTTPException
 
 from .models import (
     AuditRunOut,
+    BenchmarkWeightUpdateIn,
     BenchmarkOut,
+    FamilyApprovalBulkIn,
+    FamilyApprovalBulkOut,
+    FamilyApprovalDeltaIn,
+    FamilyApprovalDeltaOut,
+    ManualScoreResultOut,
+    ManualScoreUpdateIn,
+    MarketSnapshotOut,
+    ModelApprovalUpdateIn,
     ModelOut,
+    ModelSummaryOut,
+    ProviderOut,
+    ProviderUpdateIn,
     RawSourceRecordOut,
     RankingsResponseOut,
     SourceRunOut,
     UpdateLogOut,
     UpdateStartIn,
     UpdateStartOut,
+    UseCaseApprovalIn,
     UseCaseOut,
 )
 from .audit_engine import get_audit_run
@@ -21,12 +34,21 @@ from .update_engine import (
     get_rankings,
     get_update_log,
     list_benchmarks,
+    list_market_snapshots,
     list_models,
+    list_providers,
     list_raw_source_records,
     list_source_runs,
     list_update_logs,
     list_use_cases,
     schedule_update,
+    apply_model_family_approval_bulk,
+    apply_model_family_approval_delta,
+    update_manual_benchmark_score,
+    update_model_approval,
+    update_model_use_case_approval,
+    update_provider_origin,
+    update_use_case_internal_weight,
 )
 
 app = FastAPI(title="LLM Benchmarking API", version="0.1.0")
@@ -52,6 +74,107 @@ def api_models() -> list[dict]:
     return list_models()
 
 
+@app.get("/api/providers", response_model=list[ProviderOut])
+def api_providers() -> list[dict]:
+    return list_providers()
+
+
+@app.patch("/api/providers/{provider_id}", response_model=ProviderOut)
+def api_update_provider(provider_id: str, payload: ProviderUpdateIn) -> dict:
+    try:
+        provider = update_provider_origin(provider_id, payload.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if provider is None:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    return provider
+
+
+@app.patch("/api/models/{model_id}/approval", response_model=ModelSummaryOut)
+def api_update_model_approval(model_id: str, payload: ModelApprovalUpdateIn) -> dict:
+    model = update_model_approval(model_id, payload.approved_for_use, payload.approval_notes)
+    if model is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+    return model
+
+
+@app.patch("/api/models/{model_id}/approvals/{use_case_id}", response_model=ModelSummaryOut)
+def api_update_model_use_case_approval(model_id: str, use_case_id: str, payload: UseCaseApprovalIn) -> dict:
+    try:
+        model = update_model_use_case_approval(
+            model_id,
+            use_case_id,
+            payload.approved_for_use,
+            payload.approval_notes,
+            payload.recommendation_status,
+            payload.recommendation_notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if model is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+    return model
+
+
+@app.post("/api/model-families/{family_id}/approvals/{use_case_id}/apply-delta", response_model=FamilyApprovalDeltaOut)
+def api_apply_model_family_approval_delta(family_id: str, use_case_id: str, payload: FamilyApprovalDeltaIn | None = None) -> dict:
+    try:
+        result = apply_model_family_approval_delta(
+            family_id,
+            use_case_id,
+            payload.approval_notes if payload is not None else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Model family not found")
+    return result
+
+
+@app.post("/api/model-families/{family_id}/approvals/bulk", response_model=FamilyApprovalBulkOut)
+def api_apply_model_family_approval_bulk(family_id: str, payload: FamilyApprovalBulkIn) -> dict:
+    try:
+        result = apply_model_family_approval_bulk(
+            family_id,
+            payload.use_case_ids,
+            payload.approval_notes,
+            scope=payload.scope,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Model family not found")
+    return result
+
+
+@app.patch("/api/use-cases/{use_case_id}/internal-weight", response_model=UseCaseOut)
+def api_update_use_case_internal_weight(use_case_id: str, payload: BenchmarkWeightUpdateIn) -> dict:
+    use_case = update_use_case_internal_weight(use_case_id, payload.weight)
+    if use_case is None:
+        raise HTTPException(status_code=404, detail="Use case not found")
+    return use_case
+
+
+@app.put("/api/models/{model_id}/benchmarks/{benchmark_id}/manual-score", response_model=ManualScoreResultOut)
+def api_update_manual_score(model_id: str, benchmark_id: str, payload: ManualScoreUpdateIn) -> dict:
+    try:
+        result = update_manual_benchmark_score(
+            model_id,
+            benchmark_id,
+            value=payload.value,
+            raw_value=payload.raw_value,
+            notes=payload.notes,
+            source_url=payload.source_url,
+            verified=payload.verified,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if result is None:
+        raise HTTPException(status_code=404, detail="Model or benchmark not found")
+    return result
+
+
 @app.post("/api/update", response_model=UpdateStartOut)
 def api_update(payload: UpdateStartIn | None = None) -> UpdateStartOut:
     log_id = schedule_update(benchmarks=payload.benchmarks if payload else None, triggered_by="api")
@@ -69,6 +192,11 @@ def api_update_status(log_id: int) -> dict:
 @app.get("/api/update/history", response_model=list[UpdateLogOut])
 def api_update_history() -> list[dict]:
     return list_update_logs()
+
+
+@app.get("/api/market-snapshots", response_model=list[MarketSnapshotOut])
+def api_market_snapshots(scope: str | None = None, category: str | None = None, limit: int = 300) -> list[dict]:
+    return list_market_snapshots(scope=scope, category_slug=category, limit=limit)
 
 
 @app.get("/api/update/history/{log_id}/sources", response_model=list[SourceRunOut])
