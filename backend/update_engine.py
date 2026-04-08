@@ -129,6 +129,34 @@ _OPENROUTER_TRAILING_VERSION_RE = re.compile(
 )
 _NEXT_FLIGHT_PUSH_RE = re.compile(r"<script>self\.__next_f\.push\((\[.*?\])\)</script>", re.S)
 _VERSION_TOKEN_RE = re.compile(r"^(?:[a-z]?\d+(?:\.\d+)?|\d+(?:\.\d+)?[a-z]?)$", re.IGNORECASE)
+_PROVIDER_PREFIX_HINTS = (
+    ("openai/", "OpenAI"),
+    ("anthropic/", "Anthropic"),
+    ("google/", "Google"),
+    ("meta-llama/", "Meta"),
+    ("microsoft/", "Microsoft"),
+    ("mistralai/", "Mistral"),
+    ("qwen/", "Alibaba"),
+    ("deepseek-ai/", "DeepSeek"),
+    ("deepseek/", "DeepSeek"),
+    ("xai-org/", "xAI"),
+    ("moonshotai/", "Moonshot AI"),
+    ("coherelabs/", "Cohere"),
+    ("amazon/", "Amazon"),
+    ("ibm-granite/", "IBM"),
+)
+_PROVIDER_NAME_HINTS = (
+    ("qwen", "Alibaba"),
+    ("deepseek", "DeepSeek"),
+    ("gpt", "OpenAI"),
+    ("o1", "OpenAI"),
+    ("o3", "OpenAI"),
+    ("o4", "OpenAI"),
+    ("claude", "Anthropic"),
+    ("gemini", "Google"),
+    ("gemma", "Google"),
+    ("phi", "Microsoft"),
+)
 _DISPLAY_TOKEN_MAP = {
     "claude": "Claude",
     "codex": "Codex",
@@ -186,6 +214,10 @@ def bootstrap() -> None:
         _refresh_model_identity_metadata()
         try:
             _refresh_openrouter_model_metadata()
+            if _repair_submitter_provider_leaks() > 0:
+                _refresh_model_identity_metadata()
+                _canonicalize_model_catalog()
+                _refresh_model_identity_metadata()
         except Exception:
             pass
         try:
@@ -2137,6 +2169,10 @@ def _run_update_job(
             _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
             try:
                 _refresh_openrouter_model_metadata()
+                if _repair_submitter_provider_leaks() > 0:
+                    _refresh_model_identity_metadata()
+                    _canonicalize_model_catalog()
+                    _refresh_model_identity_metadata()
             except Exception as exc:
                 errors.append(
                     {
@@ -4558,50 +4594,118 @@ def _model_summary(model: dict[str, Any]) -> dict[str, Any]:
 
 def _infer_provider(metadata: dict[str, Any], raw_model_name: str) -> str | None:
     for key in (
-        "organization",
-        "organization_name",
-        "modelOrganization",
-        "model_creator",
         "model_provider",
         "provider",
+        "modelOrganization",
+        "model_creator",
+        "organization_name",
     ):
         value = metadata.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
 
+    name_hint = _provider_hint_from_name(raw_model_name)
+    if name_hint:
+        return name_hint
+
+    for key in ("organization", "submission_organization"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _provider_hint_from_name(raw_model_name: str) -> str | None:
     lowered = raw_model_name.strip().lower()
-    for prefix, provider in (
-        ("openai/", "OpenAI"),
-        ("anthropic/", "Anthropic"),
-        ("google/", "Google"),
-        ("meta-llama/", "Meta"),
-        ("microsoft/", "Microsoft"),
-        ("mistralai/", "Mistral"),
-        ("qwen/", "Alibaba"),
-        ("deepseek-ai/", "DeepSeek"),
-        ("zai-org/", "Zhipu AI"),
-        ("xai-org/", "xAI"),
-        ("moonshotai/", "Moonshot AI"),
-        ("coherelabs/", "Cohere"),
-        ("amazon/", "Amazon"),
-        ("ibm-granite/", "IBM"),
-    ):
+    for prefix, provider in _PROVIDER_PREFIX_HINTS:
         if lowered.startswith(prefix):
             return provider
 
-    for prefix, provider in (
-        ("gpt", "OpenAI"),
-        ("o1", "OpenAI"),
-        ("o3", "OpenAI"),
-        ("o4", "OpenAI"),
-        ("claude", "Anthropic"),
-        ("gemini", "Google"),
-        ("gemma", "Google"),
-        ("phi", "Microsoft"),
-    ):
+    for prefix, provider in _PROVIDER_NAME_HINTS:
         if lowered.startswith(prefix):
             return provider
     return None
+
+
+def _repair_submitter_provider_leaks() -> int:
+    repaired_count = 0
+    with ENGINE.begin() as conn:
+        rows = fetch_all(
+            conn,
+            select(
+                models_table.c.id,
+                models_table.c.provider,
+                models_table.c.openrouter_canonical_slug,
+            ).where(models_table.c.active == 1),
+        )
+        for row in rows:
+            current_provider = str(row.get("provider") or "").strip()
+            canonical_slug = str(row.get("openrouter_canonical_slug") or "").strip()
+            if not current_provider or not canonical_slug:
+                continue
+
+            inferred_provider = _provider_hint_from_name(canonical_slug)
+            if not inferred_provider or normalize_text(inferred_provider) == normalize_text(current_provider):
+                continue
+
+            source_rows = fetch_all(
+                conn,
+                select(raw_source_records_table.c.payload_json)
+                .select_from(
+                    raw_source_records_table.join(
+                        source_runs_table,
+                        raw_source_records_table.c.source_run_id == source_runs_table.c.id,
+                    )
+                )
+                .where(
+                    raw_source_records_table.c.normalized_model_id == str(row["id"]),
+                    source_runs_table.c.source_name == "swebench",
+                ),
+            )
+            if not source_rows:
+                continue
+
+            if not any(
+                _swebench_submission_org_from_payload(source_row.get("payload_json")) == normalize_text(current_provider)
+                for source_row in source_rows
+            ):
+                continue
+
+            provider_id = _ensure_provider_row(inferred_provider, conn=conn)
+            conn.execute(
+                update(models_table)
+                .where(models_table.c.id == row["id"])
+                .values(
+                    provider=inferred_provider,
+                    provider_id=provider_id,
+                    type="proprietary" if inferred_provider != "Unknown" else "open_weights",
+                )
+            )
+            repaired_count += 1
+    return repaired_count
+
+
+def _swebench_submission_org_from_payload(payload_json: Any) -> str:
+    payload = _decode_json_object(payload_json)
+    tags = payload.get("tags") if isinstance(payload, dict) else None
+    if not isinstance(tags, list):
+        return ""
+    for tag in tags:
+        if isinstance(tag, str) and tag.startswith("Org: "):
+            return normalize_text(tag.split("Org: ", 1)[1].strip())
+    return ""
+
+
+def _decode_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _choose_model_id(

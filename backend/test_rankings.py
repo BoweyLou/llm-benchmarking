@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from backend import update_engine
 from backend.database import (
@@ -21,6 +21,7 @@ from backend.database import (
     model_use_case_approvals as model_use_case_approvals_table,
     models as models_table,
     providers as providers_table,
+    raw_source_records as raw_source_records_table,
     scores as scores_table,
     source_runs as source_runs_table,
     update_log as update_log_table,
@@ -1219,6 +1220,92 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(log["progress_steps"][0]["status"], "completed")
         self.assertEqual(log["progress_steps"][1]["status"], "running")
         self.assertEqual(log["progress_steps"][2]["status"], "pending")
+
+    def test_infer_provider_prefers_model_name_hint_over_submission_org(self) -> None:
+        inferred = update_engine._infer_provider(
+            {
+                "organization": "42-b3yond-6ug",
+                "submission_organization": "42-b3yond-6ug",
+            },
+            "Qwen3 Coder 30B A3B Instruct",
+        )
+        self.assertEqual(inferred, "Alibaba")
+
+    def test_repair_submitter_provider_leaks_uses_openrouter_slug(self) -> None:
+        update_engine._ensure_provider_row("42-b3yond-6ug")
+        with self.engine.begin() as conn:
+            conn.execute(
+                models_table.insert(),
+                [
+                    {
+                        "id": "qwen3-coder-30b-a3b-instruct",
+                        "name": "Qwen3 Coder 30B A3B Instruct",
+                        "provider": "42-b3yond-6ug",
+                        "provider_id": "42-b3yond-6ug",
+                        "type": "proprietary",
+                        "catalog_status": "tracked",
+                        "release_date": None,
+                        "context_window": None,
+                        "context_window_tokens": None,
+                        "openrouter_canonical_slug": "qwen/qwen3-coder-30b-a3b-instruct",
+                        "active": 1,
+                    }
+                ],
+            )
+            source_run = conn.execute(
+                source_runs_table.insert().values(
+                    update_log_id=None,
+                    source_name="swebench",
+                    benchmark_id="swebench_verified",
+                    started_at="2026-04-08T00:00:00Z",
+                    completed_at="2026-04-08T00:01:00Z",
+                    status="completed",
+                    records_found=1,
+                    error_message=None,
+                    details_json=None,
+                )
+            )
+            source_run_id = int(source_run.inserted_primary_key[0])
+            conn.execute(
+                raw_source_records_table.insert(),
+                [
+                    {
+                        "source_run_id": source_run_id,
+                        "benchmark_id": "swebench_verified",
+                        "raw_model_name": "Qwen3 Coder 30B A3B Instruct",
+                        "normalized_model_id": "qwen3-coder-30b-a3b-instruct",
+                        "raw_key": "qwen3-coder-30b-a3b-instruct",
+                        "raw_value": "64.2",
+                        "payload_json": json.dumps(
+                            {
+                                "tags": [
+                                    "Model: Qwen3 Coder 30B A3B Instruct",
+                                    "Org: 42-b3yond-6ug",
+                                ]
+                            }
+                        ),
+                        "source_url": "https://www.swebench.com/#verified",
+                        "source_type": "secondary",
+                        "verified": 1,
+                        "resolution_status": "resolved",
+                        "collected_at": "2026-04-08T00:00:00Z",
+                        "notes": None,
+                    }
+                ],
+            )
+
+        repaired = update_engine._repair_submitter_provider_leaks()
+        self.assertEqual(repaired, 1)
+
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                select(models_table.c.provider, models_table.c.provider_id).where(
+                    models_table.c.id == "qwen3-coder-30b-a3b-instruct"
+                )
+            ).mappings().one()
+
+        self.assertEqual(row["provider"], "Alibaba")
+        self.assertEqual(row["provider_id"], update_engine.provider_id_from_name("Alibaba"))
 
 
 if __name__ == "__main__":

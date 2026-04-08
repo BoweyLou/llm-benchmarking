@@ -50,7 +50,7 @@ class SwebenchAdapter(BaseSourceAdapter):
                         "leaderboard_name": "Verified",
                         "leaderboard_date": row.get("date"),
                         "submission_name": row.get("name"),
-                        "organization": organization,
+                        "submission_organization": organization,
                         "system_attempts": system_attempts,
                         "os_model": bool(row.get("os_model")),
                         "os_system": bool(row.get("os_system")),
