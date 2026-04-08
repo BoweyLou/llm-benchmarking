@@ -61,6 +61,51 @@ model_use_case_approvals = Table(
     Column("recommendation_updated_at", String),
 )
 
+model_use_case_inference_approvals = Table(
+    "model_use_case_inference_approvals",
+    metadata,
+    Column("model_id", String, ForeignKey("models.id"), primary_key=True),
+    Column("use_case_id", String, primary_key=True),
+    Column("destination_id", String, primary_key=True),
+    Column("location_key", String, primary_key=True),
+    Column("location_label", String, nullable=False),
+    Column("approved_for_use", Integer, nullable=False, server_default=text("0")),
+    Column("approval_notes", Text),
+    Column("approval_updated_at", String),
+)
+
+model_identity_overrides = Table(
+    "model_identity_overrides",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("source_model_id", String, nullable=False, unique=True),
+    Column("match_provider", String, nullable=False),
+    Column("match_name", String, nullable=False),
+    Column("match_key", String, nullable=False, unique=True),
+    Column("family_id", String, nullable=False),
+    Column("family_name", String, nullable=False),
+    Column("canonical_model_id", String, nullable=False),
+    Column("canonical_model_name", String, nullable=False),
+    Column("variant_label", String),
+    Column("notes", Text),
+    Column("updated_at", String, nullable=False),
+    Column("active", Integer, nullable=False, server_default=text("1")),
+)
+
+model_duplicate_overrides = Table(
+    "model_duplicate_overrides",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("source_model_id", String, nullable=False, unique=True),
+    Column("match_provider", String, nullable=False),
+    Column("match_name", String, nullable=False),
+    Column("match_key", String, nullable=False, unique=True),
+    Column("target_model_id", String, nullable=False),
+    Column("notes", Text),
+    Column("updated_at", String, nullable=False),
+    Column("active", Integer, nullable=False, server_default=text("1")),
+)
+
 models = Table(
     "models",
     metadata,
@@ -265,6 +310,10 @@ audit_findings = Table(
 TABLES: tuple[Table, ...] = (
     benchmarks,
     providers,
+    model_use_case_approvals,
+    model_use_case_inference_approvals,
+    model_identity_overrides,
+    model_duplicate_overrides,
     models,
     model_inference_destinations,
     inference_sync_status,
@@ -389,6 +438,49 @@ def _create_schema_sql() -> list[str]:
             recommendation_notes TEXT,
             recommendation_updated_at TEXT,
             PRIMARY KEY (model_id, use_case_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS model_use_case_inference_approvals (
+            model_id TEXT NOT NULL REFERENCES models(id),
+            use_case_id TEXT NOT NULL,
+            destination_id TEXT NOT NULL,
+            location_key TEXT NOT NULL,
+            location_label TEXT NOT NULL,
+            approved_for_use INTEGER NOT NULL DEFAULT 0,
+            approval_notes TEXT,
+            approval_updated_at TEXT,
+            PRIMARY KEY (model_id, use_case_id, destination_id, location_key)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS model_identity_overrides (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_model_id TEXT NOT NULL UNIQUE,
+            match_provider TEXT NOT NULL,
+            match_name TEXT NOT NULL,
+            match_key TEXT NOT NULL UNIQUE,
+            family_id TEXT NOT NULL,
+            family_name TEXT NOT NULL,
+            canonical_model_id TEXT NOT NULL,
+            canonical_model_name TEXT NOT NULL,
+            variant_label TEXT,
+            notes TEXT,
+            updated_at TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS model_duplicate_overrides (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_model_id TEXT NOT NULL UNIQUE,
+            match_provider TEXT NOT NULL,
+            match_name TEXT NOT NULL,
+            match_key TEXT NOT NULL UNIQUE,
+            target_model_id TEXT NOT NULL,
+            notes TEXT,
+            updated_at TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1
         )
         """,
         """
@@ -741,6 +833,55 @@ def _ensure_schema_migrations(conn: Connection) -> None:
         )
         """
     )
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS model_use_case_inference_approvals (
+            model_id TEXT NOT NULL REFERENCES models(id),
+            use_case_id TEXT NOT NULL,
+            destination_id TEXT NOT NULL,
+            location_key TEXT NOT NULL,
+            location_label TEXT NOT NULL,
+            approved_for_use INTEGER NOT NULL DEFAULT 0,
+            approval_notes TEXT,
+            approval_updated_at TEXT,
+            PRIMARY KEY (model_id, use_case_id, destination_id, location_key)
+        )
+        """
+    )
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS model_identity_overrides (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_model_id TEXT NOT NULL UNIQUE,
+            match_provider TEXT NOT NULL,
+            match_name TEXT NOT NULL,
+            match_key TEXT NOT NULL UNIQUE,
+            family_id TEXT NOT NULL,
+            family_name TEXT NOT NULL,
+            canonical_model_id TEXT NOT NULL,
+            canonical_model_name TEXT NOT NULL,
+            variant_label TEXT,
+            notes TEXT,
+            updated_at TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS model_duplicate_overrides (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_model_id TEXT NOT NULL UNIQUE,
+            match_provider TEXT NOT NULL,
+            match_name TEXT NOT NULL,
+            match_key TEXT NOT NULL UNIQUE,
+            target_model_id TEXT NOT NULL,
+            notes TEXT,
+            updated_at TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
     approval_columns = {
         str(row[1])
         for row in conn.exec_driver_sql("PRAGMA table_info(model_use_case_approvals)").fetchall()
@@ -752,6 +893,19 @@ def _ensure_schema_migrations(conn: Connection) -> None:
     }
     for column_name, statement in expected_approval_columns.items():
         if column_name not in approval_columns:
+            conn.exec_driver_sql(statement)
+    inference_approval_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(model_use_case_inference_approvals)").fetchall()
+    }
+    expected_inference_approval_columns = {
+        "location_label": "ALTER TABLE model_use_case_inference_approvals ADD COLUMN location_label TEXT NOT NULL DEFAULT ''",
+        "approved_for_use": "ALTER TABLE model_use_case_inference_approvals ADD COLUMN approved_for_use INTEGER NOT NULL DEFAULT 0",
+        "approval_notes": "ALTER TABLE model_use_case_inference_approvals ADD COLUMN approval_notes TEXT",
+        "approval_updated_at": "ALTER TABLE model_use_case_inference_approvals ADD COLUMN approval_updated_at TEXT",
+    }
+    for column_name, statement in expected_inference_approval_columns.items():
+        if column_name not in inference_approval_columns:
             conn.exec_driver_sql(statement)
     update_log_columns = {
         str(row[1])
@@ -814,8 +968,11 @@ __all__ = [
     "inference_sync_status",
     "metadata",
     "models",
+    "model_duplicate_overrides",
+    "model_identity_overrides",
     "model_inference_destinations",
     "model_market_snapshots",
+    "model_use_case_inference_approvals",
     "model_use_case_approvals",
     "providers",
     "raw_source_records",

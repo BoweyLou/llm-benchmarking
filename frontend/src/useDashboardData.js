@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
+  applyModelUseCaseInferenceApprovalBulk,
   applyModelFamilyApprovalBulk,
   applyModelFamilyApprovalDelta,
+  curateModelIdentity,
   getBenchmarks,
   getMarketSnapshots,
   getModels,
@@ -13,9 +15,11 @@ import {
   getUpdateHistorySources,
   getUpdateStatus,
   getUseCases,
+  mergeModelDuplicate,
   startUpdate,
   updateManualBenchmarkScore,
   updateModelApproval,
+  updateModelUseCaseInferenceApproval,
   updateModelUseCaseApproval,
   updateProvider,
   updateUseCaseInternalWeight,
@@ -98,6 +102,113 @@ export function useDashboardData() {
     progressSteps: [],
   });
   const activePollLogIdRef = useRef(null);
+
+  function upsertRecordById(records, updatedRecord) {
+    const updatedId = String(updatedRecord?.id || "").trim();
+    if (!updatedId) {
+      return records;
+    }
+
+    let found = false;
+    const nextRecords = records.map((record) => {
+      if (record.id !== updatedId) {
+        return record;
+      }
+      found = true;
+      return { ...record, ...updatedRecord };
+    });
+
+    return found ? nextRecords : [updatedRecord, ...records];
+  }
+
+  function mergeModelRecord(updatedModel) {
+    setModels((current) => upsertRecordById(current, updatedModel));
+  }
+
+  function mergeProviderRecord(updatedProvider) {
+    setProviders((current) => upsertRecordById(current, updatedProvider));
+  }
+
+  function mergeUseCaseRecord(updatedUseCase) {
+    setUseCases((current) => upsertRecordById(current, updatedUseCase));
+  }
+
+  function mergeManualScoreResult(result) {
+    if (!result?.model_id || !result?.benchmark_id) {
+      return;
+    }
+
+    setModels((current) =>
+      current.map((model) => (
+        model.id === result.model_id
+          ? {
+              ...model,
+              scores: {
+                ...(model.scores || {}),
+                [result.benchmark_id]: result.score || null,
+              },
+            }
+          : model
+      )),
+    );
+  }
+
+  async function revalidateSlices({
+    benchmarks: includeBenchmarks = false,
+    models: includeModels = false,
+    providers: includeProviders = false,
+    useCases: includeUseCases = false,
+  } = {}) {
+    const jobs = [
+      includeBenchmarks ? { key: "benchmarks", run: getBenchmarks, apply: setBenchmarks } : null,
+      includeUseCases ? { key: "useCases", run: getUseCases, apply: setUseCases } : null,
+      includeModels ? { key: "models", run: getModels, apply: setModels } : null,
+      includeProviders ? { key: "providers", run: getProviders, apply: setProviders } : null,
+    ].filter(Boolean);
+
+    if (!jobs.length) {
+      return true;
+    }
+
+    const results = await Promise.allSettled(jobs.map((job) => job.run()));
+    let nextError = "";
+
+    results.forEach((result, index) => {
+      const job = jobs[index];
+      if (result.status === "fulfilled") {
+        job.apply(result.value);
+        return;
+      }
+      if (!nextError) {
+        nextError = result.reason instanceof Error ? result.reason.message : `Failed to refresh ${job.key}.`;
+      }
+    });
+
+    if (nextError) {
+      setError(nextError);
+      return false;
+    }
+
+    setError("");
+    return true;
+  }
+
+  async function refreshSelectedUseCaseRankings(useCaseId = selectedUseCaseId) {
+    const targetUseCaseId = String(useCaseId || "").trim();
+    if (!targetUseCaseId || targetUseCaseId !== selectedUseCaseId) {
+      return true;
+    }
+
+    try {
+      const nextRankings = await getRankings(targetUseCaseId);
+      setRankings(nextRankings);
+      setRankingsError("");
+      return true;
+    } catch (exception) {
+      setRankingsError(exception instanceof Error ? exception.message : "Failed to load rankings.");
+      return false;
+    }
+  }
 
   async function refreshData() {
     setLoading(true);
@@ -332,10 +443,13 @@ export function useDashboardData() {
     activePollLogIdRef.current = null;
   }, []);
 
-  async function saveProvider(providerId, payload) {
+  async function saveProvider(providerId, payload, options = {}) {
     try {
-      await updateProvider(providerId, payload);
-      await refreshData();
+      const updatedProvider = await updateProvider(providerId, payload);
+      mergeProviderRecord(updatedProvider);
+      if (options.revalidate !== false) {
+        await revalidateSlices({ models: true });
+      }
       return true;
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Failed to update provider.");
@@ -343,16 +457,22 @@ export function useDashboardData() {
     }
   }
 
-  async function saveModelApproval(modelId, payload) {
+  async function saveModelApproval(modelId, payload, options = {}) {
     try {
-      if (payload?.use_case_id) {
-        await updateModelUseCaseApproval(modelId, payload.use_case_id, payload);
+      let updatedModel;
+      if (payload?.use_case_id && payload?.destination_id && payload?.location_label) {
+        updatedModel = await updateModelUseCaseInferenceApproval(modelId, payload.use_case_id, payload);
+      } else if (payload?.use_case_id) {
+        updatedModel = await updateModelUseCaseApproval(modelId, payload.use_case_id, payload);
       } else {
-        await updateModelApproval(modelId, payload);
+        updatedModel = await updateModelApproval(modelId, payload);
       }
-      await refreshData();
-      if (selectedUseCaseId) {
-        await loadRankings(selectedUseCaseId);
+      mergeModelRecord(updatedModel);
+      if (options.revalidateModels) {
+        await revalidateSlices({ models: true });
+      }
+      if (options.refreshRankings !== false && payload?.use_case_id === selectedUseCaseId) {
+        await refreshSelectedUseCaseRankings(payload.use_case_id);
       }
       return true;
     } catch (exception) {
@@ -361,13 +481,48 @@ export function useDashboardData() {
     }
   }
 
+  async function saveModelIdentityCuration(modelId, payload) {
+    try {
+      const updatedModel = await curateModelIdentity(modelId, payload);
+      mergeModelRecord(updatedModel);
+      await revalidateSlices({ models: true });
+      await refreshSelectedUseCaseRankings();
+      return updatedModel;
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Failed to save model family curation.");
+      return null;
+    }
+  }
+
+  async function saveModelDuplicateMerge(modelId, payload) {
+    try {
+      const updatedModel = await mergeModelDuplicate(modelId, payload);
+      await revalidateSlices({ models: true });
+      await refreshSelectedUseCaseRankings();
+      return updatedModel;
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Failed to merge duplicate model.");
+      return null;
+    }
+  }
+
+  async function applyInferenceRouteApprovalBulk(useCaseId, payload) {
+    try {
+      const result = await applyModelUseCaseInferenceApprovalBulk(useCaseId, payload);
+      await revalidateSlices({ models: true });
+      await refreshSelectedUseCaseRankings(useCaseId);
+      return result;
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Failed to apply inference route approval.");
+      return null;
+    }
+  }
+
   async function applyFamilyApprovalDelta(familyId, useCaseId, payload) {
     try {
       const result = await applyModelFamilyApprovalDelta(familyId, useCaseId, payload);
-      await refreshData();
-      if (selectedUseCaseId) {
-        await loadRankings(selectedUseCaseId);
-      }
+      await revalidateSlices({ models: true });
+      await refreshSelectedUseCaseRankings(useCaseId);
       return result;
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Failed to apply family approval delta.");
@@ -378,9 +533,9 @@ export function useDashboardData() {
   async function applyFamilyApprovalBulk(familyId, payload) {
     try {
       const result = await applyModelFamilyApprovalBulk(familyId, payload);
-      await refreshData();
-      if (selectedUseCaseId) {
-        await loadRankings(selectedUseCaseId);
+      await revalidateSlices({ models: true });
+      if (payload?.use_case_ids?.includes(selectedUseCaseId)) {
+        await refreshSelectedUseCaseRankings(selectedUseCaseId);
       }
       return result;
     } catch (exception) {
@@ -391,11 +546,9 @@ export function useDashboardData() {
 
   async function saveUseCaseInternalWeight(useCaseId, payload) {
     try {
-      await updateUseCaseInternalWeight(useCaseId, payload);
-      await refreshData();
-      if (selectedUseCaseId) {
-        await loadRankings(selectedUseCaseId);
-      }
+      const updatedUseCase = await updateUseCaseInternalWeight(useCaseId, payload);
+      mergeUseCaseRecord(updatedUseCase);
+      await refreshSelectedUseCaseRankings(useCaseId);
       return true;
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Failed to update internal view weight.");
@@ -405,11 +558,9 @@ export function useDashboardData() {
 
   async function saveManualBenchmarkScore(modelId, benchmarkId, payload) {
     try {
-      await updateManualBenchmarkScore(modelId, benchmarkId, payload);
-      await refreshData();
-      if (selectedUseCaseId) {
-        await loadRankings(selectedUseCaseId);
-      }
+      const result = await updateManualBenchmarkScore(modelId, benchmarkId, payload);
+      mergeManualScoreResult(result);
+      await refreshSelectedUseCaseRankings();
       return true;
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Failed to update internal benchmark score.");
@@ -443,8 +594,12 @@ export function useDashboardData() {
     rawRecordsBySourceRunId,
     rawRecordsLoadingBySourceRunId,
     loadRawSourceRecords,
+    refreshSelectedUseCaseRankings,
     saveManualBenchmarkScore,
     saveModelApproval,
+    saveModelDuplicateMerge,
+    saveModelIdentityCuration,
+    applyInferenceRouteApprovalBulk,
     saveProvider,
     saveUseCaseInternalWeight,
     triggerUpdate,

@@ -13,8 +13,11 @@ from backend.database import (
     get_engine,
     inference_sync_status as inference_sync_status_table,
     init_db,
+    model_duplicate_overrides as model_duplicate_overrides_table,
     model_inference_destinations as model_inference_destinations_table,
+    model_identity_overrides as model_identity_overrides_table,
     model_market_snapshots as model_market_snapshots_table,
+    model_use_case_inference_approvals as model_use_case_inference_approvals_table,
     model_use_case_approvals as model_use_case_approvals_table,
     models as models_table,
     providers as providers_table,
@@ -22,6 +25,7 @@ from backend.database import (
     source_runs as source_runs_table,
     update_log as update_log_table,
 )
+from backend.model_curation import build_model_curation_match_key
 from backend.seed_data import seed_reference_data
 
 
@@ -460,6 +464,63 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(updated["use_case_approvals"]["coding"]["recommendation_notes"], "Primary coding default")
         self.assertFalse(updated["use_case_approvals"].get("rag_groundedness", {}).get("approved_for_use", False))
 
+    def test_update_model_use_case_inference_approval_persists_route_and_auto_enables_base_approval(self) -> None:
+        updated = update_engine.update_model_use_case_inference_approval(
+            "gpt-5-4",
+            "general_reasoning",
+            "azure-ai-foundry",
+            "Australia",
+            True,
+            "Approved only for Australian hosting.",
+        )
+        self.assertIsNotNone(updated)
+
+        approval = updated["use_case_approvals"]["general_reasoning"]
+        self.assertTrue(approval["approved_for_use"])
+        route = next(
+            entry
+            for entry in approval["inference_route_approvals"]
+            if entry["destination_id"] == "azure-ai-foundry" and entry["location_label"] == "Australia"
+        )
+        self.assertTrue(route["approved_for_use"])
+        self.assertEqual(route["destination_name"], "Azure AI Foundry")
+        self.assertEqual(route["hyperscaler"], "Azure")
+        self.assertEqual(route["approval_notes"], "Approved only for Australian hosting.")
+
+    def test_apply_model_inference_route_approval_bulk_updates_multiple_models(self) -> None:
+        self.add_model("gpt-route-b", "GPT Route B", provider="OpenAI")
+
+        result = update_engine.apply_model_inference_route_approval_bulk(
+            ["gpt-5-4", "gpt-route-b"],
+            "general_reasoning",
+            "azure-ai-foundry",
+            "Australia",
+            True,
+            "Australia only",
+        )
+
+        self.assertEqual(result["updated_count"], 2)
+        self.assertEqual(result["destination_name"], "Azure AI Foundry")
+        self.assertEqual(result["location_label"], "Australia")
+
+        models = update_engine.list_models()
+        gpt_primary = next(model for model in models if model["id"] == "gpt-5-4")
+        gpt_secondary = next(model for model in models if model["id"] == "gpt-route-b")
+
+        primary_route = next(
+            entry
+            for entry in gpt_primary["use_case_approvals"]["general_reasoning"]["inference_route_approvals"]
+            if entry["destination_id"] == "azure-ai-foundry" and entry["location_label"] == "Australia"
+        )
+        secondary_route = next(
+            entry
+            for entry in gpt_secondary["use_case_approvals"]["general_reasoning"]["inference_route_approvals"]
+            if entry["destination_id"] == "azure-ai-foundry" and entry["location_label"] == "Australia"
+        )
+
+        self.assertTrue(primary_route["approved_for_use"])
+        self.assertTrue(secondary_route["approved_for_use"])
+
     def test_use_case_approval_recommendation_persists_and_aggregates(self) -> None:
         self.add_model(
             "family-recommended",
@@ -549,6 +610,155 @@ class RankingTests(unittest.TestCase):
 
         self.assertEqual(row["discovered_update_log_id"], 321)
         self.assertIsNotNone(row["discovered_at"])
+
+    def test_curate_model_identity_persists_manual_override_across_refresh(self) -> None:
+        self.add_model(
+            "manual-family-source",
+            "Manual Family Source",
+            family_id="wrong-family",
+            family_name="Wrong Family",
+            canonical_model_id="wrong-canonical",
+            canonical_model_name="Wrong Canonical",
+        )
+        self.add_model(
+            "manual-family-target",
+            "Manual Family Target",
+            family_id="right-family",
+            family_name="Right Family",
+            canonical_model_id="right-canonical",
+            canonical_model_name="Right Canonical",
+        )
+
+        with patch.object(update_engine, "export_model_curation_baseline"):
+            updated = update_engine.curate_model_identity(
+                "manual-family-source",
+                "manual-family-target",
+                variant_label="Preview",
+                notes="Manual family correction",
+            )
+
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated["family_id"], "right-family")
+        self.assertEqual(updated["canonical_model_id"], "right-canonical")
+        self.assertEqual(updated["variant_label"], "Preview")
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                update(models_table)
+                .where(models_table.c.id == "manual-family-source")
+                .values(
+                    family_id="regressed-family",
+                    family_name="Regressed Family",
+                    canonical_model_id="regressed-canonical",
+                    canonical_model_name="Regressed Canonical",
+                    variant_label=None,
+                )
+            )
+
+        update_engine._refresh_model_identity_metadata()
+
+        with self.engine.begin() as conn:
+            model_row = conn.execute(
+                models_table.select().where(models_table.c.id == "manual-family-source")
+            ).mappings().one()
+            override_row = conn.execute(
+                model_identity_overrides_table.select().where(
+                    model_identity_overrides_table.c.source_model_id == "manual-family-source"
+                )
+            ).mappings().one()
+
+        self.assertEqual(model_row["family_id"], "right-family")
+        self.assertEqual(model_row["canonical_model_id"], "right-canonical")
+        self.assertEqual(model_row["variant_label"], "Preview")
+        self.assertEqual(override_row["family_name"], "Right Family")
+        self.assertEqual(override_row["active"], 1)
+
+    def test_ensure_model_uses_identity_override_for_future_insert(self) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                model_identity_overrides_table.insert(),
+                [
+                    {
+                        "source_model_id": "curated-future-variant",
+                        "match_provider": "Test Provider",
+                        "match_name": "Curated Future Variant",
+                        "match_key": build_model_curation_match_key("Test Provider", "Curated Future Variant"),
+                        "family_id": "future-family",
+                        "family_name": "Future Family",
+                        "canonical_model_id": "future-canonical",
+                        "canonical_model_name": "Future Canonical",
+                        "variant_label": "Instruct",
+                        "notes": "Future match rule",
+                        "updated_at": "2026-04-08T00:00:00Z",
+                        "active": 1,
+                    }
+                ],
+            )
+
+        model_id = update_engine._ensure_model(
+            "Curated Future Variant",
+            {"organization": "Test Provider"},
+            raw_model_key="curated-future-variant",
+        )
+
+        self.assertEqual(model_id, "curated-future-variant")
+
+        with self.engine.begin() as conn:
+            row = conn.execute(
+                models_table.select().where(models_table.c.id == "curated-future-variant")
+            ).mappings().one()
+
+        self.assertEqual(row["family_id"], "future-family")
+        self.assertEqual(row["canonical_model_id"], "future-canonical")
+        self.assertEqual(row["variant_label"], "Instruct")
+
+    def test_merge_model_duplicate_persists_future_redirect(self) -> None:
+        self.add_model("nova-pro", "Nova Pro", provider="Amazon")
+        self.add_model("nova-pro-preview", "Nova Pro Preview", provider="Amazon")
+        self.add_score("nova-pro-preview", "aa_intelligence", 77.0)
+        update_engine.update_model_use_case_approval("nova-pro-preview", "coding", True, "Legacy duplicate approval")
+
+        with patch.object(update_engine, "export_model_curation_baseline"):
+            merged = update_engine.merge_model_duplicate(
+                "nova-pro-preview",
+                "nova-pro",
+                notes="Preview row is a duplicate of Nova Pro",
+            )
+
+        self.assertIsNotNone(merged)
+        assert merged is not None
+        self.assertEqual(merged["id"], "nova-pro")
+
+        with self.engine.begin() as conn:
+            model_ids = {row["id"] for row in conn.execute(models_table.select()).mappings().all()}
+            duplicate_override = conn.execute(
+                model_duplicate_overrides_table.select().where(
+                    model_duplicate_overrides_table.c.source_model_id == "nova-pro-preview"
+                )
+            ).mappings().one()
+            approval_rows = conn.execute(
+                model_use_case_approvals_table.select().where(
+                    model_use_case_approvals_table.c.model_id == "nova-pro"
+                )
+            ).mappings().all()
+
+        self.assertIn("nova-pro", model_ids)
+        self.assertNotIn("nova-pro-preview", model_ids)
+        self.assertEqual(duplicate_override["target_model_id"], "nova-pro")
+        self.assertTrue(any(row["use_case_id"] == "coding" and row["approved_for_use"] == 1 for row in approval_rows))
+
+        rerouted_id = update_engine._ensure_model(
+            "Nova Pro Preview",
+            {"organization": "Amazon"},
+            raw_model_key="nova-pro-preview",
+        )
+        self.assertEqual(rerouted_id, "nova-pro")
+
+        with self.engine.begin() as conn:
+            model_ids_after_reroute = {row["id"] for row in conn.execute(models_table.select()).mappings().all()}
+
+        self.assertNotIn("nova-pro-preview", model_ids_after_reroute)
 
     def test_apply_model_family_approval_delta_only_updates_new_unreviewed_members(self) -> None:
         self.add_update_log(77)
@@ -833,6 +1043,20 @@ class RankingTests(unittest.TestCase):
                 ],
             )
             conn.execute(
+                model_use_case_inference_approvals_table.insert(),
+                [
+                    {
+                        "model_id": "duplicate-nova-pro-preview-row",
+                        "use_case_id": "general_reasoning",
+                        "destination_id": "azure-ai-foundry",
+                        "location_key": "australia",
+                        "location_label": "Australia",
+                        "approved_for_use": 1,
+                        "approval_notes": "AU only",
+                    }
+                ],
+            )
+            conn.execute(
                 model_inference_destinations_table.insert(),
                 [
                     {
@@ -871,12 +1095,14 @@ class RankingTests(unittest.TestCase):
         with self.engine.begin() as conn:
             model_ids = {row["id"] for row in conn.execute(models_table.select()).mappings().all()}
             approval_rows = conn.execute(model_use_case_approvals_table.select()).mappings().all()
+            inference_approval_rows = conn.execute(model_use_case_inference_approvals_table.select()).mappings().all()
             inference_rows = conn.execute(model_inference_destinations_table.select()).mappings().all()
             snapshot_rows = conn.execute(model_market_snapshots_table.select()).mappings().all()
 
         self.assertNotIn("duplicate-nova-pro-preview-row", model_ids)
         self.assertIn("duplicate-nova-pro-canonical-row", model_ids)
         self.assertEqual(approval_rows[0]["model_id"], "duplicate-nova-pro-canonical-row")
+        self.assertEqual(inference_approval_rows[0]["model_id"], "duplicate-nova-pro-canonical-row")
         self.assertEqual(inference_rows[0]["model_id"], "duplicate-nova-pro-canonical-row")
         self.assertEqual(snapshot_rows[0]["model_id"], "duplicate-nova-pro-canonical-row")
 

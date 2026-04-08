@@ -27,6 +27,7 @@ const INTERNAL_VIEW_BENCHMARK_ID = "internal_view";
 const VALID_MODEL_TYPES = new Set(["All", "proprietary", "open_weights"]);
 const DEFAULT_APPROVAL_FAMILY_FILTER = "All";
 const DEFAULT_HYPERSCALER_FILTER = "All";
+const DEFAULT_INFERENCE_PROVIDER_FILTER = "All";
 const DEFAULT_INFERENCE_LOCATION_FILTER = "All";
 const DEFAULT_ORIGIN_FILTER = "All";
 const DEFAULT_REVIEW_SIGNAL_FILTER = "all";
@@ -192,6 +193,7 @@ const MODEL_APPROVAL_FILTER_OPTIONS = [
 ];
 const MODEL_REVIEW_FILTER_OPTIONS = [
   { id: "all", label: "All review states" },
+  { id: "unrated", label: "Unrated" },
   { id: "needs_review", label: "Needs review" },
   { id: "suggested", label: "Suggested approve" },
   { id: "new_only", label: "New family" },
@@ -285,7 +287,12 @@ function App() {
         inferenceLocationFilter === DEFAULT_INFERENCE_LOCATION_FILTER ||
         (model.inference_countries || []).includes(inferenceLocationFilter);
       const matchType = typeFilter === "All" || model.type === typeFilter;
-      const matchApproval = !approvedOnly || isModelApprovedForUseCase(model, selectedUseCase?.id);
+      const matchApproval =
+        !approvedOnly ||
+        isModelApprovedForUseCase(model, selectedUseCase?.id, {
+          locationLabel:
+            inferenceLocationFilter !== DEFAULT_INFERENCE_LOCATION_FILTER ? inferenceLocationFilter : "",
+        });
       const matchRecommendation =
         !selectedUseCase ||
         recommendationFilter === DEFAULT_RECOMMENDATION_FILTER ||
@@ -598,13 +605,25 @@ function App() {
       exportDashboardHtmlSnapshot({
         activeTab,
         benchmarks: data.benchmarks,
+        browserOnlyCompared,
+        browserSort,
         catalogMode,
+        compareIds,
+        exactModels,
+        familyModels,
         history: data.history,
+        inferenceLocationFilter,
         marketSnapshots: data.marketSnapshots,
+        providerFilter,
+        query,
+        rankingEntries: selectedRankingEntries,
+        recommendationFilter,
         selectedUseCaseId: data.selectedUseCaseId,
         selectedUseCaseLabel: selectedUseCase?.label || "",
         sourceRunsByLogId: exportContext.sourceRunsByLogId,
+        typeFilter,
         useCases: data.useCases,
+        approvedOnly,
       });
     } catch (error) {
       console.error(error);
@@ -722,13 +741,17 @@ function App() {
     if (activeTab === "admin") {
       return (
         <AdminPanel
+          onApplyInferenceRouteApprovalBulk={data.applyInferenceRouteApprovalBulk}
           onApplyFamilyApprovalBulk={data.applyFamilyApprovalBulk}
+          onRefreshSelectedUseCaseRankings={data.refreshSelectedUseCaseRankings}
           benchmarks={data.benchmarks}
           models={data.models}
           onSaveInternalBenchmarkScore={data.saveManualBenchmarkScore}
           onSaveInternalWeight={data.saveUseCaseInternalWeight}
+          onSaveModelDuplicateMerge={data.saveModelDuplicateMerge}
           providers={data.providers}
           onSaveModelApproval={data.saveModelApproval}
+          onSaveModelIdentityCuration={data.saveModelIdentityCuration}
           onSaveProvider={data.saveProvider}
           selectedUseCaseId={data.selectedUseCaseId}
           useCases={data.useCases}
@@ -912,7 +935,7 @@ function ViewModeToggle({ mode, onChange }) {
         onClick={() => onChange("exact")}
         type="button"
       >
-        Exact variants
+        Individual models
       </button>
     </div>
   );
@@ -1358,7 +1381,7 @@ function Methodology({ benchmarks, benchmarksById, catalogMode, selectedUseCaseI
             <div><strong>High coverage matters:</strong> two models can have similar scores, but the one covering more of the evidence stack is usually the safer pick.</div>
             <div><strong>Empty lens:</strong> means no model currently satisfies the required evidence stack for that use case.</div>
             <div><strong>Preview lens:</strong> useful for exploration, but still thinner or more uneven than ready lenses.</div>
-            <div><strong>{catalogMode === "family" ? "Families mode" : "Exact variants mode"}:</strong> {catalogMode === "family" ? "exact variants are first grouped into canonical models, then rolled into a family card using the best available benchmark evidence per family." : "you are looking at exact model/variant cards with no family aggregation."}</div>
+            <div><strong>{catalogMode === "family" ? "Families mode" : "Individual models mode"}:</strong> {catalogMode === "family" ? "individual models are first grouped into canonical models, then rolled into a family card using the best available benchmark evidence per family." : "you are looking at individual model cards with no family aggregation."}</div>
           </div>
           <div className="method-badges">
             <span className="method-badge"><SourceBadge score={{ source_type: "primary", verified: true }} /> direct primary row</span>
@@ -1371,8 +1394,8 @@ function Methodology({ benchmarks, benchmarksById, catalogMode, selectedUseCaseI
           <div className="panel-head">How to use this tool</div>
           <div className="method-list">
             <div><strong>Start with a use case lens:</strong> that gives you the right weighting for the task you actually care about.</div>
-            <div><strong>Use family view first:</strong> it is the best default for procurement and shortlist decisions.</div>
-            <div><strong>Switch to exact variants second:</strong> use it when you need to choose between reasoning, max, mini, or context-window variants.</div>
+            <div><strong>Use families first:</strong> it is the best default for procurement and shortlist decisions.</div>
+            <div><strong>Switch to individual models second:</strong> use it when you need to choose between reasoning, max, mini, or context-window variants.</div>
             <div><strong>Open the benchmark rows:</strong> check source, caveat, and missing evidence before trusting a high rank.</div>
           </div>
         </article>
@@ -1694,7 +1717,7 @@ function ModelBrowser({
           <h2>Model Browser</h2>
           <p>
             Search and explore all tracked models with their full benchmark profiles.
-            {catalogMode === "family" ? " Family view combines exact variants into canonical models before rolling them into a family card." : ""}
+            {catalogMode === "family" ? " Families mode combines individual models into canonical models before rolling them into a family card." : ""}
           </p>
         </div>
         <ViewModeToggle mode={catalogMode} onChange={onCatalogModeChange} />
@@ -2975,10 +2998,14 @@ function HistorySourceRunDetails({ rawRecords, rawRecordsLoading, sourceRun }) {
 function AdminPanel({
   benchmarks,
   models,
+  onApplyInferenceRouteApprovalBulk,
   onApplyFamilyApprovalBulk,
+  onRefreshSelectedUseCaseRankings,
   onSaveInternalBenchmarkScore,
   onSaveInternalWeight,
   onSaveModelApproval,
+  onSaveModelDuplicateMerge,
+  onSaveModelIdentityCuration,
   onSaveProvider,
   providers,
   selectedUseCaseId,
@@ -2990,6 +3017,7 @@ function AdminPanel({
   );
   const [providerDrafts, setProviderDrafts] = useState({});
   const [modelDrafts, setModelDrafts] = useState({});
+  const [modelCurationDrafts, setModelCurationDrafts] = useState({});
   const [internalWeightDrafts, setInternalWeightDrafts] = useState({});
   const [internalScoreDrafts, setInternalScoreDrafts] = useState({});
   const [adminFocus, setAdminFocus] = useState("all");
@@ -3003,6 +3031,7 @@ function AdminPanel({
   const [approvalOriginFilter, setApprovalOriginFilter] = useState(DEFAULT_ORIGIN_FILTER);
   const [approvalRecommendationFilter, setApprovalRecommendationFilter] = useState(DEFAULT_RECOMMENDATION_FILTER);
   const [approvalHyperscalerFilter, setApprovalHyperscalerFilter] = useState(DEFAULT_HYPERSCALER_FILTER);
+  const [approvalInferenceProviderFilter, setApprovalInferenceProviderFilter] = useState(DEFAULT_INFERENCE_PROVIDER_FILTER);
   const [approvalInferenceLocationFilter, setApprovalInferenceLocationFilter] = useState(DEFAULT_INFERENCE_LOCATION_FILTER);
   const [reviewSignalFilter, setReviewSignalFilter] = useState(DEFAULT_REVIEW_SIGNAL_FILTER);
   const [providerSearch, setProviderSearch] = useState("");
@@ -3014,6 +3043,7 @@ function AdminPanel({
   const [internalScoreFilter, setInternalScoreFilter] = useState("all");
   const [providerSavingId, setProviderSavingId] = useState("");
   const [modelSavingId, setModelSavingId] = useState("");
+  const [modelCurationSavingId, setModelCurationSavingId] = useState("");
   const [internalWeightSavingId, setInternalWeightSavingId] = useState("");
   const [internalScoreSavingId, setInternalScoreSavingId] = useState("");
   const [providerBulkSaving, setProviderBulkSaving] = useState(false);
@@ -3026,6 +3056,9 @@ function AdminPanel({
   const [internalScoreBulkResult, setInternalScoreBulkResult] = useState(null);
   const [familyDeltaNotes, setFamilyDeltaNotes] = useState("");
   const [familyDeltaSaving, setFamilyDeltaSaving] = useState(false);
+  const [bulkInferenceRouteApproval, setBulkInferenceRouteApproval] = useState(true);
+  const [bulkInferenceRouteNotes, setBulkInferenceRouteNotes] = useState("");
+  const [bulkInferenceRouteSaving, setBulkInferenceRouteSaving] = useState(false);
   const [bulkRecommendationStatus, setBulkRecommendationStatus] = useState("unrated");
   const [bulkRecommendationNotes, setBulkRecommendationNotes] = useState("");
   const [message, setMessage] = useState("");
@@ -3126,132 +3159,163 @@ function AdminPanel({
     () => buildApprovalReviewSignals(models, approvalUseCaseId),
     [approvalUseCaseId, models],
   );
-  const approvalFamilies = useMemo(() => {
-    const familyEntries = Array.from(
-      new Map(
-        models
-          .filter((model) => model.family_id)
-          .map((model) => [
-            model.family_id,
-            {
-              id: model.family_id,
-              label: model.family_name || model.family_id,
-              provider: model.provider || "",
-              count: 0,
-            },
-          ]),
-      ).values(),
-    )
-      .map((family) => ({
-        ...family,
-        ...aggregateOpenRouterSignals(models.filter((model) => model.family_id === family.id)),
-        count: models.filter((model) => model.family_id === family.id).length,
-      }))
-      .sort(compareOpenRouterFamilyFilterOption);
-    return familyEntries;
-  }, [models]);
+  const allApprovalFamilies = useMemo(() => buildApprovalFamilyOptions(models), [models]);
 
   useEffect(() => {
-    const validFamilyIds = new Set(approvalFamilies.map((family) => family.id));
+    const validFamilyIds = new Set(allApprovalFamilies.map((family) => family.id));
     setApprovalFamilyFilters((current) => current.filter((familyId) => validFamilyIds.has(familyId)));
-  }, [approvalFamilies]);
+  }, [allApprovalFamilies]);
 
-  const selectedApprovalFamilies = useMemo(
-    () => approvalFamilies.filter((family) => approvalFamilyFilters.includes(family.id)),
-    [approvalFamilies, approvalFamilyFilters],
+  const selectedApprovalFamilyIds = useMemo(() => new Set(approvalFamilyFilters), [approvalFamilyFilters]);
+
+  function matchesApprovalModelFilters(model, { includeFamilyFilter = true } = {}) {
+    const currentApproval = getModelApprovalRecord(model, approvalUseCaseId);
+    const isDirty = isModelDirty(model);
+    const reviewSignal = approvalReviewSignals[model.id] || null;
+    const search = deferredModelSearch.toLowerCase().trim();
+
+    if (modelApprovalFilter === "changed" && !isDirty) {
+      return false;
+    }
+    if (modelApprovalFilter === "pending" && currentApproval?.approved_for_use) {
+      return false;
+    }
+    if (modelApprovalFilter === "approved" && !currentApproval?.approved_for_use) {
+      return false;
+    }
+    if (includeFamilyFilter && selectedApprovalFamilyIds.size && !selectedApprovalFamilyIds.has(model.family_id)) {
+      return false;
+    }
+    if (
+      approvalOriginFilter !== DEFAULT_ORIGIN_FILTER &&
+      !getModelOriginCountries(model).includes(approvalOriginFilter)
+    ) {
+      return false;
+    }
+    if (
+      approvalRecommendationFilter !== DEFAULT_RECOMMENDATION_FILTER &&
+      !matchesRecommendationFilter(model, approvalUseCaseId, approvalRecommendationFilter)
+    ) {
+      return false;
+    }
+    if (
+      approvalHyperscalerFilter !== DEFAULT_HYPERSCALER_FILTER &&
+      !getModelHyperscalers(model).includes(approvalHyperscalerFilter)
+    ) {
+      return false;
+    }
+    if (
+      approvalInferenceProviderFilter !== DEFAULT_INFERENCE_PROVIDER_FILTER &&
+      !getModelInferenceProviderIds(model).includes(approvalInferenceProviderFilter)
+    ) {
+      return false;
+    }
+    if (
+      approvalInferenceLocationFilter !== DEFAULT_INFERENCE_LOCATION_FILTER &&
+      !getModelInferenceCountries(model).includes(approvalInferenceLocationFilter)
+    ) {
+      return false;
+    }
+    if (reviewSignalFilter === "unrated" && reviewSignal?.isReviewed !== false) {
+      return false;
+    }
+    if (reviewSignalFilter === "needs_review" && !reviewSignal?.needsReview) {
+      return false;
+    }
+    if (reviewSignalFilter === "suggested" && reviewSignal?.status !== "suggested_approve") {
+      return false;
+    }
+    if (reviewSignalFilter === "new_only" && reviewSignal?.status !== "new_model") {
+      return false;
+    }
+    if (reviewSignalFilter === "reviewed_no" && reviewSignal?.status !== "reviewed_not_approved") {
+      return false;
+    }
+    if (!search) {
+      return true;
+    }
+    return [
+      model.name,
+      model.family_name,
+      model.provider,
+      model.provider_country_name,
+      getModelOriginCountries(model).join(" "),
+      currentApproval?.approval_notes,
+      currentApproval?.recommendation_notes,
+      formatRecommendationStatusLabel(currentApproval?.recommendation_status),
+      reviewSignal?.summary,
+      getModelHyperscalers(model).join(" "),
+      getModelInferenceProviders(model).map((provider) => provider.label).join(" "),
+      getModelInferenceCountries(model).join(" "),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(search);
+  }
+
+  const approvalFamilyCandidateModels = useMemo(
+    () => models.filter((model) => matchesApprovalModelFilters(model, { includeFamilyFilter: false })),
+    [
+      approvalHyperscalerFilter,
+      approvalInferenceLocationFilter,
+      approvalInferenceProviderFilter,
+      approvalOriginFilter,
+      approvalRecommendationFilter,
+      approvalReviewSignals,
+      approvalUseCaseId,
+      deferredModelSearch,
+      modelApprovalFilter,
+      modelDrafts,
+      models,
+      reviewSignalFilter,
+    ],
   );
-  const selectedApprovalFamilyIds = useMemo(
-    () => new Set(selectedApprovalFamilies.map((family) => family.id)),
-    [selectedApprovalFamilies],
+  const filteredApprovalFamilies = useMemo(
+    () => buildApprovalFamilyOptions(approvalFamilyCandidateModels),
+    [approvalFamilyCandidateModels],
+  );
+  const filteredApprovalFamilyMap = useMemo(
+    () => new Map(filteredApprovalFamilies.map((family) => [family.id, family])),
+    [filteredApprovalFamilies],
+  );
+  const allApprovalFamilyMap = useMemo(
+    () => new Map(allApprovalFamilies.map((family) => [family.id, family])),
+    [allApprovalFamilies],
+  );
+  const selectedApprovalFamilies = useMemo(
+    () =>
+      approvalFamilyFilters
+        .map((familyId) => {
+          const family = filteredApprovalFamilyMap.get(familyId) || allApprovalFamilyMap.get(familyId);
+          if (!family) {
+            return null;
+          }
+          return filteredApprovalFamilyMap.get(familyId)
+            ? family
+            : {
+                ...family,
+                count: 0,
+              };
+        })
+        .filter(Boolean),
+    [allApprovalFamilyMap, approvalFamilyFilters, filteredApprovalFamilyMap],
   );
   const visibleApprovalFamilies = useMemo(() => {
     const selectedIds = new Set(approvalFamilyFilters);
-    const remainingFamilies = approvalFamilies.filter((family) => !selectedIds.has(family.id));
+    const remainingFamilies = filteredApprovalFamilies.filter((family) => !selectedIds.has(family.id));
     const visibleRemainingCount = Math.max(0, visibleApprovalFamilyCount - selectedApprovalFamilies.length);
     return [...selectedApprovalFamilies, ...remainingFamilies.slice(0, visibleRemainingCount)];
-  }, [approvalFamilies, approvalFamilyFilters, selectedApprovalFamilies, visibleApprovalFamilyCount]);
+  }, [approvalFamilyFilters, filteredApprovalFamilies, selectedApprovalFamilies, visibleApprovalFamilyCount]);
   const hasMoreApprovalFamilies = useMemo(() => {
-    const hiddenCount = approvalFamilies.filter((family) => !approvalFamilyFilters.includes(family.id)).length;
+    const hiddenCount = filteredApprovalFamilies.filter((family) => !approvalFamilyFilters.includes(family.id)).length;
     const visibleRemainingCount = Math.max(0, visibleApprovalFamilyCount - selectedApprovalFamilies.length);
     return hiddenCount > visibleRemainingCount;
-  }, [approvalFamilies, approvalFamilyFilters, selectedApprovalFamilies, visibleApprovalFamilyCount]);
+  }, [approvalFamilyFilters, filteredApprovalFamilies, selectedApprovalFamilies, visibleApprovalFamilyCount]);
 
   const filteredModels = useMemo(() => {
-    const search = deferredModelSearch.toLowerCase().trim();
     return [...models]
-      .filter((model) => {
-        const currentApproval = getModelApprovalRecord(model, approvalUseCaseId);
-        const isDirty = isModelDirty(model);
-        const reviewSignal = approvalReviewSignals[model.id] || null;
-        if (modelApprovalFilter === "changed" && !isDirty) {
-          return false;
-        }
-        if (modelApprovalFilter === "pending" && currentApproval?.approved_for_use) {
-          return false;
-        }
-        if (modelApprovalFilter === "approved" && !currentApproval?.approved_for_use) {
-          return false;
-        }
-        if (selectedApprovalFamilyIds.size && !selectedApprovalFamilyIds.has(model.family_id)) {
-          return false;
-        }
-        if (
-          approvalOriginFilter !== DEFAULT_ORIGIN_FILTER &&
-          !getModelOriginCountries(model).includes(approvalOriginFilter)
-        ) {
-          return false;
-        }
-        if (
-          approvalRecommendationFilter !== DEFAULT_RECOMMENDATION_FILTER &&
-          !matchesRecommendationFilter(model, approvalUseCaseId, approvalRecommendationFilter)
-        ) {
-          return false;
-        }
-        if (
-          approvalHyperscalerFilter !== DEFAULT_HYPERSCALER_FILTER &&
-          !getModelHyperscalers(model).includes(approvalHyperscalerFilter)
-        ) {
-          return false;
-        }
-        if (
-          approvalInferenceLocationFilter !== DEFAULT_INFERENCE_LOCATION_FILTER &&
-          !getModelInferenceCountries(model).includes(approvalInferenceLocationFilter)
-        ) {
-          return false;
-        }
-        if (reviewSignalFilter === "needs_review" && !reviewSignal?.needsReview) {
-          return false;
-        }
-        if (reviewSignalFilter === "suggested" && reviewSignal?.status !== "suggested_approve") {
-          return false;
-        }
-        if (reviewSignalFilter === "new_only" && reviewSignal?.status !== "new_model") {
-          return false;
-        }
-        if (reviewSignalFilter === "reviewed_no" && reviewSignal?.status !== "reviewed_not_approved") {
-          return false;
-        }
-        if (!search) {
-          return true;
-        }
-        return [
-          model.name,
-          model.family_name,
-          model.provider,
-          model.provider_country_name,
-          getModelOriginCountries(model).join(" "),
-          currentApproval?.approval_notes,
-          currentApproval?.recommendation_notes,
-          formatRecommendationStatusLabel(currentApproval?.recommendation_status),
-          reviewSignal?.summary,
-          getModelHyperscalers(model).join(" "),
-          getModelInferenceCountries(model).join(" "),
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(search);
-      })
+      .filter((model) => matchesApprovalModelFilters(model))
       .sort((left, right) => {
         const providerComparison = String(left.provider || "").localeCompare(String(right.provider || ""));
         if (providerComparison !== 0) {
@@ -3264,6 +3328,7 @@ function AdminPanel({
     approvalOriginFilter,
     approvalRecommendationFilter,
     approvalHyperscalerFilter,
+    approvalInferenceProviderFilter,
     approvalInferenceLocationFilter,
     approvalReviewSignals,
     approvalUseCaseId,
@@ -3320,6 +3385,27 @@ function AdminPanel({
     ],
     [models],
   );
+  const approvalInferenceProviders = useMemo(() => {
+    const providersById = new Map();
+    models.forEach((model) => {
+      getModelInferenceProviders(model).forEach((provider) => {
+        if (
+          approvalHyperscalerFilter !== DEFAULT_HYPERSCALER_FILTER &&
+          provider.hyperscaler !== approvalHyperscalerFilter
+        ) {
+          return;
+        }
+        providersById.set(provider.id, provider);
+      });
+    });
+    return Array.from(providersById.values()).sort((left, right) => {
+      const hyperscalerComparison = String(left.hyperscaler || "").localeCompare(String(right.hyperscaler || ""));
+      if (hyperscalerComparison !== 0) {
+        return hyperscalerComparison;
+      }
+      return String(left.label || "").localeCompare(String(right.label || ""));
+    });
+  }, [approvalHyperscalerFilter, models]);
   const approvalOrigins = useMemo(
     () => [
       DEFAULT_ORIGIN_FILTER,
@@ -3345,6 +3431,14 @@ function AdminPanel({
     }
   }, [approvalHyperscalerFilter, approvalHyperscalers]);
   useEffect(() => {
+    if (
+      approvalInferenceProviderFilter !== DEFAULT_INFERENCE_PROVIDER_FILTER &&
+      !approvalInferenceProviders.some((provider) => provider.id === approvalInferenceProviderFilter)
+    ) {
+      setApprovalInferenceProviderFilter(DEFAULT_INFERENCE_PROVIDER_FILTER);
+    }
+  }, [approvalInferenceProviderFilter, approvalInferenceProviders]);
+  useEffect(() => {
     if (!approvalInferenceLocations.includes(approvalInferenceLocationFilter)) {
       setApprovalInferenceLocationFilter(DEFAULT_INFERENCE_LOCATION_FILTER);
     }
@@ -3360,6 +3454,20 @@ function AdminPanel({
   const selectedBulkUseCases = useMemo(
     () => useCases.filter((useCase) => bulkApprovalUseCaseIds.includes(useCase.id)),
     [bulkApprovalUseCaseIds, useCases],
+  );
+  const selectedInferenceProvider = useMemo(
+    () => approvalInferenceProviders.find((provider) => provider.id === approvalInferenceProviderFilter) || null,
+    [approvalInferenceProviderFilter, approvalInferenceProviders],
+  );
+  const selectedInferenceRouteLocationKey = useMemo(
+    () => buildInferenceLocationKey(approvalInferenceLocationFilter),
+    [approvalInferenceLocationFilter],
+  );
+  const hasSelectedInferenceRoute = Boolean(
+    approvalUseCaseId &&
+      approvalInferenceProviderFilter !== DEFAULT_INFERENCE_PROVIDER_FILTER &&
+      approvalInferenceLocationFilter !== DEFAULT_INFERENCE_LOCATION_FILTER &&
+      selectedInferenceRouteLocationKey,
   );
   const bulkApprovalPreview = useMemo(() => {
     if (!selectedApprovalFamilies.length) {
@@ -3477,6 +3585,17 @@ function AdminPanel({
       ...current,
       [draftKey]: {
         ...(current[draftKey] || {}),
+        [field]: value,
+      },
+    }));
+  }
+
+  function updateModelCurationDraft(modelId, field, value) {
+    setModelCurationDrafts((current) => ({
+      ...current,
+      [modelId]: {
+        ...createModelCurationDraft(models.find((candidate) => candidate.id === modelId)),
+        ...(current[modelId] || {}),
         [field]: value,
       },
     }));
@@ -3676,6 +3795,45 @@ function AdminPanel({
     }
   }
 
+  async function handleSaveModelIdentityCuration(model, targetModel) {
+    const draft = {
+      ...createModelCurationDraft(model),
+      ...(modelCurationDrafts[model.id] || {}),
+    };
+    if (!targetModel || targetModel.id === model.id) {
+      return;
+    }
+    setModelCurationSavingId(`identity:${model.id}`);
+    const updatedModel = await onSaveModelIdentityCuration(model.id, {
+      target_model_id: targetModel.id,
+      variant_label: draft.identity_variant_label || "",
+      notes: draft.identity_notes || "",
+    });
+    setModelCurationSavingId("");
+    if (updatedModel) {
+      setMessage(`Saved durable family mapping for ${model.name} using ${targetModel.name}.`);
+    }
+  }
+
+  async function handleMergeModelDuplicate(model, targetModel) {
+    const draft = {
+      ...createModelCurationDraft(model),
+      ...(modelCurationDrafts[model.id] || {}),
+    };
+    if (!targetModel || targetModel.id === model.id) {
+      return;
+    }
+    setModelCurationSavingId(`duplicate:${model.id}`);
+    const mergedTarget = await onSaveModelDuplicateMerge(model.id, {
+      target_model_id: targetModel.id,
+      notes: draft.duplicate_notes || "",
+    });
+    setModelCurationSavingId("");
+    if (mergedTarget) {
+      setMessage(`Merged ${model.name} into ${mergedTarget.name} and stored a future duplicate rule.`);
+    }
+  }
+
   async function handleSaveInternalWeight(useCase) {
     const draft = internalWeightDrafts[useCase.id];
     if (!draft || internalWeightErrorsById[useCase.id]?.length) {
@@ -3746,10 +3904,14 @@ function AdminPanel({
       const success = await onSaveModelApproval(
         entry.modelId,
         buildModelApprovalSavePayload(entry.useCaseId, entry.draft),
+        { refreshRankings: false },
       );
       if (success) {
         savedCount += 1;
       }
+    }
+    if (savedCount && approvalUseCaseId === selectedUseCaseId) {
+      await onRefreshSelectedUseCaseRankings(approvalUseCaseId);
     }
     setModelBulkSaving(false);
     if (savedCount) {
@@ -3775,6 +3937,29 @@ function AdminPanel({
     });
     setMessage(
       `Applied ${formatRecommendationStatusLabel(bulkRecommendationStatus).toLowerCase()} recommendation draft to ${filteredModels.length} filtered model${filteredModels.length === 1 ? "" : "s"} for ${approvalUseCase?.label || approvalUseCaseId}. Save changes to persist.`,
+    );
+  }
+
+  async function handleApplyInferenceRouteBulk() {
+    if (!hasSelectedInferenceRoute || !filteredModels.length) {
+      return;
+    }
+    setBulkInferenceRouteSaving(true);
+    const result = await onApplyInferenceRouteApprovalBulk(approvalUseCaseId, {
+      model_ids: filteredModels.map((model) => model.id),
+      destination_id: approvalInferenceProviderFilter,
+      location_key: selectedInferenceRouteLocationKey,
+      location_label: approvalInferenceLocationFilter,
+      approved_for_use: bulkInferenceRouteApproval,
+      approval_notes: bulkInferenceRouteNotes,
+    });
+    setBulkInferenceRouteSaving(false);
+    if (!result) {
+      return;
+    }
+    setBulkInferenceRouteNotes("");
+    setMessage(
+      `${bulkInferenceRouteApproval ? "Approved" : "Blocked"} ${result.updated_count} inference route change${Number(result.updated_count) === 1 ? "" : "s"} for ${selectedInferenceProvider?.label || "the selected provider"} in ${approvalInferenceLocationFilter}. Positive route approvals also ensure the base lens approval is on.`,
     );
   }
 
@@ -4233,7 +4418,7 @@ function AdminPanel({
       <article className="panel stack">
         <div className="panel-head">Model Approval</div>
         <div className="admin-subtle">
-          Approval is tracked per exact model and per lens. {approvedCount} of {models.length} models are currently approved for {approvalUseCase?.label || "the selected lens"}.
+          Base approval is tracked per exact model and per lens, with optional route-specific overlays by inference provider and location. {approvedCount} of {models.length} models are currently approved for {approvalUseCase?.label || "the selected lens"}.
           {" "}
           {pendingReviewCount} newly discovered model{pendingReviewCount === 1 ? "" : "s"} still need review, and {suggestedReviewCount} of those already match an approved family pattern.
         </div>
@@ -4283,8 +4468,11 @@ function AdminPanel({
               })}
             </div>
             <div className="admin-subtle">
-              Ordered by OpenRouter popularity. Selected families stay visible even if they fall beyond the current page.
+              Ordered by OpenRouter popularity. This list reflects the current approval filters, excluding the family selection itself. Selected families stay visible even if they no longer match the other filters.
             </div>
+            {!visibleApprovalFamilies.length && !selectedApprovalFamilies.length ? (
+              <div className="admin-subtle">No families match the current approval filters.</div>
+            ) : null}
             {hasMoreApprovalFamilies ? (
               <div className="admin-actions admin-actions-start">
                 <button
@@ -4331,6 +4519,21 @@ function AdminPanel({
               {approvalHyperscalers.map((hyperscaler) => (
                 <option key={hyperscaler} value={hyperscaler}>
                   {hyperscaler === DEFAULT_HYPERSCALER_FILTER ? "All hyperscalers" : hyperscaler}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span className="field-label">Inference provider</span>
+            <select
+              className="input select"
+              onChange={(event) => setApprovalInferenceProviderFilter(event.target.value)}
+              value={approvalInferenceProviderFilter}
+            >
+              <option value={DEFAULT_INFERENCE_PROVIDER_FILTER}>All inference providers</option>
+              {approvalInferenceProviders.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.hyperscaler ? `${provider.label} · ${provider.hyperscaler}` : provider.label}
                 </option>
               ))}
             </select>
@@ -4419,6 +4622,56 @@ function AdminPanel({
             </div>
           </div>
         ) : null}
+        {hasSelectedInferenceRoute ? (
+          <div className="admin-bulk-editor">
+            <div className="detail-label">Bulk inference route approval</div>
+            <div className="admin-subtle">
+              This writes route-specific approval rows for <strong>{selectedInferenceProvider?.label || "the selected inference provider"}</strong> in <strong>{approvalInferenceLocationFilter}</strong> across the current filtered models. Once a model has any route-specific rows for this lens, missing routes are treated as unreviewed rather than inheriting the base approval.
+            </div>
+            <div className="admin-grid admin-grid-two">
+              <label className="field">
+                <span className="field-label">Route decision</span>
+                <select
+                  className="input select"
+                  onChange={(event) => setBulkInferenceRouteApproval(event.target.value === "approved")}
+                  value={bulkInferenceRouteApproval ? "approved" : "blocked"}
+                >
+                  <option value="approved">Approved on this route</option>
+                  <option value="blocked">Not approved on this route</option>
+                </select>
+              </label>
+              <div className="admin-inline-note">
+                Positive route approvals auto-enable the base model approval for this lens if it was still off. Blocking a route does not change the base recommendation or approval state.
+              </div>
+            </div>
+            <label className="field">
+              <span className="field-label">Route notes</span>
+              <textarea
+                className="input admin-textarea"
+                onChange={(event) => setBulkInferenceRouteNotes(event.target.value)}
+                placeholder="Optional note for this provider/location policy, for example data residency or platform-specific constraints."
+                rows={3}
+                value={bulkInferenceRouteNotes}
+              />
+            </label>
+            <div className="admin-actions admin-actions-start">
+              <button
+                className="btn btn-secondary"
+                disabled={bulkInferenceRouteSaving || !filteredModels.length}
+                onClick={handleApplyInferenceRouteBulk}
+                type="button"
+              >
+                {bulkInferenceRouteSaving
+                  ? "Applying route approval…"
+                  : `Apply to ${filteredModels.length} filtered model${filteredModels.length === 1 ? "" : "s"}`}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="admin-subtle">
+            Select both an <strong>Inference provider</strong> and an <strong>Inference location</strong> to write route-specific approvals for the current lens.
+          </div>
+        )}
         {selectedApprovalFamilies.length ? (
           <div className="admin-bulk-editor">
             <div className="detail-label">Bulk family approval</div>
@@ -4505,9 +4758,25 @@ function AdminPanel({
             const reviewSignal = approvalReviewSignals[model.id] || null;
             const draftKey = buildModelApprovalDraftKey(model.id, approvalUseCaseId);
             const draft = modelDrafts[draftKey] || createModelDraft(model, approvalUseCaseId);
+            const curationDraft = {
+              ...createModelCurationDraft(model),
+              ...(modelCurationDrafts[model.id] || {}),
+            };
             const isSaving = modelSavingId === draftKey || modelBulkSaving;
+            const identityTargetModel = resolveAdminLookup(modelLookup, curationDraft.identity_target_lookup);
+            const duplicateTargetModel = resolveAdminLookup(modelLookup, curationDraft.duplicate_target_lookup);
+            const isIdentitySaving = modelCurationSavingId === `identity:${model.id}`;
+            const isDuplicateSaving = modelCurationSavingId === `duplicate:${model.id}`;
             const originCountries = getModelOriginCountries(model);
             const inferenceCountries = getModelInferenceCountries(model);
+            const selectedRouteSummary = hasSelectedInferenceRoute
+              ? getModelInferenceRouteApprovalSummary(
+                  model,
+                  approvalUseCaseId,
+                  approvalInferenceProviderFilter,
+                  approvalInferenceLocationFilter,
+                )
+              : null;
             return (
               <div key={model.id} className="admin-row">
                 <div className="admin-row-head">
@@ -4523,9 +4792,15 @@ function AdminPanel({
                     {approval?.approved_for_use ? <span className="tag tag-approval">Approved</span> : <span className="tag">Not approved</span>}
                     <RecommendationBadge model={model} useCaseId={approvalUseCaseId} />
                     {model.family_name ? <span className="tag tag-family">{model.family_name}</span> : null}
+                    {reviewSignal?.isReviewed === false ? <span className="tag">Unrated</span> : null}
                     {reviewSignal?.status === "suggested_approve" ? <span className="tag tag-approval-partial">Suggested approve</span> : null}
                     {reviewSignal?.status === "new_model" ? <span className="tag tag-warning">New model</span> : null}
                     {reviewSignal?.status === "reviewed_not_approved" ? <span className="tag">Reviewed not approved</span> : null}
+                    {selectedRouteSummary ? (
+                      <span className={selectedRouteSummary.className} title={selectedRouteSummary.title}>
+                        {selectedRouteSummary.label}
+                      </span>
+                    ) : null}
                     {originCountries.map((country) => (
                       <span key={`${model.id}-origin-${country}`} className="tag">
                         Origin: {country}
@@ -4546,6 +4821,7 @@ function AdminPanel({
                         : "No approval update yet"}
                   </div>
                 </div>
+                {selectedRouteSummary?.detail ? <div className="admin-subtle">{selectedRouteSummary.detail}</div> : null}
                 <label className="checkbox-row">
                   <input
                     checked={Boolean(draft.approved_for_use)}
@@ -4588,6 +4864,116 @@ function AdminPanel({
                     value={draft.recommendation_notes || ""}
                   />
                 </label>
+                <div className="admin-bulk-editor">
+                  <div className="detail-label">Catalog curation</div>
+                  <div className="admin-subtle">
+                    Use this when a variant landed in the wrong family or when this row is a duplicate of another exact model. These changes are remembered for future updates and DB rebuilds.
+                  </div>
+                  <div className="admin-grid admin-grid-two">
+                    <div className="stack">
+                      <label className="field">
+                        <span className="field-label">Copy family from model</span>
+                        <input
+                          className="input"
+                          onChange={(event) => updateModelCurationDraft(model.id, "identity_target_lookup", event.target.value)}
+                          placeholder="Exact model id or name"
+                          type="text"
+                          value={curationDraft.identity_target_lookup || ""}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Variant label</span>
+                        <input
+                          className="input"
+                          onChange={(event) => updateModelCurationDraft(model.id, "identity_variant_label", event.target.value)}
+                          placeholder="Optional variant label"
+                          type="text"
+                          value={curationDraft.identity_variant_label || ""}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Family mapping notes</span>
+                        <textarea
+                          className="input admin-textarea"
+                          onChange={(event) => updateModelCurationDraft(model.id, "identity_notes", event.target.value)}
+                          placeholder="Why this exact model belongs in that family or canonical group."
+                          rows={2}
+                          value={curationDraft.identity_notes || ""}
+                        />
+                      </label>
+                      <div className="admin-subtle">
+                        {identityTargetModel === undefined
+                          ? "Enter a target model id or name."
+                          : identityTargetModel === null
+                            ? "That lookup matches more than one model. Use the exact model id."
+                            : identityTargetModel.id === model.id
+                              ? "Choose a different model as the family reference."
+                              : `Will copy ${identityTargetModel.family_name || "family"} / ${identityTargetModel.canonical_model_name || "canonical model"} from ${identityTargetModel.name}.`}
+                      </div>
+                      <div className="admin-actions admin-actions-start">
+                        <button
+                          className="btn btn-secondary"
+                          disabled={
+                            isIdentitySaving ||
+                            !identityTargetModel ||
+                            identityTargetModel === null ||
+                            identityTargetModel.id === model.id
+                          }
+                          onClick={() => handleSaveModelIdentityCuration(model, identityTargetModel)}
+                          type="button"
+                        >
+                          {isIdentitySaving ? "Saving family mapping…" : "Save family mapping"}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="stack">
+                      <label className="field">
+                        <span className="field-label">Merge duplicate into model</span>
+                        <input
+                          className="input"
+                          onChange={(event) => updateModelCurationDraft(model.id, "duplicate_target_lookup", event.target.value)}
+                          placeholder="Canonical target id or name"
+                          type="text"
+                          value={curationDraft.duplicate_target_lookup || ""}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">Duplicate merge notes</span>
+                        <textarea
+                          className="input admin-textarea"
+                          onChange={(event) => updateModelCurationDraft(model.id, "duplicate_notes", event.target.value)}
+                          placeholder="Why this row should redirect to the selected canonical model."
+                          rows={2}
+                          value={curationDraft.duplicate_notes || ""}
+                        />
+                      </label>
+                      <div className="admin-subtle">
+                        {duplicateTargetModel === undefined
+                          ? "Pick the canonical exact model this duplicate should resolve to."
+                          : duplicateTargetModel === null
+                            ? "That lookup matches more than one model. Use the exact model id."
+                            : duplicateTargetModel.id === model.id
+                              ? "Choose a different canonical target."
+                              : `This row will be merged into ${duplicateTargetModel.name} now, and future matches will resolve there automatically.`}
+                      </div>
+                      <div className="admin-actions admin-actions-start">
+                        <button
+                          className="btn btn-secondary"
+                          disabled={
+                            isDuplicateSaving ||
+                            !duplicateTargetModel ||
+                            duplicateTargetModel === null ||
+                            duplicateTargetModel.id === model.id
+                          }
+                          onClick={() => handleMergeModelDuplicate(model, duplicateTargetModel)}
+                          type="button"
+                        >
+                          {isDuplicateSaving ? "Merging duplicate…" : "Merge duplicate"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 <div className="admin-actions">
                   <button
                     className="btn btn-secondary"
@@ -4889,9 +5275,38 @@ function formatRecommendationStatusLabel(status) {
   }
 }
 
-function isModelApprovedForUseCase(model, useCaseId) {
+function isModelApprovedForUseCase(model, useCaseId, routeContext = null) {
   if (useCaseId) {
-    return Boolean(getModelApprovalRecord(model, useCaseId)?.approved_for_use);
+    const approval = getModelApprovalRecord(model, useCaseId);
+    const baseApproved = Boolean(approval?.approved_for_use);
+    if (!baseApproved) {
+      return false;
+    }
+
+    const routeEntries = approval?.inference_route_approvals || [];
+    if (!routeEntries.length) {
+      return true;
+    }
+
+    const destinationId = String(routeContext?.destinationId || "").trim();
+    const locationKey = buildInferenceLocationKey(routeContext?.locationLabel || "");
+    if (!destinationId && !locationKey) {
+      return true;
+    }
+
+    const matchingEntries = routeEntries.filter((entry) => {
+      if (destinationId && entry?.destination_id !== destinationId) {
+        return false;
+      }
+      if (locationKey && entry?.location_key !== locationKey) {
+        return false;
+      }
+      return true;
+    });
+    if (matchingEntries.length) {
+      return matchingEntries.some((entry) => Boolean(entry?.approved_for_use));
+    }
+    return false;
   }
   return Boolean(model?.approved_for_use);
 }
@@ -5248,6 +5663,16 @@ function createModelDraft(model, useCaseId = "") {
   };
 }
 
+function createModelCurationDraft(model) {
+  return {
+    identity_target_lookup: "",
+    identity_variant_label: model?.variant_label || "",
+    identity_notes: "",
+    duplicate_target_lookup: "",
+    duplicate_notes: "",
+  };
+}
+
 function parseAuditSummaryPayload(value) {
   if (!value) {
     return {};
@@ -5297,8 +5722,8 @@ function buildApprovalReviewSignals(models, useCaseId) {
         Number(approvedFamilyCounts[model.family_id] || 0) - (approval?.approved_for_use ? 1 : 0),
       );
 
-      let status = "none";
-      let summary = "";
+      let status = "unrated";
+      let summary = "No review saved yet for this lens.";
       if (approval?.approved_for_use) {
         status = "approved";
         summary = "";
@@ -5321,6 +5746,7 @@ function buildApprovalReviewSignals(models, useCaseId) {
         {
           status,
           summary,
+          isReviewed,
           isNewlyDiscovered,
           needsReview: !isReviewed && isNewlyDiscovered,
           canApplyFamilyDelta: !isReviewed && isNewlyDiscovered && familyApprovedCount > 0,
@@ -5330,6 +5756,33 @@ function buildApprovalReviewSignals(models, useCaseId) {
       ];
     }),
   );
+}
+
+function buildApprovalFamilyOptions(models) {
+  return Array.from(
+    new Map(
+      models
+        .filter((model) => model.family_id)
+        .map((model) => [
+          model.family_id,
+          {
+            id: model.family_id,
+            label: model.family_name || model.family_id,
+            provider: model.provider || "",
+            count: 0,
+          },
+        ]),
+    ).values(),
+  )
+    .map((family) => {
+      const familyModels = models.filter((model) => model.family_id === family.id);
+      return {
+        ...family,
+        ...aggregateOpenRouterSignals(familyModels),
+        count: familyModels.length,
+      };
+    })
+    .sort(compareOpenRouterFamilyFilterOption);
 }
 
 function createInternalWeightDraft(useCase) {
@@ -6659,6 +7112,32 @@ function getModelInferenceCountries(model) {
   return collectInferenceCountries(model?.inference_destinations || []);
 }
 
+function getModelInferenceProviders(model) {
+  const providersById = new Map();
+  (model?.inference_destinations || []).forEach((destination) => {
+    const id = String(destination?.id || "").trim();
+    if (!id) {
+      return;
+    }
+    providersById.set(id, {
+      id,
+      label: String(destination?.name || id).trim(),
+      hyperscaler: String(destination?.hyperscaler || "").trim(),
+    });
+  });
+  return Array.from(providersById.values()).sort((left, right) => {
+    const hyperscalerComparison = String(left.hyperscaler || "").localeCompare(String(right.hyperscaler || ""));
+    if (hyperscalerComparison !== 0) {
+      return hyperscalerComparison;
+    }
+    return String(left.label || "").localeCompare(String(right.label || ""));
+  });
+}
+
+function getModelInferenceProviderIds(model) {
+  return getModelInferenceProviders(model).map((provider) => provider.id);
+}
+
 function getModelHyperscalers(model) {
   return Array.from(
     new Set(
@@ -6750,6 +7229,78 @@ function getInferenceCountryFromRegion(region) {
   }
 
   return "";
+}
+
+function buildInferenceLocationKey(locationLabel) {
+  return String(locationLabel || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function getModelInferenceRouteApprovalRecord(model, useCaseId, destinationId, locationLabel) {
+  if (!useCaseId || !destinationId || !locationLabel) {
+    return null;
+  }
+  const approval = getModelApprovalRecord(model, useCaseId);
+  const locationKey = buildInferenceLocationKey(locationLabel);
+  return (
+    (approval?.inference_route_approvals || []).find(
+      (entry) => entry?.destination_id === destinationId && entry?.location_key === locationKey,
+    ) || null
+  );
+}
+
+function getModelInferenceRouteApprovalSummary(model, useCaseId, destinationId, locationLabel) {
+  if (!useCaseId || !destinationId || !locationLabel) {
+    return null;
+  }
+  const approval = getModelApprovalRecord(model, useCaseId);
+  const explicitRouteApproval = getModelInferenceRouteApprovalRecord(model, useCaseId, destinationId, locationLabel);
+  const hasRouteOverrides = Boolean(approval?.inference_route_approvals?.length);
+  const provider = getModelInferenceProviders(model).find((entry) => entry.id === destinationId);
+  const routeLabel = `${provider?.label || destinationId} · ${locationLabel}`;
+
+  if (explicitRouteApproval) {
+    return explicitRouteApproval.approved_for_use
+      ? {
+          className: "tag tag-approval",
+          label: `${routeLabel} approved`,
+          title: explicitRouteApproval.approval_notes || "Explicitly approved on this route.",
+          detail: explicitRouteApproval.approval_notes || "",
+        }
+      : {
+          className: "tag tag-warning",
+          label: `${routeLabel} blocked`,
+          title: explicitRouteApproval.approval_notes || "Explicitly not approved on this route.",
+          detail: explicitRouteApproval.approval_notes || "",
+        };
+  }
+
+  if (!hasRouteOverrides) {
+    if (approval?.approved_for_use) {
+      return {
+        className: "tag tag-approval-partial",
+        label: `${routeLabel} inherits base approval`,
+        title: "No route-specific row exists yet, so this route currently inherits the base approval.",
+        detail: "No route-specific review exists yet. This route currently inherits the base lens approval.",
+      };
+    }
+    return {
+      className: "tag",
+      label: `${routeLabel} base not approved`,
+      title: "The model is not approved for this lens yet.",
+      detail: "The base lens approval is still off, so this route is not approved.",
+    };
+  }
+
+  return {
+    className: "tag",
+    label: `${routeLabel} unreviewed`,
+    title: "This model already has route-specific approval rows for this lens, but not for the selected provider/location.",
+    detail: "This model is already using route-specific approvals for this lens. The selected route has not been reviewed yet.",
+  };
 }
 
 function buildInferenceSummary(destinations) {
@@ -7188,30 +7739,33 @@ function getBenchmarkContext(benchmark) {
 const styles = `
   :root {
     color-scheme: light;
-    --bg: #f8fafc;
-    --panel: rgba(255, 255, 255, 0.9);
+    --bg: #f4f7fb;
+    --panel: rgba(255, 255, 255, 0.92);
     --panel-strong: #ffffff;
     --line: rgba(148, 163, 184, 0.22);
     --text: #0f172a;
-    --muted: #64748b;
-    --accent: #4f46e5;
-    --accent-soft: rgba(79, 70, 229, 0.08);
+    --muted: #526075;
+    --soft: #6b7a90;
+    --accent: #0f766e;
+    --accent-soft: rgba(15, 118, 110, 0.12);
+    --blue: #1d4ed8;
+    --blue-soft: rgba(29, 78, 216, 0.12);
     --good: #16a34a;
     --warn: #f59e0b;
     --bad: #ef4444;
-    --shadow: 0 18px 60px rgba(15, 23, 42, 0.08);
+    --shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
   }
 
   * { box-sizing: border-box; }
   html, body, #root { min-height: 100%; }
   body {
     margin: 0;
-    font-family: Inter, system-ui, sans-serif;
+    font: 500 15px/1.55 Inter, system-ui, sans-serif;
     color: var(--text);
     background:
-      radial-gradient(circle at top left, rgba(79, 70, 229, 0.12), transparent 28%),
-      radial-gradient(circle at top right, rgba(245, 158, 11, 0.11), transparent 24%),
-      linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+      radial-gradient(circle at top left, rgba(14, 165, 233, 0.08), transparent 28%),
+      radial-gradient(circle at top right, rgba(16, 185, 129, 0.08), transparent 26%),
+      linear-gradient(180deg, #f8fafc 0%, var(--bg) 46%, #eef3f8 100%);
   }
   button, input, select, textarea { font: inherit; }
   a { color: inherit; text-decoration: none; }
@@ -7221,6 +7775,11 @@ const styles = `
   }
   .shell {
     min-height: 100vh;
+    width: min(1280px, calc(100vw - 32px));
+    margin: 0 auto;
+    padding: 28px 0 56px;
+    display: grid;
+    gap: 18px;
   }
   .skip-link {
     position: absolute;
@@ -7247,93 +7806,121 @@ const styles = `
     border: 0;
   }
   .topbar {
-    max-width: 1160px;
-    margin: 0 auto;
-    padding: 24px 20px 18px;
+    position: relative;
+    overflow: hidden;
+    max-width: none;
+    margin: 0;
+    padding: 28px;
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 20px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 28px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(241, 245, 249, 0.94) 100%);
+    box-shadow: var(--shadow);
+  }
+  .topbar::after {
+    content: "";
+    position: absolute;
+    inset: auto -8% -36% auto;
+    width: 280px;
+    height: 280px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(29, 78, 216, 0.1), rgba(29, 78, 216, 0));
+    pointer-events: none;
   }
   .topbar-main {
     display: grid;
     gap: 8px;
+    max-width: 860px;
+    position: relative;
+    z-index: 1;
   }
   h1, h2, h3 {
     margin: 0;
     font-family: "Space Grotesk", Inter, system-ui, sans-serif;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.04em;
   }
-  h1 { font-size: clamp(1.45rem, 2vw, 2rem); }
+  h1 {
+    font-size: clamp(2.1rem, 4vw, 3.35rem);
+    line-height: 0.96;
+  }
   h2 { font-size: clamp(1.1rem, 1.6vw, 1.3rem); }
   h3 { font-size: 1rem; }
   .eyebrow, .meta, .version, .hint, .submeta, .tip, .small-meta, .panel-copy, .note, .coverage-label, .history-note, .history-errors, .detail-label, .bench-date, .metric, .message {
     color: var(--muted);
   }
   .eyebrow {
-    font-size: 0.72rem;
+    color: var(--accent);
+    font-size: 0.78rem;
+    font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.18em;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
   .meta {
-    margin-top: 6px;
-    font-size: 0.88rem;
+    margin-top: 8px;
+    font-size: 0.96rem;
   }
   .topbar-actions {
     display: flex;
-    align-items: flex-end;
+    align-items: flex-start;
     justify-content: flex-end;
     gap: 10px;
     flex-wrap: wrap;
+    position: relative;
+    z-index: 1;
   }
   .hero-state-row {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    margin-top: 10px;
   }
   .topbar-message {
     max-width: 320px;
-    text-align: right;
+    text-align: left;
     font-size: .8rem;
   }
   .version {
-    border: 1px solid var(--line);
-    background: var(--panel);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    background: rgba(248, 250, 252, 0.86);
     padding: 8px 12px;
     border-radius: 999px;
-    box-shadow: var(--shadow);
+    color: var(--muted);
   }
   .btn {
-    border: 1px solid var(--line);
-    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 999px;
     padding: 10px 14px;
     cursor: pointer;
-    background: var(--panel-strong);
-    color: var(--text);
-    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+    background: rgba(248, 250, 252, 0.86);
+    color: var(--muted);
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease, background-color .15s ease, color .15s ease;
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
   }
   .btn:hover { transform: translateY(-1px); }
   .btn:disabled { cursor: not-allowed; opacity: .7; transform: none; }
   .btn-primary {
-    background: linear-gradient(135deg, #4f46e5, #4338ca);
+    background: #0f172a;
     color: white;
-    border-color: rgba(67, 56, 202, .35);
+    border-color: #0f172a;
   }
   .btn-secondary {
-    background: #fff;
+    background: rgba(255, 255, 255, 0.94);
+    color: var(--text);
   }
   .btn-active {
-    background: #4f46e5;
+    background: #0f172a;
     color: #fff;
-    border-color: #4f46e5;
+    border-color: #0f172a;
   }
   .btn-ghost {
     background: transparent;
     border-color: transparent;
     box-shadow: none;
-    color: var(--accent);
+    color: var(--blue);
   }
   .btn-link {
     display: inline-flex;
@@ -7350,27 +7937,30 @@ const styles = `
   }
   .tabs {
     position: sticky;
-    top: 0;
+    top: 12px;
     z-index: 20;
-    backdrop-filter: blur(16px);
-    background: rgba(255, 255, 255, 0.72);
-    border-top: 1px solid rgba(255,255,255,.5);
-    border-bottom: 1px solid var(--line);
-    overflow: hidden;
+    background: transparent;
+    border: 0;
+    overflow: visible;
   }
   .tabs-desktop {
-    max-width: 1160px;
-    margin: 0 auto;
-    padding: 0 20px;
+    max-width: none;
+    margin: 0;
+    padding: 8px;
     display: flex;
     overflow-x: auto;
-    gap: 0;
+    gap: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.74);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 14px 36px rgba(15, 23, 42, 0.06);
   }
   .tabs-mobile {
     display: none;
-    max-width: 1160px;
-    margin: 0 auto;
-    padding: 10px 20px;
+    max-width: none;
+    margin: 0;
+    padding: 8px 0 0;
   }
   .tabs-edge {
     position: absolute;
@@ -7391,18 +7981,21 @@ const styles = `
   .tab {
     border: 0;
     background: transparent;
-    padding: 14px 16px;
-    border-bottom: 2px solid transparent;
+    padding: 10px 14px;
+    border-bottom: 0;
+    border-radius: 999px;
     color: var(--muted);
     display: inline-flex;
     align-items: center;
     gap: 8px;
     cursor: pointer;
     white-space: nowrap;
+    transition: background-color .12s ease, color .12s ease, transform .12s ease;
   }
+  .tab:hover { transform: translateY(-1px); }
   .tab-active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
+    color: #fff;
+    background: #0f172a;
   }
   .tab-badge {
     display: inline-flex;
@@ -7412,15 +8005,17 @@ const styles = `
     height: 20px;
     padding: 0 6px;
     border-radius: 999px;
-    background: rgba(79, 70, 229, .12);
-    color: var(--accent);
+    background: rgba(29, 78, 216, .12);
+    color: var(--blue);
     font-size: .72rem;
     font-weight: 700;
   }
   .page {
-    max-width: 1160px;
-    margin: 0 auto;
-    padding: 28px 20px 44px;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 18px;
   }
   .stack { display: grid; gap: 14px; }
   .stack-tight { display: grid; gap: 8px; }
@@ -7434,35 +8029,36 @@ const styles = `
   .toggle-group {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px;
-    border: 1px solid var(--line);
+    gap: 6px;
+    padding: 6px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
     border-radius: 999px;
-    background: rgba(255,255,255,.92);
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+    background: rgba(248, 250, 252, 0.84);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
   }
   .toggle-btn {
     border: 0;
     background: transparent;
     color: var(--muted);
-    padding: 8px 12px;
+    padding: 10px 14px;
     border-radius: 999px;
     font-weight: 700;
     cursor: pointer;
   }
   .toggle-btn-active {
-    background: rgba(79, 70, 229, .10);
-    color: var(--accent);
+    background: #0f172a;
+    color: #fff;
   }
   .pill, .badge, .tag, .compare-pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     border-radius: 999px;
-    padding: 6px 10px;
-    font-size: 0.77rem;
-    border: 1px solid var(--line);
-    background: rgba(255,255,255,.92);
+    padding: 6px 12px;
+    font-size: 0.78rem;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    background: rgba(248, 250, 252, 0.86);
+    color: var(--muted);
   }
   .pill-good {
     color: #166534;
@@ -7481,9 +8077,9 @@ const styles = `
   }
   .badge-slate { background: rgba(148, 163, 184, .14); color: #334155; }
   .badge-indigo, .tag-top {
-    background: rgba(79, 70, 229, .10);
-    color: var(--accent);
-    border-color: rgba(79, 70, 229, .18);
+    background: rgba(29, 78, 216, .12);
+    color: var(--blue);
+    border-color: rgba(29, 78, 216, .18);
   }
   .tag-ready {
     background: rgba(34, 197, 94, .10);
@@ -7526,9 +8122,9 @@ const styles = `
   .badge-violet { background: rgba(139, 92, 246, .10); color: #6d28d9; }
   .badge-pink { background: rgba(236, 72, 153, .10); color: #be185d; }
   .tag-family {
-    background: rgba(14, 165, 233, .10);
-    color: #0f766e;
-    border-color: rgba(14, 165, 233, .18);
+    background: rgba(29, 78, 216, .12);
+    color: var(--blue);
+    border-color: rgba(29, 78, 216, .18);
   }
   .tag-inference {
     background: rgba(15, 118, 110, .10);
@@ -7565,10 +8161,10 @@ const styles = `
     .usecase-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   }
   .usecase, .card, .panel, .summary, .table, .banner, .empty, .loading-card {
-    border: 1px solid var(--line);
-    border-radius: 18px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 16px;
     background: var(--panel);
-    box-shadow: var(--shadow);
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
   }
   .usecase {
     text-align: left;
@@ -7650,7 +8246,7 @@ const styles = `
     color: var(--muted);
   }
   .workspace-intro {
-    background: linear-gradient(135deg, rgba(255, 255, 255, .98), rgba(239, 246, 255, .94));
+    background: linear-gradient(135deg, rgba(255, 255, 255, .98), rgba(241, 245, 249, .94));
   }
   .workspace-intro-copy {
     max-width: 760px;
@@ -7660,7 +8256,7 @@ const styles = `
   }
   .starter-panel {
     gap: 14px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, .98), rgba(245, 247, 255, .96));
+    background: linear-gradient(135deg, rgba(255, 255, 255, .98), rgba(241, 245, 249, .96));
   }
   .starter-panel-head {
     display: flex;
@@ -7689,11 +8285,11 @@ const styles = `
   .finder-focus {
     display: grid;
     gap: 16px;
-    padding: 18px;
-    border: 1px solid rgba(79, 70, 229, .16);
-    border-radius: 20px;
-    background: linear-gradient(145deg, rgba(255, 255, 255, .98), rgba(238, 242, 255, .9));
-    box-shadow: var(--shadow);
+    padding: 22px;
+    border: 1px solid rgba(148, 163, 184, .18);
+    border-radius: 22px;
+    background: linear-gradient(145deg, rgba(255, 255, 255, .98), rgba(241, 245, 249, .92));
+    box-shadow: 0 14px 36px rgba(15, 23, 42, 0.06);
   }
   .finder-focus-main {
     display: grid;

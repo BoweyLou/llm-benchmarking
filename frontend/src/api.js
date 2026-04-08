@@ -63,6 +63,34 @@ export function updateModelUseCaseApproval(modelId, useCaseId, payload) {
   });
 }
 
+export function updateModelUseCaseInferenceApproval(modelId, useCaseId, payload) {
+  return request(`/models/${encodeURIComponent(modelId)}/approvals/${encodeURIComponent(useCaseId)}/inference-route`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function curateModelIdentity(modelId, payload) {
+  return request(`/models/${encodeURIComponent(modelId)}/curation/identity`, {
+    method: "PUT",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export function mergeModelDuplicate(modelId, payload) {
+  return request(`/models/${encodeURIComponent(modelId)}/curation/duplicate`, {
+    method: "PUT",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export function applyModelUseCaseInferenceApprovalBulk(useCaseId, payload) {
+  return request(`/models/approvals/${encodeURIComponent(useCaseId)}/inference-route/bulk`, {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
 export function applyModelFamilyApprovalDelta(familyId, useCaseId, payload) {
   return request(`/model-families/${encodeURIComponent(familyId)}/approvals/${encodeURIComponent(useCaseId)}/apply-delta`, {
     method: "POST",

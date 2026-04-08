@@ -10,10 +10,15 @@ from .models import (
     FamilyApprovalBulkOut,
     FamilyApprovalDeltaIn,
     FamilyApprovalDeltaOut,
+    InferenceRouteApprovalBulkIn,
+    InferenceRouteApprovalBulkOut,
+    InferenceRouteApprovalIn,
     ManualScoreResultOut,
     ManualScoreUpdateIn,
     MarketSnapshotOut,
     ModelApprovalUpdateIn,
+    ModelDuplicateCurationIn,
+    ModelIdentityCurationIn,
     ModelOut,
     ModelSummaryOut,
     ProviderOut,
@@ -44,8 +49,12 @@ from .update_engine import (
     schedule_update,
     apply_model_family_approval_bulk,
     apply_model_family_approval_delta,
+    apply_model_inference_route_approval_bulk,
+    curate_model_identity,
     update_manual_benchmark_score,
+    merge_model_duplicate,
     update_model_approval,
+    update_model_use_case_inference_approval,
     update_model_use_case_approval,
     update_provider_origin,
     update_use_case_internal_weight,
@@ -114,6 +123,72 @@ def api_update_model_use_case_approval(model_id: str, use_case_id: str, payload:
     if model is None:
         raise HTTPException(status_code=404, detail="Model not found")
     return model
+
+
+@app.put("/api/models/{model_id}/approvals/{use_case_id}/inference-route", response_model=ModelSummaryOut)
+def api_update_model_use_case_inference_approval(model_id: str, use_case_id: str, payload: InferenceRouteApprovalIn) -> dict:
+    try:
+        model = update_model_use_case_inference_approval(
+            model_id,
+            use_case_id,
+            payload.destination_id,
+            payload.location_label,
+            payload.approved_for_use,
+            payload.approval_notes,
+            location_key=payload.location_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if model is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+    return model
+
+
+@app.put("/api/models/{model_id}/curation/identity", response_model=ModelSummaryOut)
+def api_curate_model_identity(model_id: str, payload: ModelIdentityCurationIn) -> dict:
+    try:
+        model = curate_model_identity(
+            model_id,
+            payload.target_model_id,
+            variant_label=payload.variant_label,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if model is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+    return model
+
+
+@app.put("/api/models/{model_id}/curation/duplicate", response_model=ModelSummaryOut)
+def api_merge_model_duplicate(model_id: str, payload: ModelDuplicateCurationIn) -> dict:
+    try:
+        model = merge_model_duplicate(
+            model_id,
+            payload.target_model_id,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if model is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+    return model
+
+
+@app.post("/api/models/approvals/{use_case_id}/inference-route/bulk", response_model=InferenceRouteApprovalBulkOut)
+def api_apply_model_use_case_inference_approval_bulk(use_case_id: str, payload: InferenceRouteApprovalBulkIn) -> dict:
+    try:
+        return apply_model_inference_route_approval_bulk(
+            payload.model_ids,
+            use_case_id,
+            payload.destination_id,
+            payload.location_label,
+            payload.approved_for_use,
+            payload.approval_notes,
+            location_key=payload.location_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/model-families/{family_id}/approvals/{use_case_id}/apply-delta", response_model=FamilyApprovalDeltaOut)

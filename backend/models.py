@@ -104,6 +104,7 @@ class UseCaseApprovalOut(APIModel):
     recommended_member_count: int = 0
     not_recommended_member_count: int = 0
     discouraged_member_count: int = 0
+    inference_route_approvals: list["InferenceRouteApprovalOut"] = Field(default_factory=list)
 
 
 class UseCaseApprovalIn(APIModel):
@@ -111,6 +112,49 @@ class UseCaseApprovalIn(APIModel):
     approval_notes: str | None = None
     recommendation_status: RecommendationStatusIn = "unrated"
     recommendation_notes: str | None = None
+
+
+class InferenceRouteApprovalOut(APIModel):
+    use_case_id: str
+    destination_id: str
+    destination_name: str | None = None
+    hyperscaler: str | None = None
+    location_key: str
+    location_label: str
+    approved_for_use: bool = False
+    approval_notes: str | None = None
+    approval_updated_at: datetime | None = None
+
+
+class InferenceRouteApprovalIn(APIModel):
+    destination_id: str
+    location_key: str | None = None
+    location_label: str
+    approved_for_use: bool = False
+    approval_notes: str | None = None
+
+
+class InferenceRouteApprovalBulkIn(APIModel):
+    model_ids: list[str] = Field(default_factory=list)
+    destination_id: str
+    location_key: str | None = None
+    location_label: str
+    approved_for_use: bool = False
+    approval_notes: str | None = None
+
+
+class InferenceRouteApprovalBulkOut(APIModel):
+    use_case_id: str
+    destination_id: str
+    destination_name: str | None = None
+    hyperscaler: str | None = None
+    location_key: str
+    location_label: str
+    approved_for_use: bool = False
+    approval_notes: str | None = None
+    updated_count: int = 0
+    updated_model_ids: list[str] = Field(default_factory=list)
+    applied_at: datetime | None = None
 
 
 class FamilyApprovalDeltaIn(APIModel):
@@ -153,6 +197,17 @@ class FamilyApprovalBulkOut(APIModel):
     results: list[FamilyApprovalBulkUseCaseOut] = Field(default_factory=list)
     approval_notes: str | None = None
     applied_at: datetime | None = None
+
+
+class ModelIdentityCurationIn(APIModel):
+    target_model_id: str
+    variant_label: str | None = None
+    notes: str | None = None
+
+
+class ModelDuplicateCurationIn(APIModel):
+    target_model_id: str
+    notes: str | None = None
 
 
 class ModelOut(APIModel):
@@ -239,6 +294,7 @@ class ModelSummaryOut(APIModel):
     family_name: str | None = None
     canonical_model_id: str | None = None
     canonical_model_name: str | None = None
+    variant_label: str | None = None
     discovered_at: datetime | None = None
     discovered_update_log_id: int | None = None
     approved_for_use: bool = False
@@ -471,6 +527,9 @@ class HistoryEntryOut(APIModel):
     benchmark_count: int
 
 
+UseCaseApprovalOut.model_rebuild()
+
+
 __all__ = [
     "APIModel",
     "AuditFindingOut",
@@ -486,6 +545,10 @@ __all__ = [
     "FamilyApprovalDeltaIn",
     "FamilyApprovalDeltaOut",
     "HistoryEntryOut",
+    "InferenceRouteApprovalBulkIn",
+    "InferenceRouteApprovalBulkOut",
+    "InferenceRouteApprovalIn",
+    "InferenceRouteApprovalOut",
     "ManualScoreIn",
     "ManualScoreResultOut",
     "ManualScoreUpdateIn",

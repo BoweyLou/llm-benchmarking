@@ -7,6 +7,7 @@ import sys
 
 from .database import DEFAULT_DB_PATH, get_engine
 from .inference_sync import sync_inference_catalog
+from .model_curation import MODEL_CURATION_BASELINE_PATH, export_model_curation_baseline
 from .seed_data import PROVIDER_ORIGIN_BASELINE_PATH, export_provider_origin_baseline
 from .update_engine import bootstrap, get_update_log, run_update_now
 
@@ -55,6 +56,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     provider_origin_parser.set_defaults(func=cmd_provider_origin_export)
 
+    model_curation_parser = subparsers.add_parser(
+        "model-curation-export",
+        help="Export current model curation overrides into the tracked repo baseline.",
+    )
+    model_curation_parser.add_argument(
+        "--path",
+        default=str(MODEL_CURATION_BASELINE_PATH),
+        help="Optional output path. Defaults to the canonical baseline JSON in backend/.",
+    )
+    model_curation_parser.set_defaults(func=cmd_model_curation_export)
+
     return parser
 
 
@@ -97,6 +109,13 @@ def cmd_provider_origin_export(args: argparse.Namespace) -> int:
     bootstrap()
     output_path = export_provider_origin_baseline(get_engine(), Path(args.path))
     print(f"Exported provider-origin baseline to {output_path}")
+    return 0
+
+
+def cmd_model_curation_export(args: argparse.Namespace) -> int:
+    bootstrap()
+    output_path = export_model_curation_baseline(get_engine(), Path(args.path))
+    print(f"Exported model curation baseline to {output_path}")
     return 0
 
 

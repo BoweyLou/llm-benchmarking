@@ -20,8 +20,11 @@ from .database import (
     get_connection,
     get_engine,
     init_db,
+    model_duplicate_overrides as model_duplicate_overrides_table,
     model_inference_destinations as model_inference_destinations_table,
+    model_identity_overrides as model_identity_overrides_table,
     model_market_snapshots as model_market_snapshots_table,
+    model_use_case_inference_approvals as model_use_case_inference_approvals_table,
     model_use_case_approvals as model_use_case_approvals_table,
     models as models_table,
     providers as providers_table,
@@ -38,7 +41,13 @@ from .inference_catalog import (
     load_authoritative_destination_ids,
     load_synced_inference_catalog,
 )
-from .model_taxonomy import infer_model_identity
+from .inference_locations import get_inference_country_from_region, inference_location_key, sort_inference_countries
+from .model_curation import (
+    apply_model_curation_baseline,
+    build_model_curation_match_key,
+    export_model_curation_baseline,
+)
+from .model_taxonomy import ModelIdentity, infer_model_identity
 from .name_resolution import build_model_lookup, name_signatures, normalize_text, resolve_model_name
 from .seed_data import (
     INTERNAL_VIEW_BENCHMARK_ID,
@@ -170,6 +179,7 @@ def bootstrap() -> None:
         _repair_score_trust_labels()
         _sync_provider_directory()
         apply_provider_origin_baseline(ENGINE)
+        apply_model_curation_baseline(ENGINE)
         _migrate_legacy_model_approvals()
         _refresh_model_identity_metadata()
         _canonicalize_model_catalog()
@@ -385,6 +395,7 @@ def _serialize_use_case_approval(row: dict[str, Any]) -> dict[str, Any]:
         "discouraged_member_count": int(
             row.get("discouraged_member_count") or (1 if recommendation_status == RECOMMENDATION_STATUS_DISCOURAGED else 0)
         ),
+        "inference_route_approvals": [],
     }
 
 
@@ -404,6 +415,61 @@ def _load_model_use_case_approvals(
         if not model_id or not use_case_id:
             continue
         payload.setdefault(model_id, {})[use_case_id] = _serialize_use_case_approval(row)
+    return payload
+
+
+def _serialize_inference_route_approval(
+    row: dict[str, Any],
+    destination_lookup: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    destination = (destination_lookup or {}).get(str(row.get("destination_id") or ""))
+    return {
+        "use_case_id": str(row.get("use_case_id") or ""),
+        "destination_id": str(row.get("destination_id") or ""),
+        "destination_name": destination.get("name") if destination is not None else None,
+        "hyperscaler": destination.get("hyperscaler") if destination is not None else None,
+        "location_key": str(row.get("location_key") or ""),
+        "location_label": str(row.get("location_label") or ""),
+        "approved_for_use": bool(row.get("approved_for_use", 0)),
+        "approval_notes": _clean_text(row.get("approval_notes")),
+        "approval_updated_at": row.get("approval_updated_at"),
+    }
+
+
+def _load_model_use_case_inference_approvals(
+    conn,
+    model_ids: Iterable[str] | None = None,
+    destinations_by_model_id: dict[str, list[dict[str, Any]]] | None = None,
+) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    statement = select(model_use_case_inference_approvals_table)
+    normalized_model_ids = [str(model_id) for model_id in (model_ids or []) if str(model_id).strip()]
+    if normalized_model_ids:
+        statement = statement.where(model_use_case_inference_approvals_table.c.model_id.in_(normalized_model_ids))
+    rows = fetch_all(conn, statement)
+    payload: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for row in rows:
+        model_id = str(row.get("model_id") or "").strip()
+        use_case_id = str(row.get("use_case_id") or "").strip()
+        if not model_id or not use_case_id:
+            continue
+        destination_lookup = {
+            str(destination.get("id") or ""): destination
+            for destination in (destinations_by_model_id or {}).get(model_id, [])
+            if str(destination.get("id") or "").strip()
+        }
+        payload.setdefault(model_id, {}).setdefault(use_case_id, []).append(
+            _serialize_inference_route_approval(row, destination_lookup)
+        )
+
+    for approvals_by_use_case in payload.values():
+        for use_case_id, approvals in approvals_by_use_case.items():
+            approvals_by_use_case[use_case_id] = sorted(
+                approvals,
+                key=lambda item: (
+                    str(item.get("destination_name") or ""),
+                    str(item.get("location_label") or ""),
+                ),
+            )
     return payload
 
 
@@ -442,6 +508,7 @@ def list_models() -> list[dict[str, Any]]:
         )
         model_ids = [str(row["id"]) for row in model_rows]
         approvals_by_model_id = _load_model_use_case_approvals(conn, model_ids)
+        inference_approvals_by_model_id = _load_model_use_case_inference_approvals(conn, model_ids)
         inference_rows_by_model = load_synced_inference_catalog(conn, model_ids)
         authoritative_destination_ids = load_authoritative_destination_ids(conn)
 
@@ -458,12 +525,14 @@ def list_models() -> list[dict[str, Any]]:
             row,
             provider_metadata=_resolve_provider_metadata(row, providers_by_id, providers_by_name),
             use_case_approvals=approvals_by_model_id.get(str(row["id"]), {}),
+            inference_route_approvals=inference_approvals_by_model_id.get(str(row["id"]), {}),
         )
         model = attach_inference_catalog(
             model,
             synced_destinations=inference_rows_by_model.get(model["id"]),
             authoritative_destinations=authoritative_destination_ids,
         )
+        _attach_inference_route_destination_metadata(model)
         model["scores"] = {
             benchmark_id: _serialize_score(latest_scores[(model["id"], benchmark_id)])
             if (model["id"], benchmark_id) in latest_scores
@@ -621,7 +690,14 @@ def _migrate_legacy_model_approvals() -> None:
             conn.execute(stmt)
 
 
-def _load_model_update_context(conn, model_ids: list[str]) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, dict[str, Any]]], dict[str, list[dict[str, Any]]], set[str]]:
+def _load_model_update_context(conn, model_ids: list[str]) -> tuple[
+    dict[str, dict[str, Any]],
+    dict[str, dict[str, Any]],
+    dict[str, dict[str, dict[str, Any]]],
+    dict[str, dict[str, list[dict[str, Any]]]],
+    dict[str, list[dict[str, Any]]],
+    set[str],
+]:
     provider_rows = fetch_all(conn, select(providers_table).where(providers_table.c.active == 1))
     providers_by_id = {str(row["id"]): _serialize_provider(row) for row in provider_rows}
     providers_by_name = {
@@ -630,9 +706,44 @@ def _load_model_update_context(conn, model_ids: list[str]) -> tuple[dict[str, di
         if str(row.get("name") or "").strip()
     }
     approvals_by_model_id = _load_model_use_case_approvals(conn, model_ids)
+    inference_approvals_by_model_id = _load_model_use_case_inference_approvals(conn, model_ids)
     inference_rows_by_model = load_synced_inference_catalog(conn, model_ids)
     authoritative_destination_ids = load_authoritative_destination_ids(conn)
-    return providers_by_id, providers_by_name, approvals_by_model_id, inference_rows_by_model, authoritative_destination_ids
+    return (
+        providers_by_id,
+        providers_by_name,
+        approvals_by_model_id,
+        inference_approvals_by_model_id,
+        inference_rows_by_model,
+        authoritative_destination_ids,
+    )
+
+
+def _load_serialized_model_for_response(conn, model_id: str) -> dict[str, Any] | None:
+    existing = fetch_one(conn, select(models_table).where(models_table.c.id == model_id))
+    if existing is None:
+        return None
+    (
+        providers_by_id,
+        providers_by_name,
+        approvals_by_model_id,
+        inference_approvals_by_model_id,
+        inference_rows_by_model,
+        authoritative_destination_ids,
+    ) = _load_model_update_context(conn, [model_id])
+    model = _serialize_model(
+        existing,
+        provider_metadata=_resolve_provider_metadata(existing, providers_by_id, providers_by_name),
+        use_case_approvals=approvals_by_model_id.get(model_id, {}),
+        inference_route_approvals=inference_approvals_by_model_id.get(model_id, {}),
+    )
+    model = attach_inference_catalog(
+        model,
+        synced_destinations=inference_rows_by_model.get(model_id),
+        authoritative_destinations=authoritative_destination_ids,
+    )
+    _attach_inference_route_destination_metadata(model)
+    return model
 
 
 def update_model_use_case_approval(
@@ -700,6 +811,7 @@ def update_model_use_case_approval(
             providers_by_id,
             providers_by_name,
             approvals_by_model_id,
+            inference_approvals_by_model_id,
             inference_rows_by_model,
             authoritative_destination_ids,
         ) = _load_model_update_context(conn, [model_id])
@@ -711,13 +823,513 @@ def update_model_use_case_approval(
         updated,
         provider_metadata=_resolve_provider_metadata(updated, providers_by_id, providers_by_name),
         use_case_approvals=approvals_by_model_id.get(model_id, {}),
+        inference_route_approvals=inference_approvals_by_model_id.get(model_id, {}),
     )
     model = attach_inference_catalog(
         model,
         synced_destinations=inference_rows_by_model.get(model_id),
         authoritative_destinations=authoritative_destination_ids,
     )
+    _attach_inference_route_destination_metadata(model)
     return _model_summary(model)
+
+
+def curate_model_identity(
+    model_id: str,
+    target_model_id: str,
+    *,
+    variant_label: str | None = None,
+    notes: str | None = None,
+) -> dict[str, Any] | None:
+    bootstrap()
+    normalized_model_id = str(model_id or "").strip()
+    normalized_target_model_id = str(target_model_id or "").strip()
+    if not normalized_model_id or not normalized_target_model_id:
+        raise ValueError("Both source and target model ids are required.")
+    if normalized_model_id == normalized_target_model_id:
+        raise ValueError("Choose a different model to copy family identity from.")
+
+    cleaned_variant_label = _clean_text(variant_label)
+    cleaned_notes = _clean_text(notes)
+    updated_at = utc_now_iso()
+
+    with ENGINE.begin() as conn:
+        source = fetch_one(conn, select(models_table).where(models_table.c.id == normalized_model_id))
+        target = fetch_one(conn, select(models_table).where(models_table.c.id == normalized_target_model_id))
+        if source is None:
+            return None
+        if target is None:
+            raise ValueError("Target model not found.")
+        if not all(
+            (
+                str(target.get("family_id") or "").strip(),
+                str(target.get("family_name") or "").strip(),
+                str(target.get("canonical_model_id") or "").strip(),
+                str(target.get("canonical_model_name") or "").strip(),
+            )
+        ):
+            raise ValueError("Target model is missing family/canonical identity metadata.")
+
+        match_provider = str(source.get("provider") or "").strip() or "Unknown"
+        match_name = str(source.get("name") or "").strip()
+        if not match_name:
+            raise ValueError("Source model is missing a name.")
+        match_key = build_model_curation_match_key(match_provider, match_name)
+        if not match_key:
+            raise ValueError("Could not derive a durable match key for this model.")
+
+        override_values = {
+            "source_model_id": normalized_model_id,
+            "match_provider": match_provider,
+            "match_name": match_name,
+            "match_key": match_key,
+            "family_id": str(target["family_id"]),
+            "family_name": str(target["family_name"]),
+            "canonical_model_id": str(target["canonical_model_id"]),
+            "canonical_model_name": str(target["canonical_model_name"]),
+            "variant_label": cleaned_variant_label if variant_label is not None else _clean_text(source.get("variant_label")),
+            "notes": cleaned_notes,
+            "updated_at": updated_at,
+            "active": 1,
+        }
+        stmt = sqlite_insert(model_identity_overrides_table).values(**override_values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["source_model_id"],
+            set_={
+                "match_provider": stmt.excluded.match_provider,
+                "match_name": stmt.excluded.match_name,
+                "match_key": stmt.excluded.match_key,
+                "family_id": stmt.excluded.family_id,
+                "family_name": stmt.excluded.family_name,
+                "canonical_model_id": stmt.excluded.canonical_model_id,
+                "canonical_model_name": stmt.excluded.canonical_model_name,
+                "variant_label": stmt.excluded.variant_label,
+                "notes": stmt.excluded.notes,
+                "updated_at": stmt.excluded.updated_at,
+                "active": stmt.excluded.active,
+            },
+        )
+        conn.execute(stmt)
+        conn.execute(
+            update(model_duplicate_overrides_table)
+            .where(model_duplicate_overrides_table.c.source_model_id == normalized_model_id)
+            .values(active=0)
+        )
+        conn.execute(
+            update(models_table)
+            .where(models_table.c.id == normalized_model_id)
+            .values(
+                family_id=override_values["family_id"],
+                family_name=override_values["family_name"],
+                canonical_model_id=override_values["canonical_model_id"],
+                canonical_model_name=override_values["canonical_model_name"],
+                variant_label=override_values["variant_label"],
+            )
+        )
+        model = _load_serialized_model_for_response(conn, normalized_model_id)
+
+    export_model_curation_baseline(ENGINE)
+    return _model_summary(model) if model is not None else None
+
+
+def merge_model_duplicate(
+    model_id: str,
+    target_model_id: str,
+    *,
+    notes: str | None = None,
+) -> dict[str, Any] | None:
+    bootstrap()
+    normalized_model_id = str(model_id or "").strip()
+    normalized_target_model_id = str(target_model_id or "").strip()
+    if not normalized_model_id or not normalized_target_model_id:
+        raise ValueError("Both source and target model ids are required.")
+    if normalized_model_id == normalized_target_model_id:
+        raise ValueError("Choose a different model to merge into.")
+
+    cleaned_notes = _clean_text(notes)
+    updated_at = utc_now_iso()
+
+    with ENGINE.begin() as conn:
+        source = fetch_one(conn, select(models_table).where(models_table.c.id == normalized_model_id))
+        target = fetch_one(conn, select(models_table).where(models_table.c.id == normalized_target_model_id))
+        if source is None:
+            return None
+        if target is None:
+            raise ValueError("Target model not found.")
+        match_provider = str(source.get("provider") or "").strip() or "Unknown"
+        match_name = str(source.get("name") or "").strip()
+        if not match_name:
+            raise ValueError("Source model is missing a name.")
+        match_key = build_model_curation_match_key(match_provider, match_name)
+        if not match_key:
+            raise ValueError("Could not derive a durable match key for this model.")
+
+        stmt = sqlite_insert(model_duplicate_overrides_table).values(
+            source_model_id=normalized_model_id,
+            match_provider=match_provider,
+            match_name=match_name,
+            match_key=match_key,
+            target_model_id=normalized_target_model_id,
+            notes=cleaned_notes,
+            updated_at=updated_at,
+            active=1,
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["source_model_id"],
+            set_={
+                "match_provider": stmt.excluded.match_provider,
+                "match_name": stmt.excluded.match_name,
+                "match_key": stmt.excluded.match_key,
+                "target_model_id": stmt.excluded.target_model_id,
+                "notes": stmt.excluded.notes,
+                "updated_at": stmt.excluded.updated_at,
+                "active": stmt.excluded.active,
+            },
+        )
+        conn.execute(stmt)
+        _deactivate_source_identity_override(conn, normalized_model_id)
+        merged = _merge_model_into_target(conn, normalized_model_id, normalized_target_model_id)
+        if not merged:
+            raise ValueError("Could not merge duplicate into the selected target.")
+        model = _load_serialized_model_for_response(conn, normalized_target_model_id)
+
+    export_model_curation_baseline(ENGINE)
+    return _model_summary(model) if model is not None else None
+
+
+def _destination_location_entries(destination: dict[str, Any]) -> list[dict[str, str]]:
+    labels = sort_inference_countries(
+        [
+            get_inference_country_from_region(region)
+            for region in (destination.get("regions") or [])
+        ]
+    )
+    if not labels and "global" in str(destination.get("location_scope") or "").lower():
+        labels = ["Global"]
+    return [
+        {
+            "location_key": inference_location_key(label),
+            "location_label": label,
+        }
+        for label in labels
+        if inference_location_key(label)
+    ]
+
+
+def _resolve_inference_route_target(
+    destinations: list[dict[str, Any]],
+    destination_id: str,
+    location_label: str,
+    location_key: str | None = None,
+) -> dict[str, Any] | None:
+    normalized_destination_id = str(destination_id or "").strip()
+    normalized_location_label = str(location_label or "").strip()
+    normalized_location_key = str(location_key or "").strip() or inference_location_key(normalized_location_label)
+    if not normalized_destination_id or not normalized_location_key:
+        return None
+
+    for destination in destinations:
+        if str(destination.get("id") or "").strip() != normalized_destination_id:
+            continue
+        for location in _destination_location_entries(destination):
+            if location["location_key"] != normalized_location_key:
+                continue
+            return {
+                "destination_id": normalized_destination_id,
+                "destination_name": destination.get("name"),
+                "hyperscaler": destination.get("hyperscaler"),
+                "location_key": location["location_key"],
+                "location_label": location["location_label"],
+            }
+    return None
+
+
+def update_model_use_case_inference_approval(
+    model_id: str,
+    use_case_id: str,
+    destination_id: str,
+    location_label: str,
+    approved_for_use: bool,
+    approval_notes: str | None,
+    *,
+    location_key: str | None = None,
+) -> dict[str, Any] | None:
+    bootstrap()
+    if _get_base_use_case(use_case_id) is None:
+        raise ValueError("Use case not found")
+
+    cleaned_notes = _clean_text(approval_notes)
+    updated_at = utc_now_iso()
+
+    with ENGINE.begin() as conn:
+        existing = fetch_one(conn, select(models_table).where(models_table.c.id == model_id))
+        if existing is None:
+            return None
+
+        (
+            providers_by_id,
+            providers_by_name,
+            approvals_by_model_id,
+            inference_approvals_by_model_id,
+            inference_rows_by_model,
+            authoritative_destination_ids,
+        ) = _load_model_update_context(conn, [model_id])
+
+        model = _serialize_model(
+            existing,
+            provider_metadata=_resolve_provider_metadata(existing, providers_by_id, providers_by_name),
+            use_case_approvals=approvals_by_model_id.get(model_id, {}),
+            inference_route_approvals=inference_approvals_by_model_id.get(model_id, {}),
+        )
+        model = attach_inference_catalog(
+            model,
+            synced_destinations=inference_rows_by_model.get(model_id),
+            authoritative_destinations=authoritative_destination_ids,
+        )
+        _attach_inference_route_destination_metadata(model)
+
+        route_target = _resolve_inference_route_target(
+            model.get("inference_destinations") or [],
+            destination_id,
+            location_label,
+            location_key,
+        )
+        if route_target is None:
+            raise ValueError("Inference provider/location not found for this model")
+
+        stmt = sqlite_insert(model_use_case_inference_approvals_table).values(
+            model_id=model_id,
+            use_case_id=use_case_id,
+            destination_id=route_target["destination_id"],
+            location_key=route_target["location_key"],
+            location_label=route_target["location_label"],
+            approved_for_use=1 if approved_for_use else 0,
+            approval_notes=cleaned_notes,
+            approval_updated_at=updated_at,
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["model_id", "use_case_id", "destination_id", "location_key"],
+            set_={
+                "location_label": stmt.excluded.location_label,
+                "approved_for_use": stmt.excluded.approved_for_use,
+                "approval_notes": stmt.excluded.approval_notes,
+                "approval_updated_at": stmt.excluded.approval_updated_at,
+            },
+        )
+        conn.execute(stmt)
+
+        base_approval = approvals_by_model_id.get(model_id, {}).get(use_case_id)
+        if approved_for_use and not (base_approval or {}).get("approved_for_use"):
+            base_note = _clean_text((base_approval or {}).get("approval_notes")) or (
+                f"Approved via inference route approval for {route_target['destination_name']} in {route_target['location_label']}."
+            )
+            base_stmt = sqlite_insert(model_use_case_approvals_table).values(
+                model_id=model_id,
+                use_case_id=use_case_id,
+                approved_for_use=1,
+                approval_notes=base_note,
+                approval_updated_at=updated_at,
+                recommendation_status=_normalize_recommendation_status((base_approval or {}).get("recommendation_status")),
+                recommendation_notes=_clean_text((base_approval or {}).get("recommendation_notes")),
+                recommendation_updated_at=(base_approval or {}).get("recommendation_updated_at"),
+            )
+            base_stmt = base_stmt.on_conflict_do_update(
+                index_elements=["model_id", "use_case_id"],
+                set_={
+                    "approved_for_use": 1,
+                    "approval_notes": base_stmt.excluded.approval_notes,
+                    "approval_updated_at": base_stmt.excluded.approval_updated_at,
+                },
+            )
+            conn.execute(base_stmt)
+
+        updated = _sync_legacy_model_approval_columns(conn, model_id)
+        (
+            providers_by_id,
+            providers_by_name,
+            approvals_by_model_id,
+            inference_approvals_by_model_id,
+            inference_rows_by_model,
+            authoritative_destination_ids,
+        ) = _load_model_update_context(conn, [model_id])
+
+    if updated is None:
+        return None
+
+    model = _serialize_model(
+        updated,
+        provider_metadata=_resolve_provider_metadata(updated, providers_by_id, providers_by_name),
+        use_case_approvals=approvals_by_model_id.get(model_id, {}),
+        inference_route_approvals=inference_approvals_by_model_id.get(model_id, {}),
+    )
+    model = attach_inference_catalog(
+        model,
+        synced_destinations=inference_rows_by_model.get(model_id),
+        authoritative_destinations=authoritative_destination_ids,
+    )
+    _attach_inference_route_destination_metadata(model)
+    return _model_summary(model)
+
+
+def apply_model_inference_route_approval_bulk(
+    model_ids: Iterable[str],
+    use_case_id: str,
+    destination_id: str,
+    location_label: str,
+    approved_for_use: bool,
+    approval_notes: str | None = None,
+    *,
+    location_key: str | None = None,
+) -> dict[str, Any]:
+    bootstrap()
+    if _get_base_use_case(use_case_id) is None:
+        raise ValueError("Use case not found")
+
+    normalized_model_ids = []
+    seen_model_ids = set()
+    for model_id in model_ids:
+        normalized_model_id = str(model_id or "").strip()
+        if not normalized_model_id or normalized_model_id in seen_model_ids:
+            continue
+        seen_model_ids.add(normalized_model_id)
+        normalized_model_ids.append(normalized_model_id)
+    if not normalized_model_ids:
+        raise ValueError("At least one model id is required")
+
+    cleaned_notes = _clean_text(approval_notes)
+    applied_at = utc_now_iso()
+
+    with ENGINE.begin() as conn:
+        model_rows = fetch_all(
+            conn,
+            select(models_table)
+            .where(models_table.c.active == 1)
+            .where(models_table.c.id.in_(normalized_model_ids))
+            .order_by(models_table.c.provider.asc(), models_table.c.name.asc()),
+        )
+        if not model_rows:
+            raise ValueError("No active models matched the requested ids")
+
+        (
+            providers_by_id,
+            providers_by_name,
+            approvals_by_model_id,
+            inference_approvals_by_model_id,
+            inference_rows_by_model,
+            authoritative_destination_ids,
+        ) = _load_model_update_context(conn, [str(row["id"]) for row in model_rows])
+
+        pending_rows: list[dict[str, Any]] = []
+        base_rows: list[dict[str, Any]] = []
+        updated_model_ids: list[str] = []
+        route_target_summary: dict[str, Any] | None = None
+
+        for row in model_rows:
+            model_id = str(row["id"])
+            model = _serialize_model(
+                row,
+                provider_metadata=_resolve_provider_metadata(row, providers_by_id, providers_by_name),
+                use_case_approvals=approvals_by_model_id.get(model_id, {}),
+                inference_route_approvals=inference_approvals_by_model_id.get(model_id, {}),
+            )
+            model = attach_inference_catalog(
+                model,
+                synced_destinations=inference_rows_by_model.get(model_id),
+                authoritative_destinations=authoritative_destination_ids,
+            )
+            _attach_inference_route_destination_metadata(model)
+
+            route_target = _resolve_inference_route_target(
+                model.get("inference_destinations") or [],
+                destination_id,
+                location_label,
+                location_key,
+            )
+            if route_target is None:
+                continue
+
+            route_target_summary = route_target
+            pending_rows.append(
+                {
+                    "model_id": model_id,
+                    "use_case_id": use_case_id,
+                    "destination_id": route_target["destination_id"],
+                    "location_key": route_target["location_key"],
+                    "location_label": route_target["location_label"],
+                    "approved_for_use": 1 if approved_for_use else 0,
+                    "approval_notes": cleaned_notes,
+                    "approval_updated_at": applied_at,
+                }
+            )
+            updated_model_ids.append(model_id)
+
+            base_approval = approvals_by_model_id.get(model_id, {}).get(use_case_id)
+            if approved_for_use and not (base_approval or {}).get("approved_for_use"):
+                base_note = _clean_text((base_approval or {}).get("approval_notes")) or (
+                    f"Approved via inference route approval for {route_target['destination_name']} in {route_target['location_label']}."
+                )
+                base_rows.append(
+                    {
+                        "model_id": model_id,
+                        "use_case_id": use_case_id,
+                        "approved_for_use": 1,
+                        "approval_notes": base_note,
+                        "approval_updated_at": applied_at,
+                        "recommendation_status": _normalize_recommendation_status((base_approval or {}).get("recommendation_status")),
+                        "recommendation_notes": _clean_text((base_approval or {}).get("recommendation_notes")),
+                        "recommendation_updated_at": (base_approval or {}).get("recommendation_updated_at"),
+                    }
+                )
+
+        if pending_rows:
+            stmt = sqlite_insert(model_use_case_inference_approvals_table).values(pending_rows)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["model_id", "use_case_id", "destination_id", "location_key"],
+                set_={
+                    "location_label": stmt.excluded.location_label,
+                    "approved_for_use": stmt.excluded.approved_for_use,
+                    "approval_notes": stmt.excluded.approval_notes,
+                    "approval_updated_at": stmt.excluded.approval_updated_at,
+                },
+            )
+            conn.execute(stmt)
+
+        if base_rows:
+            base_stmt = sqlite_insert(model_use_case_approvals_table).values(base_rows)
+            base_stmt = base_stmt.on_conflict_do_update(
+                index_elements=["model_id", "use_case_id"],
+                set_={
+                    "approved_for_use": 1,
+                    "approval_notes": base_stmt.excluded.approval_notes,
+                    "approval_updated_at": base_stmt.excluded.approval_updated_at,
+                },
+            )
+            conn.execute(base_stmt)
+
+        for model_id in updated_model_ids:
+            _sync_legacy_model_approval_columns(conn, model_id)
+
+    route_target_summary = route_target_summary or {
+        "destination_id": str(destination_id or "").strip(),
+        "destination_name": None,
+        "hyperscaler": None,
+        "location_key": str(location_key or "").strip() or inference_location_key(location_label),
+        "location_label": str(location_label or "").strip(),
+    }
+
+    return {
+        "use_case_id": use_case_id,
+        "destination_id": route_target_summary["destination_id"],
+        "destination_name": route_target_summary.get("destination_name"),
+        "hyperscaler": route_target_summary.get("hyperscaler"),
+        "location_key": route_target_summary["location_key"],
+        "location_label": route_target_summary["location_label"],
+        "approved_for_use": bool(approved_for_use),
+        "approval_notes": cleaned_notes,
+        "updated_count": len(updated_model_ids),
+        "updated_model_ids": updated_model_ids,
+        "applied_at": applied_at,
+    }
 
 
 def update_model_approval(model_id: str, approved_for_use: bool, approval_notes: str | None) -> dict[str, Any] | None:
@@ -1914,6 +2526,112 @@ def _persist_score_candidate(
     return model_id, "updated" if latest is not None else "added"
 
 
+def _load_identity_override_indexes(
+    conn,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    rows = fetch_all(
+        conn,
+        select(model_identity_overrides_table).where(model_identity_overrides_table.c.active == 1),
+    )
+    by_model_id: dict[str, dict[str, Any]] = {}
+    by_match_key: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        source_model_id = str(row.get("source_model_id") or "").strip()
+        match_key = str(row.get("match_key") or "").strip()
+        if source_model_id:
+            by_model_id[source_model_id] = row
+        if match_key:
+            by_match_key[match_key] = row
+    return by_model_id, by_match_key
+
+
+def _load_duplicate_override_indexes(
+    conn,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    rows = fetch_all(
+        conn,
+        select(model_duplicate_overrides_table).where(model_duplicate_overrides_table.c.active == 1),
+    )
+    by_model_id: dict[str, dict[str, Any]] = {}
+    by_match_key: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        source_model_id = str(row.get("source_model_id") or "").strip()
+        match_key = str(row.get("match_key") or "").strip()
+        if source_model_id:
+            by_model_id[source_model_id] = row
+        if match_key:
+            by_match_key[match_key] = row
+    return by_model_id, by_match_key
+
+
+def _find_identity_override(
+    conn,
+    *,
+    model_id: str | None = None,
+    provider: str | None = None,
+    name: str | None = None,
+) -> dict[str, Any] | None:
+    by_model_id, by_match_key = _load_identity_override_indexes(conn)
+    normalized_model_id = str(model_id or "").strip()
+    if normalized_model_id and normalized_model_id in by_model_id:
+        return by_model_id[normalized_model_id]
+    match_key = build_model_curation_match_key(provider, name)
+    if match_key:
+        return by_match_key.get(match_key)
+    return None
+
+
+def _find_duplicate_override(
+    conn,
+    *,
+    model_id: str | None = None,
+    provider: str | None = None,
+    name: str | None = None,
+) -> dict[str, Any] | None:
+    by_model_id, by_match_key = _load_duplicate_override_indexes(conn)
+    normalized_model_id = str(model_id or "").strip()
+    if normalized_model_id and normalized_model_id in by_model_id:
+        return by_model_id[normalized_model_id]
+    match_key = build_model_curation_match_key(provider, name)
+    if match_key:
+        return by_match_key.get(match_key)
+    return None
+
+
+def _resolve_active_duplicate_target(conn, override: dict[str, Any] | None) -> str | None:
+    if override is None:
+        return None
+    target_model_id = str(override.get("target_model_id") or "").strip()
+    if not target_model_id:
+        return None
+    existing = fetch_one(
+        conn,
+        select(models_table.c.id).where(
+            models_table.c.id == target_model_id,
+            models_table.c.active == 1,
+        ),
+    )
+    return target_model_id if existing is not None else None
+
+
+def _identity_from_override(override: dict[str, Any] | None) -> ModelIdentity | None:
+    if override is None:
+        return None
+    family_id = str(override.get("family_id") or "").strip()
+    family_name = str(override.get("family_name") or "").strip()
+    canonical_model_id = str(override.get("canonical_model_id") or "").strip()
+    canonical_model_name = str(override.get("canonical_model_name") or "").strip()
+    if not all((family_id, family_name, canonical_model_id, canonical_model_name)):
+        return None
+    return ModelIdentity(
+        family_id=family_id,
+        family_name=family_name,
+        canonical_model_id=canonical_model_id,
+        canonical_model_name=canonical_model_name,
+        variant_label=_clean_text(override.get("variant_label")),
+    )
+
+
 def _ensure_model(
     raw_model_name: str,
     metadata: dict[str, Any],
@@ -1925,31 +2643,48 @@ def _ensure_model(
     if resolved:
         return resolved
 
-    model_id = _choose_model_id(raw_model_name, raw_model_key)
+    candidate_model_id = _choose_model_id(raw_model_name, raw_model_key)
     provider = _infer_provider(metadata, raw_model_name) or "Unknown"
-    provider_id = _ensure_provider_row(provider)
-    identity = infer_model_identity(raw_model_name, provider, model_id)
     discovered_at = utc_now_iso()
-    stmt = sqlite_insert(models_table).values(
-        id=model_id,
-        name=raw_model_name,
-        provider_id=provider_id,
-        provider=provider,
-        type="proprietary" if provider != "Unknown" else "open_weights",
-        catalog_status=CATALOG_STATUS_TRACKED,
-        release_date=None,
-        context_window=None,
-        family_id=identity.family_id,
-        family_name=identity.family_name,
-        canonical_model_id=identity.canonical_model_id,
-        canonical_model_name=identity.canonical_model_name,
-        variant_label=identity.variant_label,
-        discovered_at=discovered_at,
-        discovered_update_log_id=discovered_update_log_id,
-        active=1,
-    )
-    stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
     with ENGINE.begin() as conn:
+        provider_id = _ensure_provider_row(provider, conn=conn)
+        duplicate_override = _find_duplicate_override(
+            conn,
+            model_id=candidate_model_id,
+            provider=provider,
+            name=raw_model_name,
+        )
+        duplicate_target_id = _resolve_active_duplicate_target(conn, duplicate_override)
+        if duplicate_target_id:
+            return duplicate_target_id
+
+        identity_override = _find_identity_override(
+            conn,
+            model_id=candidate_model_id,
+            provider=provider,
+            name=raw_model_name,
+        )
+        model_id = str(identity_override.get("source_model_id") or candidate_model_id) if identity_override else candidate_model_id
+        identity = _identity_from_override(identity_override) or infer_model_identity(raw_model_name, provider, model_id)
+        stmt = sqlite_insert(models_table).values(
+            id=model_id,
+            name=raw_model_name,
+            provider_id=provider_id,
+            provider=provider,
+            type="proprietary" if provider != "Unknown" else "open_weights",
+            catalog_status=CATALOG_STATUS_TRACKED,
+            release_date=None,
+            context_window=None,
+            family_id=identity.family_id,
+            family_name=identity.family_name,
+            canonical_model_id=identity.canonical_model_id,
+            canonical_model_name=identity.canonical_model_name,
+            variant_label=identity.variant_label,
+            discovered_at=discovered_at,
+            discovered_update_log_id=discovered_update_log_id,
+            active=1,
+        )
+        stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
         conn.execute(stmt)
     return model_id
 
@@ -2037,6 +2772,7 @@ def _ensure_provider_row(provider_name: str | None, *, conn: Any | None = None) 
 
 def _refresh_model_identity_metadata() -> None:
     with ENGINE.begin() as conn:
+        identity_overrides_by_model_id, identity_overrides_by_match_key = _load_identity_override_indexes(conn)
         rows = fetch_all(
             conn,
             select(
@@ -2051,7 +2787,14 @@ def _refresh_model_identity_metadata() -> None:
             ).where(models_table.c.active == 1),
         )
         for row in rows:
-            identity = infer_model_identity(str(row["name"]), str(row.get("provider") or "Unknown"), str(row["id"]))
+            override = identity_overrides_by_model_id.get(str(row["id"])) or identity_overrides_by_match_key.get(
+                str(build_model_curation_match_key(row.get("provider"), row.get("name")) or "")
+            )
+            identity = _identity_from_override(override) or infer_model_identity(
+                str(row["name"]),
+                str(row.get("provider") or "Unknown"),
+                str(row["id"]),
+            )
             desired_values = {
                 "family_id": identity.family_id,
                 "family_name": identity.family_name,
@@ -2075,7 +2818,129 @@ def _refresh_model_identity_metadata() -> None:
             )
 
 
+def _merge_duplicate_use_case_approvals(conn, duplicate_id: str, canonical_id: str) -> None:
+    duplicate_rows = fetch_all(
+        conn,
+        select(model_use_case_approvals_table).where(
+            model_use_case_approvals_table.c.model_id == duplicate_id
+        ),
+    )
+    if not duplicate_rows:
+        return
+
+    stmt = sqlite_insert(model_use_case_approvals_table).values(
+        [{**row, "model_id": canonical_id} for row in duplicate_rows]
+    )
+    stmt = stmt.on_conflict_do_nothing(index_elements=["model_id", "use_case_id"])
+    conn.execute(stmt)
+    conn.execute(
+        delete(model_use_case_approvals_table).where(
+            model_use_case_approvals_table.c.model_id == duplicate_id
+        )
+    )
+
+
+def _merge_duplicate_inference_destinations(conn, duplicate_id: str, canonical_id: str) -> None:
+    duplicate_rows = fetch_all(
+        conn,
+        select(model_inference_destinations_table).where(
+            model_inference_destinations_table.c.model_id == duplicate_id
+        ),
+    )
+    if not duplicate_rows:
+        return
+
+    payload_rows: list[dict[str, Any]] = []
+    for row in duplicate_rows:
+        payload = {key: value for key, value in row.items() if key != "id"}
+        payload["model_id"] = canonical_id
+        payload_rows.append(payload)
+    stmt = sqlite_insert(model_inference_destinations_table).values(payload_rows)
+    stmt = stmt.on_conflict_do_nothing(index_elements=["model_id", "destination_id"])
+    conn.execute(stmt)
+    conn.execute(
+        delete(model_inference_destinations_table).where(
+            model_inference_destinations_table.c.model_id == duplicate_id
+        )
+    )
+
+
+def _deactivate_source_identity_override(conn, source_model_id: str) -> None:
+    conn.execute(
+        update(model_identity_overrides_table)
+        .where(model_identity_overrides_table.c.source_model_id == source_model_id)
+        .values(active=0)
+    )
+
+
+def _merge_model_into_target(conn, duplicate_id: str, canonical_id: str) -> bool:
+    normalized_duplicate_id = str(duplicate_id or "").strip()
+    normalized_canonical_id = str(canonical_id or "").strip()
+    if not normalized_duplicate_id or not normalized_canonical_id or normalized_duplicate_id == normalized_canonical_id:
+        return False
+
+    duplicate = fetch_one(
+        conn,
+        select(models_table).where(
+            models_table.c.id == normalized_duplicate_id,
+            models_table.c.active == 1,
+        ),
+    )
+    canonical = fetch_one(
+        conn,
+        select(models_table).where(
+            models_table.c.id == normalized_canonical_id,
+            models_table.c.active == 1,
+        ),
+    )
+    if duplicate is None or canonical is None:
+        return False
+
+    enrichment = _canonical_model_enrichment([duplicate, canonical], canonical)
+    if enrichment:
+        conn.execute(
+            update(models_table)
+            .where(models_table.c.id == normalized_canonical_id)
+            .values(**enrichment)
+        )
+
+    conn.execute(
+        update(scores_table)
+        .where(scores_table.c.model_id == normalized_duplicate_id)
+        .values(model_id=normalized_canonical_id)
+    )
+    _merge_duplicate_use_case_approvals(conn, normalized_duplicate_id, normalized_canonical_id)
+    _merge_duplicate_inference_destinations(conn, normalized_duplicate_id, normalized_canonical_id)
+    _merge_duplicate_inference_route_approvals(conn, normalized_duplicate_id, normalized_canonical_id)
+    _merge_duplicate_market_snapshots(conn, normalized_duplicate_id, normalized_canonical_id)
+    conn.execute(
+        update(raw_source_records_table)
+        .where(raw_source_records_table.c.normalized_model_id == normalized_duplicate_id)
+        .values(normalized_model_id=normalized_canonical_id)
+    )
+    _deactivate_source_identity_override(conn, normalized_duplicate_id)
+    conn.execute(
+        models_table.delete().where(models_table.c.id == normalized_duplicate_id)
+    )
+    _sync_legacy_model_approval_columns(conn, normalized_canonical_id)
+    return True
+
+
 def _canonicalize_model_catalog() -> None:
+    with ENGINE.begin() as conn:
+        duplicate_override_rows = fetch_all(
+            conn,
+            select(model_duplicate_overrides_table)
+            .where(model_duplicate_overrides_table.c.active == 1)
+            .order_by(model_duplicate_overrides_table.c.updated_at.asc(), model_duplicate_overrides_table.c.id.asc()),
+        )
+        for override in duplicate_override_rows:
+            _merge_model_into_target(
+                conn,
+                str(override.get("source_model_id") or ""),
+                str(override.get("target_model_id") or ""),
+            )
+
     with get_connection(ENGINE) as conn:
         model_rows = fetch_all(
             conn,
@@ -2126,30 +2991,7 @@ def _canonicalize_model_catalog() -> None:
                 duplicate_id = str(duplicate["id"])
                 if duplicate_id == canonical_id:
                     continue
-                conn.execute(
-                    update(scores_table)
-                    .where(scores_table.c.model_id == duplicate_id)
-                    .values(model_id=canonical_id)
-                )
-                conn.execute(
-                    update(model_use_case_approvals_table)
-                    .where(model_use_case_approvals_table.c.model_id == duplicate_id)
-                    .values(model_id=canonical_id)
-                )
-                conn.execute(
-                    update(model_inference_destinations_table)
-                    .where(model_inference_destinations_table.c.model_id == duplicate_id)
-                    .values(model_id=canonical_id)
-                )
-                _merge_duplicate_market_snapshots(conn, duplicate_id, canonical_id)
-                conn.execute(
-                    update(raw_source_records_table)
-                    .where(raw_source_records_table.c.normalized_model_id == duplicate_id)
-                    .values(normalized_model_id=canonical_id)
-                )
-                conn.execute(
-                    models_table.delete().where(models_table.c.id == duplicate_id)
-                )
+                _merge_model_into_target(conn, duplicate_id, canonical_id)
 
         active_rows = fetch_all(
             conn,
@@ -2224,6 +3066,36 @@ def _merge_duplicate_market_snapshots(conn, duplicate_id: str, canonical_id: str
             .where(model_market_snapshots_table.c.id.in_(duplicate_snapshot_ids_to_update))
             .values(model_id=canonical_id)
         )
+
+
+def _merge_duplicate_inference_route_approvals(conn, duplicate_id: str, canonical_id: str) -> None:
+    duplicate_rows = fetch_all(
+        conn,
+        select(model_use_case_inference_approvals_table).where(
+            model_use_case_inference_approvals_table.c.model_id == duplicate_id
+        ),
+    )
+    if not duplicate_rows:
+        return
+
+    stmt = sqlite_insert(model_use_case_inference_approvals_table).values(
+        [{**row, "model_id": canonical_id} for row in duplicate_rows]
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["model_id", "use_case_id", "destination_id", "location_key"],
+        set_={
+            "location_label": stmt.excluded.location_label,
+            "approved_for_use": stmt.excluded.approved_for_use,
+            "approval_notes": stmt.excluded.approval_notes,
+            "approval_updated_at": stmt.excluded.approval_updated_at,
+        },
+    )
+    conn.execute(stmt)
+    conn.execute(
+        delete(model_use_case_inference_approvals_table).where(
+            model_use_case_inference_approvals_table.c.model_id == duplicate_id
+        )
+    )
 
 
 def _refresh_openrouter_model_metadata() -> None:
@@ -3331,6 +4203,7 @@ def _serialize_model(
     row: dict[str, Any],
     provider_metadata: dict[str, Any] | None = None,
     use_case_approvals: dict[str, dict[str, Any]] | None = None,
+    inference_route_approvals: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     payload = dict(row)
     payload["active"] = bool(payload.get("active", 1))
@@ -3359,12 +4232,59 @@ def _serialize_model(
         use_case_id: dict(approval)
         for use_case_id, approval in (use_case_approvals or {}).items()
     }
+    for use_case_id, route_entries in (inference_route_approvals or {}).items():
+        payload["use_case_approvals"].setdefault(
+            use_case_id,
+            {
+                "use_case_id": use_case_id,
+                "approved_for_use": False,
+                "approval_notes": None,
+                "approval_updated_at": None,
+                "recommendation_status": RECOMMENDATION_STATUS_UNRATED,
+                "recommendation_notes": None,
+                "recommendation_updated_at": None,
+                "approval_member_count": 0,
+                "approval_total_count": 1,
+                "recommended_member_count": 0,
+                "not_recommended_member_count": 0,
+                "discouraged_member_count": 0,
+            },
+        )["inference_route_approvals"] = [dict(entry) for entry in route_entries]
     approval_summary = _approval_summary_from_use_case_approvals(payload["use_case_approvals"])
     payload["approved_for_use"] = bool(approval_summary["approved_for_use"] or payload.get("approved_for_use", 0))
     payload["approval_use_case_count"] = int(approval_summary["approval_use_case_count"] or 0)
     payload["approval_notes"] = approval_summary["approval_notes"] or _clean_text(payload.get("approval_notes"))
     payload["approval_updated_at"] = approval_summary["approval_updated_at"] or payload.get("approval_updated_at")
     return payload
+
+
+def _attach_inference_route_destination_metadata(model: dict[str, Any]) -> None:
+    destination_lookup = {
+        str(destination.get("id") or ""): destination
+        for destination in (model.get("inference_destinations") or [])
+        if str(destination.get("id") or "").strip()
+    }
+    for approval in (model.get("use_case_approvals") or {}).values():
+        route_entries = approval.get("inference_route_approvals") or []
+        if not route_entries:
+            continue
+        enriched_entries: list[dict[str, Any]] = []
+        for entry in route_entries:
+            destination = destination_lookup.get(str(entry.get("destination_id") or ""))
+            enriched_entries.append(
+                {
+                    **entry,
+                    "destination_name": entry.get("destination_name") or (destination.get("name") if destination is not None else None),
+                    "hyperscaler": entry.get("hyperscaler") or (destination.get("hyperscaler") if destination is not None else None),
+                }
+            )
+        approval["inference_route_approvals"] = sorted(
+            enriched_entries,
+            key=lambda item: (
+                str(item.get("destination_name") or ""),
+                str(item.get("location_label") or ""),
+            ),
+        )
 
 
 def _serialize_score(row: dict[str, Any]) -> dict[str, Any]:
@@ -3623,6 +4543,7 @@ def _model_summary(model: dict[str, Any]) -> dict[str, Any]:
         "family_name": model.get("family_name"),
         "canonical_model_id": model.get("canonical_model_id"),
         "canonical_model_name": model.get("canonical_model_name"),
+        "variant_label": model.get("variant_label"),
         "discovered_at": model.get("discovered_at"),
         "discovered_update_log_id": model.get("discovered_update_log_id"),
         "approved_for_use": bool(model.get("approved_for_use", False)),
@@ -3787,8 +4708,12 @@ __all__ = [
     "schedule_update",
     "apply_model_family_approval_bulk",
     "apply_model_family_approval_delta",
+    "apply_model_inference_route_approval_bulk",
+    "curate_model_identity",
+    "merge_model_duplicate",
     "update_manual_benchmark_score",
     "update_model_approval",
+    "update_model_use_case_inference_approval",
     "update_model_use_case_approval",
     "update_provider_origin",
     "update_use_case_internal_weight",
