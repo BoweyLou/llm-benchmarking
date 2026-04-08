@@ -205,6 +205,8 @@ const RECOMMENDATION_STATUS_OPTIONS = [
   { id: "not_recommended", label: "Not recommended" },
   { id: "discouraged", label: "Discouraged" },
 ];
+const AUTO_NOT_RECOMMENDED_RELEASE_DAYS = 365;
+const AUTO_NOT_RECOMMENDED_OPENROUTER_DAYS = 540;
 const RECOMMENDATION_FILTER_OPTIONS = [
   { id: DEFAULT_RECOMMENDATION_FILTER, label: "All recommendation states" },
   ...RECOMMENDATION_STATUS_OPTIONS,
@@ -5260,6 +5262,108 @@ function normalizeRecommendationStatus(value, { allowMixed = false } = {}) {
   return "unrated";
 }
 
+function getAgeDays(timestamp) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return null;
+  }
+  return Math.max(0, Math.floor((Date.now() - timestamp) / 86400000));
+}
+
+function getAutoRecommendationMeta(model) {
+  const releaseTimestamp = getPreciseReleaseTimestamp(model?.release_date);
+  const releaseAgeDays = getAgeDays(releaseTimestamp);
+  if (releaseAgeDays != null && releaseAgeDays >= AUTO_NOT_RECOMMENDED_RELEASE_DAYS) {
+    return {
+      status: "not_recommended",
+      label: "Not recommended · age",
+      title: `Auto-derived because this model is ${releaseAgeDays} days old based on its exact release date and no manual recommendation is saved for this lens.`,
+      source: "release",
+      ageDays: releaseAgeDays,
+    };
+  }
+
+  const openRouterAddedTimestamp = getTimestampOrZero(model?.openrouter_added_at);
+  const openRouterAgeDays = getAgeDays(openRouterAddedTimestamp);
+  if (openRouterAgeDays != null && openRouterAgeDays >= AUTO_NOT_RECOMMENDED_OPENROUTER_DAYS) {
+    return {
+      status: "not_recommended",
+      label: "Not recommended · age",
+      title: `Auto-derived because this model was first added to OpenRouter ${openRouterAgeDays} days ago and no manual recommendation is saved for this lens.`,
+      source: "openrouter",
+      ageDays: openRouterAgeDays,
+    };
+  }
+
+  return null;
+}
+
+function getRecommendationBreakdown(model, useCaseId) {
+  if (!useCaseId) {
+    return {
+      status: "unrated",
+      totalCount: 1,
+      recommendedCount: 0,
+      notRecommendedCount: 0,
+      discouragedCount: 0,
+      approval: null,
+      autoMeta: null,
+    };
+  }
+
+  const approval = getModelApprovalRecord(model, useCaseId);
+  const recommendationStatus = normalizeRecommendationStatus(approval?.recommendation_status, { allowMixed: true });
+  const totalCount = Math.max(1, Number(approval?.approval_total_count ?? 1));
+  const recommendedCount = Number(
+    approval?.recommended_member_count ?? (recommendationStatus === "recommended" ? 1 : 0),
+  );
+  const notRecommendedCount = Number(
+    approval?.not_recommended_member_count ?? (recommendationStatus === "not_recommended" ? 1 : 0),
+  );
+  const discouragedCount = Number(
+    approval?.discouraged_member_count ?? (recommendationStatus === "discouraged" ? 1 : 0),
+  );
+  const hasManualSignal =
+    recommendationStatus === "mixed" ||
+    recommendedCount > 0 ||
+    notRecommendedCount > 0 ||
+    discouragedCount > 0;
+
+  if (hasManualSignal) {
+    return {
+      status: recommendationStatus,
+      totalCount,
+      recommendedCount,
+      notRecommendedCount,
+      discouragedCount,
+      approval,
+      autoMeta: null,
+    };
+  }
+
+  const autoMeta = getAutoRecommendationMeta(model);
+  if (autoMeta) {
+    return {
+      status: autoMeta.status,
+      totalCount,
+      recommendedCount: 0,
+      notRecommendedCount: autoMeta.status === "not_recommended" ? 1 : 0,
+      discouragedCount: autoMeta.status === "discouraged" ? 1 : 0,
+      approval,
+      autoMeta,
+    };
+  }
+
+  return {
+    status: "unrated",
+    totalCount,
+    recommendedCount: 0,
+    notRecommendedCount: 0,
+    discouragedCount: 0,
+    approval,
+    autoMeta: null,
+  };
+}
+
 function formatRecommendationStatusLabel(status) {
   switch (normalizeRecommendationStatus(status, { allowMixed: true })) {
     case "recommended":
@@ -5316,17 +5420,7 @@ function matchesRecommendationFilter(model, useCaseId, filterValue) {
     return true;
   }
 
-  const approval = getModelApprovalRecord(model, useCaseId);
-  const recommendationStatus = normalizeRecommendationStatus(approval?.recommendation_status, { allowMixed: true });
-  const recommendedCount = Number(
-    approval?.recommended_member_count ?? (recommendationStatus === "recommended" ? 1 : 0),
-  );
-  const notRecommendedCount = Number(
-    approval?.not_recommended_member_count ?? (recommendationStatus === "not_recommended" ? 1 : 0),
-  );
-  const discouragedCount = Number(
-    approval?.discouraged_member_count ?? (recommendationStatus === "discouraged" ? 1 : 0),
-  );
+  const { recommendedCount, notRecommendedCount, discouragedCount } = getRecommendationBreakdown(model, useCaseId);
 
   if (filterValue === "recommended") {
     return recommendedCount > 0;
@@ -5382,22 +5476,15 @@ function getRecommendationSummary(model, useCaseId) {
   if (!useCaseId) {
     return null;
   }
-  const approval = getModelApprovalRecord(model, useCaseId);
-  if (!approval) {
-    return null;
-  }
-
-  const recommendationStatus = normalizeRecommendationStatus(approval.recommendation_status, { allowMixed: true });
-  const totalCount = Math.max(1, Number(approval.approval_total_count ?? 1));
-  const recommendedCount = Number(
-    approval.recommended_member_count ?? (recommendationStatus === "recommended" ? 1 : 0),
-  );
-  const notRecommendedCount = Number(
-    approval.not_recommended_member_count ?? (recommendationStatus === "not_recommended" ? 1 : 0),
-  );
-  const discouragedCount = Number(
-    approval.discouraged_member_count ?? (recommendationStatus === "discouraged" ? 1 : 0),
-  );
+  const {
+    approval,
+    autoMeta,
+    discouragedCount,
+    notRecommendedCount,
+    recommendedCount,
+    status: recommendationStatus,
+    totalCount,
+  } = getRecommendationBreakdown(model, useCaseId);
 
   if (recommendationStatus === "mixed") {
     const details = [
@@ -5418,21 +5505,23 @@ function getRecommendationSummary(model, useCaseId) {
     return {
       className: "tag tag-approval",
       label: totalCount > 1 && recommendedCount < totalCount ? `${recommendedCount}/${totalCount} recommended` : "Recommended",
-      title: approval.recommendation_notes || "Recommended for this lens",
+      title: approval?.recommendation_notes || "Recommended for this lens",
     };
   }
   if (recommendationStatus === "not_recommended") {
     return {
       className: "tag",
-      label: totalCount > 1 && notRecommendedCount < totalCount ? `${notRecommendedCount}/${totalCount} not recommended` : "Not recommended",
-      title: approval.recommendation_notes || "Approved but not a default recommendation",
+      label: autoMeta
+        ? autoMeta.label
+        : (totalCount > 1 && notRecommendedCount < totalCount ? `${notRecommendedCount}/${totalCount} not recommended` : "Not recommended"),
+      title: autoMeta?.title || approval?.recommendation_notes || "Approved but not a default recommendation",
     };
   }
   if (recommendationStatus === "discouraged") {
     return {
       className: "tag tag-warning",
       label: totalCount > 1 && discouragedCount < totalCount ? `${discouragedCount}/${totalCount} discouraged` : "Discouraged",
-      title: approval.recommendation_notes || "Discouraged for this lens",
+      title: approval?.recommendation_notes || "Discouraged for this lens",
     };
   }
   return null;
@@ -6715,15 +6804,19 @@ function aggregateUseCaseApprovals(members) {
         String(right.recommendation_updated_at || "").localeCompare(String(left.recommendation_updated_at || "")),
       )[0];
       const approvedMemberCount = entries.filter((entry) => entry.approved_for_use).length;
-      const recommendedMemberCount = entries.filter(
-        (entry) => normalizeRecommendationStatus(entry.recommendation_status) === "recommended",
-      ).length;
-      const notRecommendedMemberCount = entries.filter(
-        (entry) => normalizeRecommendationStatus(entry.recommendation_status) === "not_recommended",
-      ).length;
-      const discouragedMemberCount = entries.filter(
-        (entry) => normalizeRecommendationStatus(entry.recommendation_status) === "discouraged",
-      ).length;
+      const recommendationBreakdowns = members.map((member) => getRecommendationBreakdown(member, useCaseId));
+      const recommendedMemberCount = recommendationBreakdowns.reduce(
+        (sum, breakdown) => sum + Number(breakdown.recommendedCount || 0),
+        0,
+      );
+      const notRecommendedMemberCount = recommendationBreakdowns.reduce(
+        (sum, breakdown) => sum + Number(breakdown.notRecommendedCount || 0),
+        0,
+      );
+      const discouragedMemberCount = recommendationBreakdowns.reduce(
+        (sum, breakdown) => sum + Number(breakdown.discouragedCount || 0),
+        0,
+      );
       const distinctRecommendationStates = [
         recommendedMemberCount ? "recommended" : "",
         notRecommendedMemberCount ? "not_recommended" : "",

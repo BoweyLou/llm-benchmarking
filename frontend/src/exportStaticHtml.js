@@ -995,6 +995,8 @@ function buildPortableShellMarkup({ snapshot, methodologyMarkup, historyMarkup }
 function portableSnapshotRuntime() {
   const DEFAULT_INFERENCE_LOCATION_FILTER = "All";
   const DEFAULT_RECOMMENDATION_FILTER = "all";
+  const AUTO_NOT_RECOMMENDED_RELEASE_DAYS = 365;
+  const AUTO_NOT_RECOMMENDED_OPENROUTER_DAYS = 540;
   const BROWSER_SORT_OPTIONS = [
     { id: "smart", label: "Smart order" },
     { id: "popularity", label: "OpenRouter popularity" },
@@ -2021,6 +2023,98 @@ function portableSnapshotRuntime() {
     return "unrated";
   }
 
+  function getAgeDays(timestamp) {
+    if (!Number.isFinite(timestamp) || timestamp <= 0) {
+      return null;
+    }
+    return Math.max(0, Math.floor((Date.now() - timestamp) / 86400000));
+  }
+
+  function getAutoRecommendationMeta(model) {
+    const releaseTimestamp = getPreciseReleaseTimestamp(model?.release_date);
+    const releaseAgeDays = getAgeDays(releaseTimestamp);
+    if (releaseAgeDays != null && releaseAgeDays >= AUTO_NOT_RECOMMENDED_RELEASE_DAYS) {
+      return {
+        status: "not_recommended",
+        label: "Not recommended · age",
+        title: `Auto-derived because this model is ${releaseAgeDays} days old based on its exact release date and no manual recommendation is saved for this lens.`,
+      };
+    }
+
+    const openRouterAddedTimestamp = getTimestampOrZero(model?.openrouter_added_at);
+    const openRouterAgeDays = getAgeDays(openRouterAddedTimestamp);
+    if (openRouterAgeDays != null && openRouterAgeDays >= AUTO_NOT_RECOMMENDED_OPENROUTER_DAYS) {
+      return {
+        status: "not_recommended",
+        label: "Not recommended · age",
+        title: `Auto-derived because this model was first added to OpenRouter ${openRouterAgeDays} days ago and no manual recommendation is saved for this lens.`,
+      };
+    }
+
+    return null;
+  }
+
+  function getRecommendationBreakdown(model, useCaseId) {
+    if (!useCaseId) {
+      return {
+        status: "unrated",
+        totalCount: 1,
+        recommendedCount: 0,
+        notRecommendedCount: 0,
+        discouragedCount: 0,
+        approval: null,
+        autoMeta: null,
+      };
+    }
+
+    const approval = getModelApprovalRecord(model, useCaseId);
+    const recommendationStatus = normalizeRecommendationStatus(approval?.recommendation_status, { allowMixed: true });
+    const totalCount = Math.max(1, Number(approval?.approval_total_count ?? 1));
+    const recommendedCount = Number(approval?.recommended_member_count ?? (recommendationStatus === "recommended" ? 1 : 0));
+    const notRecommendedCount = Number(approval?.not_recommended_member_count ?? (recommendationStatus === "not_recommended" ? 1 : 0));
+    const discouragedCount = Number(approval?.discouraged_member_count ?? (recommendationStatus === "discouraged" ? 1 : 0));
+    const hasManualSignal =
+      recommendationStatus === "mixed" ||
+      recommendedCount > 0 ||
+      notRecommendedCount > 0 ||
+      discouragedCount > 0;
+
+    if (hasManualSignal) {
+      return {
+        status: recommendationStatus,
+        totalCount,
+        recommendedCount,
+        notRecommendedCount,
+        discouragedCount,
+        approval,
+        autoMeta: null,
+      };
+    }
+
+    const autoMeta = getAutoRecommendationMeta(model);
+    if (autoMeta) {
+      return {
+        status: autoMeta.status,
+        totalCount,
+        recommendedCount: 0,
+        notRecommendedCount: autoMeta.status === "not_recommended" ? 1 : 0,
+        discouragedCount: autoMeta.status === "discouraged" ? 1 : 0,
+        approval,
+        autoMeta,
+      };
+    }
+
+    return {
+      status: "unrated",
+      totalCount,
+      recommendedCount: 0,
+      notRecommendedCount: 0,
+      discouragedCount: 0,
+      approval,
+      autoMeta: null,
+    };
+  }
+
   function isModelApprovedForUseCase(model, useCaseId) {
     if (useCaseId) {
       return Boolean(getModelApprovalRecord(model, useCaseId)?.approved_for_use);
@@ -2033,11 +2127,7 @@ function portableSnapshotRuntime() {
       return true;
     }
 
-    const approval = getModelApprovalRecord(model, useCaseId);
-    const recommendationStatus = normalizeRecommendationStatus(approval?.recommendation_status, { allowMixed: true });
-    const recommendedCount = Number(approval?.recommended_member_count ?? (recommendationStatus === "recommended" ? 1 : 0));
-    const notRecommendedCount = Number(approval?.not_recommended_member_count ?? (recommendationStatus === "not_recommended" ? 1 : 0));
-    const discouragedCount = Number(approval?.discouraged_member_count ?? (recommendationStatus === "discouraged" ? 1 : 0));
+    const { recommendedCount, notRecommendedCount, discouragedCount } = getRecommendationBreakdown(model, useCaseId);
 
     if (filterValue === "recommended") {
       return recommendedCount > 0;
@@ -2085,15 +2175,15 @@ function portableSnapshotRuntime() {
     if (!useCaseId) {
       return null;
     }
-    const approval = getModelApprovalRecord(model, useCaseId);
-    if (!approval) {
-      return null;
-    }
-    const status = normalizeRecommendationStatus(approval.recommendation_status, { allowMixed: true });
-    const totalCount = Math.max(1, Number(approval.approval_total_count ?? 1));
-    const recommendedCount = Number(approval.recommended_member_count ?? (status === "recommended" ? 1 : 0));
-    const notRecommendedCount = Number(approval.not_recommended_member_count ?? (status === "not_recommended" ? 1 : 0));
-    const discouragedCount = Number(approval.discouraged_member_count ?? (status === "discouraged" ? 1 : 0));
+    const {
+      approval,
+      autoMeta,
+      discouragedCount,
+      notRecommendedCount,
+      recommendedCount,
+      status,
+      totalCount,
+    } = getRecommendationBreakdown(model, useCaseId);
 
     if (status === "mixed") {
       const details = [
@@ -2112,21 +2202,23 @@ function portableSnapshotRuntime() {
     if (status === "recommended") {
       return {
         label: totalCount > 1 && recommendedCount < totalCount ? `${recommendedCount}/${totalCount} recommended` : "Recommended",
-        title: approval.recommendation_notes || "Recommended for this lens",
+        title: approval?.recommendation_notes || "Recommended for this lens",
         toneClass: "snapshot-pill-strong",
       };
     }
     if (status === "not_recommended") {
       return {
-        label: totalCount > 1 && notRecommendedCount < totalCount ? `${notRecommendedCount}/${totalCount} not recommended` : "Not recommended",
-        title: approval.recommendation_notes || "Approved but not a default recommendation",
+        label: autoMeta
+          ? autoMeta.label
+          : (totalCount > 1 && notRecommendedCount < totalCount ? `${notRecommendedCount}/${totalCount} not recommended` : "Not recommended"),
+        title: autoMeta?.title || approval?.recommendation_notes || "Approved but not a default recommendation",
         toneClass: "snapshot-pill-muted",
       };
     }
     if (status === "discouraged") {
       return {
         label: totalCount > 1 && discouragedCount < totalCount ? `${discouragedCount}/${totalCount} discouraged` : "Discouraged",
-        title: approval.recommendation_notes || "Discouraged for this lens",
+        title: approval?.recommendation_notes || "Discouraged for this lens",
         toneClass: "snapshot-pill-warn",
       };
     }
