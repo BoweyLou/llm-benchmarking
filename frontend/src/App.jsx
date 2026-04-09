@@ -1,6 +1,8 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import {
+  DASHBOARD_BRAND_EYEBROW,
+  DASHBOARD_BRAND_TITLE,
   DASHBOARD_DEFAULT_CATALOG_MODE,
   DASHBOARD_DEFAULT_LENS,
   DASHBOARD_DEFAULT_RECOMMENDATION_FILTER,
@@ -859,8 +861,8 @@ function Header({
   return (
     <header className="topbar">
       <div className="topbar-main">
-        <div className="eyebrow">Internal research tool</div>
-        <h1>LLM Intelligence Dashboard</h1>
+        <div className="eyebrow">{DASHBOARD_BRAND_EYEBROW}</div>
+        <h1>{DASHBOARD_BRAND_TITLE}</h1>
         <p className="meta">
           Last updated {formatDate(lastUpdated)} · {modelCount} models · {benchmarkCount} benchmarks
         </p>
@@ -8314,8 +8316,8 @@ const styles = `
     color: var(--accent);
     font-size: 0.78rem;
     font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.18em;
+    text-transform: none;
+    letter-spacing: 0.08em;
     margin-bottom: 6px;
   }
   .meta {

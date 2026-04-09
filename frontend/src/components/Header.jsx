@@ -1,5 +1,7 @@
 import React from "react";
 
+import { DASHBOARD_BRAND_EYEBROW, DASHBOARD_BRAND_TITLE } from "../dashboardDefaults";
+
 function formatLastUpdated(value) {
   if (!value) return "Not updated yet";
   if (typeof value === "string") return value;
@@ -28,8 +30,8 @@ function SummaryLine({ updateSummary }) {
 }
 
 export default function Header({
-  title = "LLM Intelligence Dashboard",
-  subtitle = "Internal research tool",
+  title = DASHBOARD_BRAND_TITLE,
+  subtitle = DASHBOARD_BRAND_EYEBROW,
   version,
   lastUpdated,
   modelCount = 0,

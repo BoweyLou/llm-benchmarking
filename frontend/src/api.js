@@ -15,7 +15,14 @@ async function request(path, options = {}) {
     : await response.text();
 
   if (!response.ok) {
-    const message = typeof body === "string" ? body : body?.detail || response.statusText;
+    const isBlankStringBody = typeof body === "string" && !body.trim();
+    const message = (
+      isBlankStringBody && import.meta.env.DEV && response.status === 500
+        ? "Backend API unavailable. Start `uvicorn backend.main:app --reload --port 8000` and retry."
+        : typeof body === "string"
+          ? body
+          : body?.detail || response.statusText
+    );
     throw new Error(message || `Request failed with status ${response.status}`);
   }
 

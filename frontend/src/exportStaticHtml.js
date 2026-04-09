@@ -1,4 +1,8 @@
 import {
+  DASHBOARD_BRAND_EYEBROW,
+  DASHBOARD_BRAND_TITLE,
+  DASHBOARD_DOCUMENT_TITLE,
+  DASHBOARD_EXPORT_FILE_PREFIX,
   DASHBOARD_DEFAULT_CATALOG_MODE,
   DASHBOARD_DEFAULT_LENS,
   DASHBOARD_DEFAULT_RECOMMENDATION_FILTER,
@@ -103,8 +107,8 @@ const PORTABLE_SNAPSHOT_STYLE = `
     color: var(--accent);
     font-size: 0.78rem;
     font-weight: 800;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    text-transform: none;
   }
 
   .snapshot-hero h1 {
@@ -1030,14 +1034,14 @@ function serializeRankingRows(entries) {
 }
 
 function buildPortableSnapshotHtml({ snapshot, methodologyMarkup, historyMarkup }) {
-  const title = snapshot.meta?.title || "LLM Intelligence Dashboard - Portable snapshot";
+  const title = snapshot.meta?.title || `${DASHBOARD_DOCUMENT_TITLE} - Portable snapshot`;
   const serializedSnapshot = serializeForScript(snapshot);
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="generator" content="LLM Intelligence Dashboard portable snapshot" />
+    <meta name="generator" content="LLM model garden candidates portable snapshot" />
     <title>${escapeHtml(title)}</title>
     <style>${PORTABLE_SNAPSHOT_STYLE}</style>
   </head>
@@ -1055,8 +1059,8 @@ function buildPortableShellMarkup({ snapshot, methodologyMarkup, historyMarkup }
   return `
     <div class="snapshot-shell">
       <header class="snapshot-hero">
-        <div class="snapshot-kicker">Portable snapshot</div>
-        <h1>LLM Intelligence Dashboard</h1>
+        <div class="snapshot-kicker">${escapeHtml(DASHBOARD_BRAND_EYEBROW)}</div>
+        <h1>${escapeHtml(DASHBOARD_BRAND_TITLE)}</h1>
         <p class="snapshot-hero-copy">
           Single-file offline export with embedded data. Search, filters, sorting, and compare run locally in this document.
           Admin editing, live updates, and backend calls are intentionally removed.
@@ -3345,7 +3349,7 @@ function normalizePortableTab(activeTab) {
 
 function buildExportTitle({ activeTab, selectedUseCaseLabel }) {
   const viewLabel = buildViewLabel({ activeTab, selectedUseCaseLabel });
-  return `LLM Intelligence Dashboard - ${viewLabel} portable snapshot`;
+  return `${DASHBOARD_DOCUMENT_TITLE} - ${viewLabel} portable snapshot`;
 }
 
 function buildViewLabel({ activeTab, selectedUseCaseLabel }) {
@@ -3357,7 +3361,7 @@ function buildViewLabel({ activeTab, selectedUseCaseLabel }) {
 }
 
 function buildSnapshotFileName({ activeTab, selectedUseCaseLabel }) {
-  const parts = ["llm-dashboard", "portable"];
+  const parts = [DASHBOARD_EXPORT_FILE_PREFIX, "portable"];
   if (activeTab) {
     parts.push(slugify(activeTab));
   }
