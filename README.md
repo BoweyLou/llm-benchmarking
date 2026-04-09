@@ -2,6 +2,8 @@
 
 LLM Benchmarking is a local model intelligence workspace for comparing AI models across public benchmarks, curating provider and family metadata, governing approvals by use case and inference region, and exporting portable offline snapshots.
 
+![Live dashboard screenshot](docs/images/live-dashboard.png)
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

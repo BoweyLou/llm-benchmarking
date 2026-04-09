@@ -1,5 +1,19 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
+import {
+  DASHBOARD_DEFAULT_CATALOG_MODE,
+  DASHBOARD_DEFAULT_LENS,
+  DASHBOARD_DEFAULT_RECOMMENDATION_FILTER,
+  DASHBOARD_DEFAULT_TAB,
+  DASHBOARD_EMPTY_LENS_QUERY_VALUE,
+  RECOMMENDATION_RAIL_DESKTOP_FONT_SIZE_REM,
+  RECOMMENDATION_RAIL_DESKTOP_LETTER_SPACING_EM,
+  RECOMMENDATION_RAIL_MOBILE_FONT_SIZE_REM,
+  RECOMMENDATION_RAIL_MOBILE_LETTER_SPACING_EM,
+  RECOMMENDATION_RAIL_WIDTH_PX,
+  getDashboardBaselineRecommendationFilter,
+  getDashboardRailLabel,
+} from "./dashboardDefaults";
 import { exportDashboardHtmlSnapshot } from "./exportStaticHtml";
 import { useDashboardData } from "./useDashboardData";
 
@@ -422,9 +436,9 @@ function App() {
     if (nextLens !== requestedLensId) {
       setRequestedLensId(nextLens);
     }
+    setLensPickerOpen(!nextLens);
     if (nextLens) {
       data.loadRankings(nextLens);
-      setLensPickerOpen(false);
     }
   }, [data.useCases.length, requestedLensId]);
 
@@ -539,6 +553,7 @@ function App() {
     const nextUseCaseId = useCaseId === requestedLensId ? "" : useCaseId;
     startTransition(() => {
       setRequestedLensId(nextUseCaseId);
+      setRecommendationFilter(getDashboardBaselineRecommendationFilter(nextUseCaseId));
       setLensPickerOpen(!nextUseCaseId);
       setShowAllRankings(false);
     });
@@ -590,7 +605,7 @@ function App() {
       setInferenceLocationFilter(DEFAULT_INFERENCE_LOCATION_FILTER);
       setTypeFilter("All");
       setApprovedOnly(false);
-      setRecommendationFilter(DEFAULT_RECOMMENDATION_FILTER);
+      setRecommendationFilter(getDashboardBaselineRecommendationFilter(requestedLensId));
       setBrowserOnlyCompared(false);
       setBrowserSort("smart");
     });
@@ -1578,6 +1593,7 @@ function RankedModelCard({
   const ageMeta = getModelAgeMeta(entry.model);
   const licenseLabel = getModelLicenseLabel(entry.model);
   const metadataLinks = getModelMetadataLinks(entry.model);
+  const recommendationSummary = getRecommendationSummary(entry.model, selectedUseCase?.id);
   const detailPills = [
     { label: "Benchmark coverage", value: `${Math.round(entry.coverage * 100)}%` },
     { label: "Composite score", value: Math.round(entry.score) },
@@ -1587,116 +1603,117 @@ function RankedModelCard({
   ].filter(Boolean);
 
   return (
-    <article className={isTop ? "card card-top" : "card"}>
-      <div className="card-body">
-        <div className="rank-pill">{entry.rank}</div>
-        <div className="card-main">
-          <div className="card-headline">
-            <span className="title">{entry.model.name}</span>
-            <ProviderBadge
-              countryCode={entry.model.provider_country_code}
-              countryFlag={entry.model.provider_country_flag}
-              countryName={entry.model.provider_country_name}
-              provider={entry.model.provider}
-            />
-            <CatalogStatusBadge model={entry.model} />
-            <ApprovalBadge model={entry.model} useCaseId={selectedUseCase?.id} />
-            <RecommendationBadge model={entry.model} useCaseId={selectedUseCase?.id} />
-            <TypeBadge type={entry.model.type} />
-            {licenseLabel ? <span className="tag tag-license">License: {licenseLabel}</span> : null}
-            {isTop ? <span className="tag tag-top">Top pick</span> : null}
-            {criticalMissing.length ? (
-              <span className="tag tag-warning">Critical gaps: {criticalMissing.map((id) => benchmarksById[id]?.short || id.replaceAll("_", " ")).join(", ")}</span>
-            ) : null}
-          </div>
-          <ScoreBar score={entry.score} />
-        </div>
-        <div className="card-actions">
-          <button
-            aria-label={inCompare ? `Remove ${entry.model.name} from compare` : `Add ${entry.model.name} to compare`}
-            className={inCompare ? "btn btn-secondary btn-active" : "btn btn-secondary"}
-            onClick={() => onToggleCompare(compareId)}
-            type="button"
-          >
-            {inCompare ? "In compare" : "Add to compare"}
-          </button>
-          <button
-            aria-expanded={isExpanded}
-            aria-label={isExpanded ? `Hide evidence for ${entry.model.name}` : `View evidence for ${entry.model.name}`}
-            className="link-btn"
-            onClick={() => setExpanded((value) => !value)}
-            type="button"
-          >
-            {isExpanded ? "Hide evidence" : "View evidence"}
-          </button>
-        </div>
-      </div>
-
-      {isExpanded ? (
-        <div className="card-details">
-          <div className="model-detail-summary">
-            {detailPills.map((item) => (
-              <span key={item.label} className="detail-pill">
-                {item.label} <strong>{item.value}</strong>
-              </span>
-            ))}
-          </div>
-          <div className="detail-label">Benchmark breakdown</div>
-          {criticalMissing.length ? (
-            <div className="critical-gaps">
-              <strong>Critical evidence missing:</strong>{" "}
-              {criticalMissing.map((id) => benchmarksById[id]?.short || id.replaceAll("_", " ")).join(", ")}
+    <article className={isTop ? "card card-top card-with-status-rail" : "card card-with-status-rail"}>
+      {recommendationSummary ? <RecommendationRail summary={recommendationSummary} /> : null}
+      <div className="card-shell">
+        <div className="card-body">
+          <div className="rank-pill">{entry.rank}</div>
+          <div className="card-main">
+            <div className="card-headline">
+              <span className="title">{entry.model.name}</span>
+              <ProviderBadge
+                countryCode={entry.model.provider_country_code}
+                countryFlag={entry.model.provider_country_flag}
+                countryName={entry.model.provider_country_name}
+                provider={entry.model.provider}
+              />
+              <CatalogStatusBadge model={entry.model} />
+              <ApprovalBadge model={entry.model} useCaseId={selectedUseCase?.id} />
+              <TypeBadge type={entry.model.type} />
+              {licenseLabel ? <span className="tag tag-license">License: {licenseLabel}</span> : null}
+              {isTop ? <span className="tag tag-top">Top pick</span> : null}
+              {criticalMissing.length ? (
+                <span className="tag tag-warning">Critical gaps: {criticalMissing.map((id) => benchmarksById[id]?.short || id.replaceAll("_", " ")).join(", ")}</span>
+              ) : null}
             </div>
-          ) : null}
-          <div className="detail-list">
-            {entry.breakdown.map((item) => (
-              <div key={item.benchmark_id} className="detail-row">
-                <span className="detail-short">{benchmarksById[item.benchmark_id]?.short || item.benchmark_id.replaceAll("_", " ")}</span>
-                <div className="mini-bar">
-                  <div
-                    className={`mini-fill mini-fill-${getBenchmarkTone(benchmarksById[item.benchmark_id], item.raw_value)}`}
-                    style={{ width: `${item.normalised}%` }}
-                  />
-                </div>
-                <span className="detail-value">
-                  <SourceBadge score={{ source_type: item.source_type, verified: item.verified }} />
-                  {formatBenchmarkValue(benchmarksById[item.benchmark_id], item.raw_value)}
+            <ScoreBar score={entry.score} />
+          </div>
+          <div className="card-actions">
+            <button
+              aria-label={inCompare ? `Remove ${entry.model.name} from compare` : `Add ${entry.model.name} to compare`}
+              className={inCompare ? "btn btn-secondary btn-active" : "btn btn-secondary"}
+              onClick={() => onToggleCompare(compareId)}
+              type="button"
+            >
+              {inCompare ? "In compare" : "Add to compare"}
+            </button>
+            <button
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? `Hide evidence for ${entry.model.name}` : `View evidence for ${entry.model.name}`}
+              className="link-btn"
+              onClick={() => setExpanded((value) => !value)}
+              type="button"
+            >
+              {isExpanded ? "Hide evidence" : "View evidence"}
+            </button>
+          </div>
+        </div>
+        {isExpanded ? (
+          <div className="card-details">
+            <div className="model-detail-summary">
+              {detailPills.map((item) => (
+                <span key={item.label} className="detail-pill">
+                  {item.label} <strong>{item.value}</strong>
                 </span>
-                <span className="detail-weight">{Math.round(item.weight * 100)}% weight</span>
-                {item.variant_model_name && item.variant_model_name !== entry.model.name ? <span className="detail-note">via {item.variant_model_name}</span> : null}
-                {getBenchmarkScaleDescriptor(benchmarksById[item.benchmark_id], item.raw_value) ? (
-                  <span className="detail-note">Relative speed: {getBenchmarkScaleDescriptor(benchmarksById[item.benchmark_id], item.raw_value)}</span>
-                ) : null}
-                {item.notes ? <span className="detail-note">{item.notes}</span> : null}
-              </div>
-            ))}
-            {entry.missing_benchmarks.length ? (
-              <div className="missing">
-                Missing optional evidence lowers this score and coverage: {entry.missing_benchmarks.map((id) => benchmarksById[id]?.short || id.replaceAll("_", " ")).join(", ")}
-              </div>
-            ) : null}
-          </div>
-          <div className="small-meta">
-            Context: {entry.model.context_window || "Unknown"} · Released: {entry.model.release_date || "Unknown"}
-            {ageMeta ? ` · Age: ${ageMeta.label}` : ""}{licenseLabel ? ` · License: ${licenseLabel}` : ""}
-          </div>
-          {metadataLinks.length ? (
-            <div className="metadata-link-row">
-              {metadataLinks.map((entryLink) => (
-                <a
-                  className="metadata-link"
-                  href={entryLink.url}
-                  key={`${entry.model.id}-${entryLink.label}`}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  {entryLink.label}
-                </a>
               ))}
             </div>
-          ) : null}
-        </div>
-      ) : null}
+            <div className="detail-label">Benchmark breakdown</div>
+            {criticalMissing.length ? (
+              <div className="critical-gaps">
+                <strong>Critical evidence missing:</strong>{" "}
+                {criticalMissing.map((id) => benchmarksById[id]?.short || id.replaceAll("_", " ")).join(", ")}
+              </div>
+            ) : null}
+            <div className="detail-list">
+              {entry.breakdown.map((item) => (
+                <div key={item.benchmark_id} className="detail-row">
+                  <span className="detail-short">{benchmarksById[item.benchmark_id]?.short || item.benchmark_id.replaceAll("_", " ")}</span>
+                  <div className="mini-bar">
+                    <div
+                      className={`mini-fill mini-fill-${getBenchmarkTone(benchmarksById[item.benchmark_id], item.raw_value)}`}
+                      style={{ width: `${item.normalised}%` }}
+                    />
+                  </div>
+                  <span className="detail-value">
+                    <SourceBadge score={{ source_type: item.source_type, verified: item.verified }} />
+                    {formatBenchmarkValue(benchmarksById[item.benchmark_id], item.raw_value)}
+                  </span>
+                  <span className="detail-weight">{Math.round(item.weight * 100)}% weight</span>
+                  {item.variant_model_name && item.variant_model_name !== entry.model.name ? <span className="detail-note">via {item.variant_model_name}</span> : null}
+                  {getBenchmarkScaleDescriptor(benchmarksById[item.benchmark_id], item.raw_value) ? (
+                    <span className="detail-note">Relative speed: {getBenchmarkScaleDescriptor(benchmarksById[item.benchmark_id], item.raw_value)}</span>
+                  ) : null}
+                  {item.notes ? <span className="detail-note">{item.notes}</span> : null}
+                </div>
+              ))}
+              {entry.missing_benchmarks.length ? (
+                <div className="missing">
+                  Missing optional evidence lowers this score and coverage: {entry.missing_benchmarks.map((id) => benchmarksById[id]?.short || id.replaceAll("_", " ")).join(", ")}
+                </div>
+              ) : null}
+            </div>
+            <div className="small-meta">
+              Context: {entry.model.context_window || "Unknown"} · Released: {entry.model.release_date || "Unknown"}
+              {ageMeta ? ` · Age: ${ageMeta.label}` : ""}{licenseLabel ? ` · License: ${licenseLabel}` : ""}
+            </div>
+            {metadataLinks.length ? (
+              <div className="metadata-link-row">
+                {metadataLinks.map((entryLink) => (
+                  <a
+                    className="metadata-link"
+                    href={entryLink.url}
+                    key={`${entry.model.id}-${entryLink.label}`}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {entryLink.label}
+                  </a>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </article>
   );
 }
@@ -1737,13 +1754,14 @@ function ModelBrowser({
   selectedUseCase,
   typeFilter,
 }) {
+  const defaultRecommendationFilter = selectedUseCase ? DASHBOARD_DEFAULT_RECOMMENDATION_FILTER : DEFAULT_RECOMMENDATION_FILTER;
   const hasActiveFilters =
     query.trim() !== "" ||
     providerFilter !== "All" ||
     inferenceLocationFilter !== DEFAULT_INFERENCE_LOCATION_FILTER ||
     typeFilter !== "All" ||
     approvedOnly ||
-    recommendationFilter !== DEFAULT_RECOMMENDATION_FILTER ||
+    recommendationFilter !== defaultRecommendationFilter ||
     browserOnlyCompared ||
     browserSort !== "smart";
 
@@ -1857,7 +1875,7 @@ function ModelBrowser({
             <span className="hint">
               {filteredModelsCount.toLocaleString()} results
               {selectedUseCase ? ` · tuned to ${selectedUseCase.label}` : ""}
-              {!selectedUseCase && recommendationFilter !== DEFAULT_RECOMMENDATION_FILTER ? " · recommendation filter inactive without a lens" : ""}
+              {!selectedUseCase && recommendationFilter !== defaultRecommendationFilter ? " · recommendation filter inactive without a lens" : ""}
             </span>
             {hasActiveFilters ? (
               <button className="btn btn-ghost btn-inline" onClick={onClearFilters} type="button">
@@ -1925,6 +1943,7 @@ function ModelBrowserCard({
   const familyBenchmarkWins = isFamily ? getFamilyBenchmarkWins(model) : {};
   const familyVariants = isFamily ? getFamilyVariants(model, exactModelsById, familyBenchmarkWins) : [];
   const legacyAdvisoryMemberModels = isFamily ? familyVariants : null;
+  const legacyAdvisoryInline = getLegacyAdvisoryInline(model, legacyAdvisoryMemberModels);
   const sortedBenchmarkIds = sortBenchmarkIdsForLens(model, selectedUseCase, benchmarksById);
   const openRouterLabel = getPreferredOpenRouterLabel(model, selectedUseCase);
   const openRouterDetail = getOpenRouterPopularityDetail(model, selectedUseCase);
@@ -1934,6 +1953,7 @@ function ModelBrowserCard({
   const metadataLinks = getModelMetadataLinks(model);
   const lensEligibility = selectedUseCase ? getLensEligibilitySummary(model, selectedUseCase, benchmarksById) : null;
   const ageMeta = getModelAgeMeta(model);
+  const recommendationSummary = getRecommendationSummary(model, selectedUseCase?.id);
   const inferenceSectionLabel = isFamily ? "Family Inference Footprint" : "Inference";
   const inferenceSectionCaption = isFamily
     ? `Union across ${familyVariants.length || model.family?.member_count || 0} variants. Pricing and locations below are aggregated at the family level.`
@@ -1952,71 +1972,76 @@ function ModelBrowserCard({
   ].filter(Boolean);
 
   return (
-    <article className="card">
-      <div className="card-body">
-        <div className="card-main">
-          <div className="card-headline">
-            <span className="title">{model.name}</span>
-            <ProviderBadge
-              countryCode={model.provider_country_code}
-              countryFlag={model.provider_country_flag}
-              countryName={model.provider_country_name}
-              provider={model.provider}
-            />
-            <CatalogStatusBadge model={model} />
-            <ApprovalBadge model={model} useCaseId={selectedUseCase?.id} />
-            <RecommendationBadge model={model} useCaseId={selectedUseCase?.id} />
-            <LegacyAdvisoryBadge model={model} memberModels={legacyAdvisoryMemberModels} />
-            <TypeBadge type={model.type} />
-            {licenseLabel ? <span className="tag tag-license">License: {licenseLabel}</span> : null}
-            {isFamily ? <span className="tag tag-family">{model.family.member_count} variants</span> : null}
-            {selectedUseCase ? (
-              lensEntry ? (
-                <span className="tag tag-top">
-                  #{lensEntry.rank} in {selectedUseCase.label}
+    <article className="card card-with-status-rail">
+      {recommendationSummary ? <RecommendationRail summary={recommendationSummary} /> : null}
+      <div className="card-shell">
+        <div className="card-body">
+          <div className="card-main">
+            <div className="card-headline">
+              <span className="title">{model.name}</span>
+              <ProviderBadge
+                countryCode={model.provider_country_code}
+                countryFlag={model.provider_country_flag}
+                countryName={model.provider_country_name}
+                provider={model.provider}
+              />
+              <CatalogStatusBadge model={model} />
+              <ApprovalBadge model={model} useCaseId={selectedUseCase?.id} />
+              <LegacyAdvisoryBadge model={model} memberModels={legacyAdvisoryMemberModels} />
+              <TypeBadge type={model.type} />
+              {licenseLabel ? <span className="tag tag-license">License: {licenseLabel}</span> : null}
+              {isFamily ? <span className="tag tag-family">{model.family.member_count} variants</span> : null}
+              {selectedUseCase ? (
+                lensEntry ? (
+                  <span className="tag tag-top">
+                    #{lensEntry.rank} in {selectedUseCase.label}
+                  </span>
+                ) : (
+                  <span className={lensEligibility?.status === "missing_required" ? "tag tag-warning" : "tag"}>
+                    {lensEligibility?.badgeLabel || `Not ranked in ${selectedUseCase.label}`}
+                  </span>
+                )
+              ) : null}
+              {openRouterLabel ? <span className="tag">{openRouterLabel}</span> : null}
+            </div>
+            <div className="submeta">
+              <span>Context: {model.context_window || "Unknown"}</span>
+              <span>Released: {model.release_date || "Unknown"}</span>
+              {ageMeta ? <span>Age: {ageMeta.label}</span> : null}
+              {lensEntry ? <span className="submeta-score">Score {Math.round(lensEntry.score)}</span> : null}
+              {selectedUseCase && !lensEntry && lensEligibility?.inlineLabel ? (
+                <span className={lensEligibility.status === "missing_required" ? "lens-gap-note lens-gap-note-warning" : "lens-gap-note"}>
+                  {lensEligibility.inlineLabel}
                 </span>
-              ) : (
-                <span className={lensEligibility?.status === "missing_required" ? "tag tag-warning" : "tag"}>
-                  {lensEligibility?.badgeLabel || `Not ranked in ${selectedUseCase.label}`}
-                </span>
-              )
+              ) : null}
+            </div>
+            {legacyAdvisoryInline ? (
+              <div className="legacy-inline-note" title={legacyAdvisoryInline.title}>
+                <strong>{legacyAdvisoryInline.headline}</strong> {legacyAdvisoryInline.body}
+              </div>
             ) : null}
-            {openRouterLabel ? <span className="tag">{openRouterLabel}</span> : null}
           </div>
-          <div className="submeta">
-            <span>Context: {model.context_window || "Unknown"}</span>
-            <span>Released: {model.release_date || "Unknown"}</span>
-            {ageMeta ? <span>Age: {ageMeta.label}</span> : null}
-            {lensEntry ? <span className="submeta-score">Score {Math.round(lensEntry.score)}</span> : null}
-            {selectedUseCase && !lensEntry && lensEligibility?.inlineLabel ? (
-              <span className={lensEligibility.status === "missing_required" ? "lens-gap-note lens-gap-note-warning" : "lens-gap-note"}>
-                {lensEligibility.inlineLabel}
-              </span>
-            ) : null}
+          <div className="card-actions">
+            <button
+              className={compareIds.includes(model.id) ? "btn btn-secondary btn-active" : "btn btn-secondary"}
+              onClick={() => onAddToCompare(model.id)}
+              type="button"
+            >
+              {compareIds.includes(model.id) ? "In compare" : "Add to compare"}
+            </button>
+            <button
+              aria-expanded={expanded}
+              aria-label={expanded ? `Hide details for ${model.name}` : `Show details for ${model.name}`}
+              className="link-btn"
+              onClick={onToggle}
+              type="button"
+            >
+              {expanded ? "Hide Details" : "Show Details"}
+            </button>
           </div>
         </div>
-        <div className="card-actions">
-          <button
-            className={compareIds.includes(model.id) ? "btn btn-secondary btn-active" : "btn btn-secondary"}
-            onClick={() => onAddToCompare(model.id)}
-            type="button"
-          >
-            {compareIds.includes(model.id) ? "In compare" : "Add to compare"}
-          </button>
-          <button
-            aria-expanded={expanded}
-            aria-label={expanded ? `Hide details for ${model.name}` : `Show details for ${model.name}`}
-            className="link-btn"
-            onClick={onToggle}
-            type="button"
-          >
-            {expanded ? "Hide Details" : "Show Details"}
-          </button>
-        </div>
-      </div>
-
-      {expanded ? (
-        <div className="card-details">
+        {expanded ? (
+          <div className="card-details">
           <div className="model-detail-summary">
             {detailPills.map((item) => (
               <span key={item.label} className="detail-pill">
@@ -2249,8 +2274,9 @@ function ModelBrowserCard({
               })}
             </div>
           </div>
-        </div>
-      ) : null}
+          </div>
+        ) : null}
+      </div>
     </article>
   );
 }
@@ -5453,6 +5479,31 @@ function getLegacyAdvisorySummary(model, memberModels = null) {
   };
 }
 
+function getLegacyAdvisoryInline(model, memberModels = null) {
+  const relatedModels = Array.isArray(memberModels) ? memberModels.filter(Boolean) : [];
+  if (relatedModels.length) {
+    const legacyModels = relatedModels.filter((entry) => getLegacyAdvisoryMeta(entry));
+    if (!legacyModels.length || legacyModels.length !== relatedModels.length) {
+      return null;
+    }
+    return {
+      headline: "Legacy family.",
+      body: "All tracked variants are legacy. Prefer a newer option unless you specifically need this family.",
+      title: `All ${relatedModels.length} tracked variant${relatedModels.length === 1 ? "" : "s"} in this family meet the legacy advisory.`,
+    };
+  }
+
+  const legacyMeta = getLegacyAdvisoryMeta(model);
+  if (!legacyMeta) {
+    return null;
+  }
+  return {
+    headline: "Legacy model.",
+    body: "Prefer a newer option unless you specifically need this one.",
+    title: legacyMeta.title,
+  };
+}
+
 function getRecommendationBreakdown(model, useCaseId) {
   if (!useCaseId) {
     return {
@@ -5561,17 +5612,21 @@ function matchesRecommendationFilter(model, useCaseId, filterValue) {
   }
 
   const { recommendedCount, notRecommendedCount, discouragedCount } = getRecommendationBreakdown(model, useCaseId);
+  const hasAutoNotRecommended = recommendedCount === 0 &&
+    notRecommendedCount === 0 &&
+    discouragedCount === 0 &&
+    Boolean(getLegacyAdvisoryMeta(model));
 
   if (filterValue === "recommended") {
     return recommendedCount > 0;
   }
   if (filterValue === "not_recommended") {
-    return notRecommendedCount > 0;
+    return notRecommendedCount > 0 || hasAutoNotRecommended;
   }
   if (filterValue === "discouraged") {
     return discouragedCount > 0;
   }
-  return recommendedCount === 0 && notRecommendedCount === 0 && discouragedCount === 0;
+  return recommendedCount === 0 && notRecommendedCount === 0 && discouragedCount === 0 && !hasAutoNotRecommended;
 }
 
 function getApprovalSummary(model, useCaseId) {
@@ -5636,6 +5691,8 @@ function getRecommendationSummary(model, useCaseId) {
     return {
       className: "tag tag-approval-partial",
       label: "Mixed recommendation",
+      railLabel: getDashboardRailLabel("mixed"),
+      status: "mixed",
       title: details || "Mixed recommendation state",
     };
   }
@@ -5644,6 +5701,8 @@ function getRecommendationSummary(model, useCaseId) {
     return {
       className: "tag tag-approval",
       label: totalCount > 1 && recommendedCount < totalCount ? `${recommendedCount}/${totalCount} recommended` : "Recommended",
+      railLabel: getDashboardRailLabel("recommended"),
+      status: "recommended",
       title: approval?.recommendation_notes || "Recommended for this lens",
     };
   }
@@ -5651,6 +5710,8 @@ function getRecommendationSummary(model, useCaseId) {
     return {
       className: "tag tag-not-recommended",
       label: totalCount > 1 && notRecommendedCount < totalCount ? `${notRecommendedCount}/${totalCount} not recommended` : "Not recommended",
+      railLabel: getDashboardRailLabel("not_recommended"),
+      status: "not_recommended",
       title: approval?.recommendation_notes || "Approved but not a default recommendation",
     };
   }
@@ -5658,21 +5719,52 @@ function getRecommendationSummary(model, useCaseId) {
     return {
       className: "tag tag-warning",
       label: totalCount > 1 && discouragedCount < totalCount ? `${discouragedCount}/${totalCount} discouraged` : "Discouraged",
+      railLabel: getDashboardRailLabel("discouraged"),
+      status: "discouraged",
       title: approval?.recommendation_notes || "Discouraged for this lens",
     };
   }
-  return null;
+  const legacyMeta = getLegacyAdvisoryMeta(model);
+  if (legacyMeta) {
+    return {
+      auto: true,
+      className: "tag tag-not-recommended",
+      label: "Not recommended",
+      railLabel: getDashboardRailLabel("not_recommended"),
+      status: "not_recommended",
+      title: legacyMeta.title,
+    };
+  }
+  return {
+    className: "tag tag-detail",
+    label: "Unrated",
+    railLabel: getDashboardRailLabel("unrated"),
+    status: "unrated",
+    title: "No recommendation has been saved for this lens yet.",
+  };
 }
 
 function RecommendationBadge({ model, useCaseId = "" }) {
   const summary = getRecommendationSummary(model, useCaseId);
-  if (!summary) {
+  if (!summary || summary.status === "unrated") {
     return null;
   }
   return (
     <span className={summary.className} title={summary.title}>
       {summary.label}
     </span>
+  );
+}
+
+function RecommendationRail({ summary }) {
+  if (!summary) {
+    return null;
+  }
+  return (
+    <div className={`card-status-rail card-status-rail-${summary.status}`} title={summary.title}>
+      <span className="card-status-rail-text">{summary.railLabel || summary.label}</span>
+      {summary.auto ? <span className="card-status-rail-auto">Auto</span> : null}
+    </div>
   );
 }
 
@@ -6425,20 +6517,31 @@ function EmptyState({ message }) {
 
 function readUrlState() {
   const params = new URLSearchParams(window.location.search);
+  const hasLensParam = params.has("lens");
+  const lensParam = params.get("lens");
+  const lens =
+    !hasLensParam
+      ? DASHBOARD_DEFAULT_LENS
+      : lensParam === DASHBOARD_EMPTY_LENS_QUERY_VALUE
+        ? ""
+        : String(lensParam || "");
+  const recommendationParam = params.get("recommendation");
   return {
     approvedOnly: params.get("approved") === "1",
     compare: splitCsv(params.get("compare")),
     expandedModelId: params.get("expanded") || "",
     historyLogId: parseIntegerParam(params.get("history")),
     inferenceLocation: params.get("inferenceLocation") || DEFAULT_INFERENCE_LOCATION_FILTER,
-    lens: params.get("lens") || "",
-    mode: sanitizeCatalogMode(params.get("mode")),
+    lens,
+    mode: params.has("mode") ? sanitizeCatalogMode(params.get("mode")) : DASHBOARD_DEFAULT_CATALOG_MODE,
     onlyCompared: params.get("onlyCompared") === "1",
     provider: params.get("provider") || "All",
     query: params.get("q") || "",
-    recommendation: sanitizeRecommendationFilter(params.get("recommendation")),
+    recommendation: recommendationParam
+      ? sanitizeRecommendationFilter(recommendationParam)
+      : getDashboardBaselineRecommendationFilter(lens),
     sort: sanitizeBrowserSort(params.get("sort")),
-    tab: sanitizeTab(params.get("tab")),
+    tab: params.has("tab") ? sanitizeTab(params.get("tab")) : DASHBOARD_DEFAULT_TAB,
     type: VALID_MODEL_TYPES.has(params.get("type")) ? params.get("type") : "All",
   };
 }
@@ -6446,9 +6549,13 @@ function readUrlState() {
 function buildUrlStateHref(state) {
   const params = new URLSearchParams();
 
-  if (state.tab && state.tab !== "finder") params.set("tab", state.tab);
-  if (state.mode && state.mode !== "family") params.set("mode", state.mode);
-  if (state.lens) params.set("lens", state.lens);
+  if (state.tab && state.tab !== DASHBOARD_DEFAULT_TAB) params.set("tab", state.tab);
+  if (state.mode && state.mode !== DASHBOARD_DEFAULT_CATALOG_MODE) params.set("mode", state.mode);
+  if (state.lens === "") {
+    params.set("lens", DASHBOARD_EMPTY_LENS_QUERY_VALUE);
+  } else if (state.lens && state.lens !== DASHBOARD_DEFAULT_LENS) {
+    params.set("lens", state.lens);
+  }
   if (state.query) params.set("q", state.query);
   if (state.inferenceLocation && state.inferenceLocation !== DEFAULT_INFERENCE_LOCATION_FILTER) {
     params.set("inferenceLocation", state.inferenceLocation);
@@ -6456,7 +6563,7 @@ function buildUrlStateHref(state) {
   if (state.provider && state.provider !== "All") params.set("provider", state.provider);
   if (state.type && state.type !== "All") params.set("type", state.type);
   if (state.approvedOnly) params.set("approved", "1");
-  if (state.recommendation && state.recommendation !== DEFAULT_RECOMMENDATION_FILTER) {
+  if (state.recommendation && state.recommendation !== getDashboardBaselineRecommendationFilter(state.lens)) {
     params.set("recommendation", state.recommendation);
   }
   if (state.sort && state.sort !== "smart") params.set("sort", state.sort);
@@ -6498,11 +6605,11 @@ function shouldHandleClientNavigation(event) {
 }
 
 function sanitizeTab(value) {
-  return TAB_ITEMS.some((tab) => tab.id === value) ? value : "finder";
+  return TAB_ITEMS.some((tab) => tab.id === value) ? value : DASHBOARD_DEFAULT_TAB;
 }
 
 function sanitizeCatalogMode(value) {
-  return value === "exact" ? "exact" : "family";
+  return value === "family" ? "family" : DASHBOARD_DEFAULT_CATALOG_MODE;
 }
 
 function sanitizeBrowserSort(value) {
@@ -6690,7 +6797,7 @@ function getModelAgeMeta(model) {
   const openRouterAddedTimestamp = getTimestampOrZero(model?.openrouter_added_at);
   if (openRouterAddedTimestamp) {
     return {
-      label: `${formatAgeDays(openRouterAddedTimestamp)} via OpenRouter`,
+      label: formatAgeDays(openRouterAddedTimestamp),
       source: "openrouter",
     };
   }
@@ -8862,6 +8969,70 @@ const styles = `
     border-color: rgba(14, 165, 233, .22);
   }
   .card, .panel, .banner, .summary, .table, .empty { overflow: hidden; }
+  .card-with-status-rail {
+    display: flex;
+    align-items: stretch;
+  }
+  .card-shell {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .card-status-rail {
+    flex: 0 0 ${RECOMMENDATION_RAIL_WIDTH_PX}px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px 8px 12px;
+    border-right: 1px solid rgba(148, 163, 184, .18);
+  }
+  .card-status-rail-text {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: ${RECOMMENDATION_RAIL_DESKTOP_LETTER_SPACING_EM}em;
+    font-size: ${RECOMMENDATION_RAIL_DESKTOP_FONT_SIZE_REM}rem;
+    line-height: 1;
+    font-weight: 800;
+  }
+  .card-status-rail-auto {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 100%;
+    padding: 4px 0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .74);
+    color: inherit;
+    font-size: .58rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+  }
+  .card-status-rail-recommended {
+    background: linear-gradient(180deg, rgba(220, 252, 231, .92), rgba(240, 253, 244, .74));
+    color: #166534;
+  }
+  .card-status-rail-not_recommended {
+    background: linear-gradient(180deg, rgba(255, 237, 213, .96), rgba(255, 247, 237, .8));
+    color: #9a3412;
+  }
+  .card-status-rail-discouraged {
+    background: linear-gradient(180deg, rgba(254, 226, 226, .96), rgba(255, 241, 242, .82));
+    color: #b91c1c;
+  }
+  .card-status-rail-mixed {
+    background: linear-gradient(180deg, rgba(224, 242, 254, .96), rgba(240, 249, 255, .82));
+    color: #0f766e;
+  }
+  .card-status-rail-unrated {
+    background: linear-gradient(180deg, rgba(241, 245, 249, .96), rgba(248, 250, 252, .86));
+    color: #475569;
+  }
   .card-body {
     padding: 16px;
     display: flex;
@@ -8902,6 +9073,20 @@ const styles = `
   .submeta-score {
     color: #0f172a;
     font-weight: 600;
+  }
+  .legacy-inline-note {
+    margin-top: 10px;
+    padding: 9px 11px;
+    border: 1px solid rgba(120, 113, 108, .18);
+    border-left: 4px solid rgba(120, 113, 108, .45);
+    border-radius: 12px;
+    background: rgba(245, 245, 244, .72);
+    color: #57534e;
+    font-size: .78rem;
+    line-height: 1.45;
+  }
+  .legacy-inline-note strong {
+    color: #44403c;
   }
   .coverage-good { color: #16a34a; }
   .coverage-warn { color: #d97706; }
@@ -10113,6 +10298,29 @@ const styles = `
     .topbar { flex-direction: column; }
     .section-head { flex-direction: column; align-items: flex-start; }
     .topbar-message { text-align: left; max-width: none; }
+    .card-with-status-rail {
+      flex-direction: column;
+    }
+    .card-status-rail {
+      flex: 0 0 auto;
+      width: 100%;
+      flex-direction: row;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-right: 0;
+      border-bottom: 1px solid rgba(148, 163, 184, .14);
+    }
+    .card-status-rail-text {
+      writing-mode: initial;
+      transform: none;
+      letter-spacing: ${RECOMMENDATION_RAIL_MOBILE_LETTER_SPACING_EM}em;
+      font-size: ${RECOMMENDATION_RAIL_MOBILE_FONT_SIZE_REM}rem;
+      white-space: nowrap;
+    }
+    .card-status-rail-auto {
+      min-width: auto;
+      padding: 4px 8px;
+    }
     .card-body { flex-direction: column; }
     .card-actions { width: 100%; justify-content: space-between; }
     .finder-focus-metrics, .compare-insights-grid { grid-template-columns: 1fr; }

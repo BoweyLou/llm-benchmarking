@@ -1,3 +1,17 @@
+import {
+  DASHBOARD_DEFAULT_CATALOG_MODE,
+  DASHBOARD_DEFAULT_LENS,
+  DASHBOARD_DEFAULT_RECOMMENDATION_FILTER,
+  DASHBOARD_DEFAULT_TAB,
+  RECOMMENDATION_RAIL_DESKTOP_FONT_SIZE_REM,
+  RECOMMENDATION_RAIL_DESKTOP_LETTER_SPACING_EM,
+  RECOMMENDATION_RAIL_MOBILE_FONT_SIZE_REM,
+  RECOMMENDATION_RAIL_MOBILE_LETTER_SPACING_EM,
+  RECOMMENDATION_RAIL_WIDTH_PX,
+  getDashboardBaselineRecommendationFilter,
+  getDashboardRailLabel,
+} from "./dashboardDefaults";
+
 const PORTABLE_SNAPSHOT_STYLE = `
   :root {
     color-scheme: light;
@@ -459,6 +473,84 @@ const PORTABLE_SNAPSHOT_STYLE = `
     border-radius: var(--radius-md);
     background: rgba(255, 255, 255, 0.88);
     box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+    overflow: hidden;
+  }
+
+  .snapshot-card-with-rail {
+    flex-direction: row;
+    gap: 0;
+    padding: 0;
+  }
+
+  .snapshot-card-shell {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+  }
+
+  .snapshot-card-status-rail {
+    flex: 0 0 ${RECOMMENDATION_RAIL_WIDTH_PX}px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px 8px 12px;
+    border-right: 1px solid rgba(148, 163, 184, 0.18);
+  }
+
+  .snapshot-card-status-rail-text {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: ${RECOMMENDATION_RAIL_DESKTOP_LETTER_SPACING_EM}em;
+    font-size: ${RECOMMENDATION_RAIL_DESKTOP_FONT_SIZE_REM}rem;
+    line-height: 1;
+    font-weight: 800;
+  }
+
+  .snapshot-card-status-rail-auto {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 100%;
+    padding: 4px 0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.76);
+    color: inherit;
+    font-size: 0.58rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .snapshot-card-status-rail-recommended {
+    background: linear-gradient(180deg, rgba(220, 252, 231, 0.92), rgba(240, 253, 244, 0.74));
+    color: #166534;
+  }
+
+  .snapshot-card-status-rail-not_recommended {
+    background: linear-gradient(180deg, rgba(255, 237, 213, 0.96), rgba(255, 247, 237, 0.8));
+    color: #9a3412;
+  }
+
+  .snapshot-card-status-rail-discouraged {
+    background: linear-gradient(180deg, rgba(254, 226, 226, 0.96), rgba(255, 241, 242, 0.82));
+    color: #b91c1c;
+  }
+
+  .snapshot-card-status-rail-mixed {
+    background: linear-gradient(180deg, rgba(224, 242, 254, 0.96), rgba(240, 249, 255, 0.82));
+    color: #0f766e;
+  }
+
+  .snapshot-card-status-rail-unrated {
+    background: linear-gradient(180deg, rgba(241, 245, 249, 0.96), rgba(248, 250, 252, 0.86));
+    color: #475569;
   }
 
   .snapshot-card-header {
@@ -751,8 +843,41 @@ const PORTABLE_SNAPSHOT_STYLE = `
     .snapshot-card-header {
       flex-direction: column;
     }
+
+    .snapshot-card-with-rail {
+      flex-direction: column;
+    }
+
+    .snapshot-card-status-rail {
+      flex: 0 0 auto;
+      width: 100%;
+      flex-direction: row;
+      justify-content: space-between;
+      padding: 10px 14px;
+      border-right: 0;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+    }
+
+    .snapshot-card-status-rail-text {
+      writing-mode: initial;
+      transform: none;
+      letter-spacing: ${RECOMMENDATION_RAIL_MOBILE_LETTER_SPACING_EM}em;
+      font-size: ${RECOMMENDATION_RAIL_MOBILE_FONT_SIZE_REM}rem;
+      white-space: nowrap;
+    }
+
+    .snapshot-card-status-rail-auto {
+      min-width: auto;
+      padding: 4px 8px;
+    }
   }
 `;
+
+const DEFAULT_SNAPSHOT_TAB = DASHBOARD_DEFAULT_TAB;
+const DEFAULT_SNAPSHOT_LENS_ID = DASHBOARD_DEFAULT_LENS;
+const DEFAULT_SNAPSHOT_LENS_LABEL = "General Reasoning";
+const DEFAULT_SNAPSHOT_CATALOG_MODE = DASHBOARD_DEFAULT_CATALOG_MODE;
+const DEFAULT_SNAPSHOT_RECOMMENDATION_FILTER = DASHBOARD_DEFAULT_RECOMMENDATION_FILTER;
 
 export function exportDashboardHtmlSnapshot(options = {}) {
   if (typeof document === "undefined" || typeof window === "undefined") {
@@ -782,14 +907,14 @@ export function exportDashboardHtmlSnapshot(options = {}) {
   );
 }
 
-function buildSnapshotPayload(
-  {
+function buildSnapshotPayload(options = {}, exportedAt = new Date()) {
+  const {
     activeTab,
     approvedOnly = false,
     benchmarks = [],
     browserOnlyCompared = false,
     browserSort = "smart",
-    catalogMode = "family",
+    catalogMode = DEFAULT_SNAPSHOT_CATALOG_MODE,
     compareIds = [],
     exactModels = [],
     familyModels = [],
@@ -799,21 +924,44 @@ function buildSnapshotPayload(
     providerFilter = "All",
     query = "",
     rankingEntries = [],
-    recommendationFilter = "all",
-    selectedUseCaseId = "",
-    selectedUseCaseLabel = "",
+    recommendationFilter,
+    selectedUseCaseId,
+    selectedUseCaseLabel,
     sourceRunsByLogId = {},
     typeFilter = "All",
     useCases = [],
-  } = {},
-  exportedAt = new Date(),
-) {
-  const normalizedActiveTab = normalizePortableTab(activeTab);
+  } = options;
+  const hasSelectedUseCaseId = Object.prototype.hasOwnProperty.call(options, "selectedUseCaseId");
+  const hasSelectedUseCaseLabel = Object.prototype.hasOwnProperty.call(options, "selectedUseCaseLabel");
+  const hasRecommendationFilter = Object.prototype.hasOwnProperty.call(options, "recommendationFilter");
+  const normalizedActiveTab = normalizePortableTab(activeTab || DEFAULT_SNAPSHOT_TAB);
+  const fallbackUseCase = hasSelectedUseCaseId
+    ? useCases.find((useCase) => useCase.id === selectedUseCaseId) || null
+    : useCases.find((useCase) => useCase.id === DEFAULT_SNAPSHOT_LENS_ID) || useCases[0] || null;
+  const resolvedSelectedUseCaseId = hasSelectedUseCaseId
+    ? String(selectedUseCaseId || "")
+    : String(fallbackUseCase?.id || DEFAULT_SNAPSHOT_LENS_ID);
+  const resolvedSelectedUseCaseLabel = String(
+    hasSelectedUseCaseLabel
+      ? (selectedUseCaseLabel || "")
+      : hasSelectedUseCaseId && resolvedSelectedUseCaseId === ""
+        ? ""
+        : (
+            useCases.find((useCase) => useCase.id === resolvedSelectedUseCaseId)?.label ||
+            fallbackUseCase?.label ||
+            DEFAULT_SNAPSHOT_LENS_LABEL
+          ),
+  );
+  const resolvedRecommendationFilter = String(
+    hasRecommendationFilter
+      ? (recommendationFilter || getDashboardBaselineRecommendationFilter(resolvedSelectedUseCaseId))
+      : getDashboardBaselineRecommendationFilter(resolvedSelectedUseCaseId),
+  );
   return {
     version: 2,
     exportedAt: exportedAt.toISOString(),
-    selectedUseCaseId: String(selectedUseCaseId || ""),
-    selectedUseCaseLabel: String(selectedUseCaseLabel || ""),
+    selectedUseCaseId: resolvedSelectedUseCaseId,
+    selectedUseCaseLabel: resolvedSelectedUseCaseLabel,
     benchmarks,
     exactModels,
     familyModels,
@@ -827,12 +975,12 @@ function buildSnapshotPayload(
       approvedOnly: Boolean(approvedOnly),
       browserOnlyCompared: Boolean(browserOnlyCompared),
       browserSort: String(browserSort || "smart"),
-      catalogMode: catalogMode === "exact" ? "exact" : "family",
+      catalogMode: catalogMode === "family" ? "family" : DEFAULT_SNAPSHOT_CATALOG_MODE,
       compareIds: Array.isArray(compareIds) ? compareIds : [],
       inferenceLocationFilter: String(inferenceLocationFilter || "All"),
       providerFilter: String(providerFilter || "All"),
       query: String(query || ""),
-      recommendationFilter: String(recommendationFilter || "all"),
+      recommendationFilter: resolvedRecommendationFilter,
       typeFilter: String(typeFilter || "All"),
     },
     meta: {
@@ -1016,6 +1164,9 @@ function buildPortableShellMarkup({ snapshot, methodologyMarkup, historyMarkup }
 function portableSnapshotRuntime() {
   const DEFAULT_INFERENCE_LOCATION_FILTER = "All";
   const DEFAULT_RECOMMENDATION_FILTER = "all";
+  const DEFAULT_RUNTIME_TAB = DASHBOARD_DEFAULT_TAB;
+  const DEFAULT_RUNTIME_CATALOG_MODE = DASHBOARD_DEFAULT_CATALOG_MODE;
+  const DEFAULT_RUNTIME_LENS_ID = DASHBOARD_DEFAULT_LENS;
   const AUTO_LEGACY_RELEASE_DAYS = 365;
   const AUTO_LEGACY_OPENROUTER_DAYS = 365;
   const BROWSER_SORT_OPTIONS = [
@@ -1044,7 +1195,15 @@ function portableSnapshotRuntime() {
   const familyModels = Array.isArray(snapshot.familyModels) ? snapshot.familyModels : [];
   const benchmarks = Array.isArray(snapshot.benchmarks) ? snapshot.benchmarks : [];
   const useCases = Array.isArray(snapshot.useCases) ? snapshot.useCases : [];
-  const selectedUseCase = useCases.find((useCase) => useCase.id === snapshot.selectedUseCaseId) || null;
+  const selectedUseCase =
+    snapshot?.selectedUseCaseId === ""
+      ? null
+      : (
+          useCases.find((useCase) => useCase.id === snapshot.selectedUseCaseId) ||
+          (!snapshot?.selectedUseCaseId
+            ? (useCases.find((useCase) => useCase.id === DEFAULT_RUNTIME_LENS_ID) || useCases[0] || null)
+            : null)
+        );
   const benchmarksById = Object.fromEntries(benchmarks.map((benchmark) => [benchmark.id, benchmark]));
   const exactModelsById = Object.fromEntries(exactModels.map((model) => [model.id, model]));
   const familyLookup = buildFamilyLookup(familyModels);
@@ -1052,17 +1211,19 @@ function portableSnapshotRuntime() {
   const familyRankingById = mapRankingRowsToFamilies(snapshot.rankingRows, familyModels, exactRankingById);
 
   const state = {
-    activeTab: normalizePortableTab(snapshot?.initialState?.activeTab || snapshot?.meta?.activeTab),
+    activeTab: normalizePortableTab(snapshot?.initialState?.activeTab || snapshot?.meta?.activeTab || DEFAULT_RUNTIME_TAB),
     approvedOnly: Boolean(snapshot?.initialState?.approvedOnly),
     browserOnlyCompared: Boolean(snapshot?.initialState?.browserOnlyCompared),
     browserSort: sanitizeBrowserSort(snapshot?.initialState?.browserSort),
-    catalogMode: snapshot?.initialState?.catalogMode === "exact" ? "exact" : "family",
+    catalogMode: snapshot?.initialState?.catalogMode === "family" ? "family" : DEFAULT_RUNTIME_CATALOG_MODE,
     compareIds: Array.isArray(snapshot?.initialState?.compareIds) ? [...snapshot.initialState.compareIds] : [],
     expandedFamilyIds: [],
     inferenceLocationFilter: String(snapshot?.initialState?.inferenceLocationFilter || DEFAULT_INFERENCE_LOCATION_FILTER),
     providerFilter: String(snapshot?.initialState?.providerFilter || "All"),
     query: String(snapshot?.initialState?.query || ""),
-    recommendationFilter: sanitizeRecommendationFilter(snapshot?.initialState?.recommendationFilter),
+    recommendationFilter: sanitizeRecommendationFilter(
+      snapshot?.initialState?.recommendationFilter || getDashboardBaselineRecommendationFilter(snapshot?.selectedUseCaseId || selectedUseCase?.id || ""),
+    ),
     typeFilter: sanitizeTypeFilter(snapshot?.initialState?.typeFilter),
     visibleBrowserCount: 24,
   };
@@ -1181,7 +1342,7 @@ function portableSnapshotRuntime() {
       state.inferenceLocationFilter = DEFAULT_INFERENCE_LOCATION_FILTER;
       state.typeFilter = "All";
       state.browserSort = "smart";
-      state.recommendationFilter = DEFAULT_RECOMMENDATION_FILTER;
+      state.recommendationFilter = getDashboardBaselineRecommendationFilter(selectedUseCase?.id || "");
       state.approvedOnly = false;
       state.browserOnlyCompared = false;
       state.visibleBrowserCount = 24;
@@ -1224,11 +1385,9 @@ function portableSnapshotRuntime() {
 
     state.typeFilter = sanitizeTypeFilter(state.typeFilter);
     state.browserSort = sanitizeBrowserSort(state.browserSort);
-    if (!selectedUseCase) {
-      state.recommendationFilter = DEFAULT_RECOMMENDATION_FILTER;
-    } else {
-      state.recommendationFilter = sanitizeRecommendationFilter(state.recommendationFilter);
-    }
+    state.recommendationFilter = sanitizeRecommendationFilter(
+      state.recommendationFilter || getDashboardBaselineRecommendationFilter(selectedUseCase?.id || ""),
+    );
   }
 
   function renderTabs() {
@@ -1550,6 +1709,7 @@ function portableSnapshotRuntime() {
   }
 
   function buildActiveFilterPills() {
+    const baselineRecommendationFilter = getDashboardBaselineRecommendationFilter(selectedUseCase?.id || "");
     const pills = [];
     if (state.query.trim()) {
       pills.push(`Search: ${state.query.trim()}`);
@@ -1569,13 +1729,25 @@ function portableSnapshotRuntime() {
     if (state.browserOnlyCompared) {
       pills.push("Compared only");
     }
-    if (selectedUseCase && state.recommendationFilter !== DEFAULT_RECOMMENDATION_FILTER) {
+    if (selectedUseCase && state.recommendationFilter !== baselineRecommendationFilter) {
       pills.push(`Recommendation: ${getRecommendationFilterLabel(state.recommendationFilter)}`);
     }
     if (state.browserSort !== "smart") {
       pills.push(`Sort: ${getSortLabel(state.browserSort)}`);
     }
     return pills.map((label) => `<span class="snapshot-pill snapshot-pill-muted">${escapeHtml(label)}</span>`).join("");
+  }
+
+  function buildRecommendationRailMarkup(summary) {
+    if (!summary) {
+      return "";
+    }
+    return `
+      <div class="snapshot-card-status-rail snapshot-card-status-rail-${escapeAttribute(summary.status)}" title="${escapeAttribute(summary.title)}">
+        <span class="snapshot-card-status-rail-text">${escapeHtml(summary.railLabel || summary.label)}</span>
+        ${summary.auto ? '<span class="snapshot-card-status-rail-auto">Auto</span>' : ""}
+      </div>
+    `;
   }
 
   function buildModelCardMarkup(model, rankingEntry, { compact = false } = {}) {
@@ -1601,7 +1773,9 @@ function portableSnapshotRuntime() {
     const familyExpanded = canExpandFamily && state.expandedFamilyIds.includes(model.id);
 
     return `
-      <article class="snapshot-card">
+      <article class="snapshot-card snapshot-card-with-rail">
+        ${buildRecommendationRailMarkup(recommendationSummary)}
+        <div class="snapshot-card-shell">
         <div class="snapshot-card-header">
           <div>
             <h3 class="snapshot-card-title">${escapeHtml(model.name || model.id)}</h3>
@@ -1627,7 +1801,6 @@ function portableSnapshotRuntime() {
           ${canExpandFamily ? `<span class="snapshot-pill snapshot-pill-muted">${escapeHtml(`${familyMemberModels.length} individual model${familyMemberModels.length === 1 ? "" : "s"}`)}</span>` : ""}
           ${String(model.catalog_status || "") === "provisional" ? `<span class="snapshot-pill snapshot-pill-warn">OpenRouter provisional</span>` : ""}
           ${approvalSummary ? `<span class="snapshot-pill ${approvalSummary.toneClass}">${escapeHtml(approvalSummary.label)}</span>` : ""}
-          ${recommendationSummary ? `<span class="snapshot-pill ${recommendationSummary.toneClass}" title="${escapeAttribute(recommendationSummary.title)}">${escapeHtml(recommendationSummary.label)}</span>` : ""}
           ${legacySummary ? `<span class="snapshot-pill ${legacySummary.toneClass}" title="${escapeAttribute(legacySummary.title)}">${escapeHtml(legacySummary.label)}</span>` : ""}
         </div>
         <div class="snapshot-card-stats">
@@ -1691,6 +1864,7 @@ function portableSnapshotRuntime() {
           }
         </div>
         ${familyExpanded ? buildFamilyVariantsMarkup(familyMemberModels) : ""}
+        </div>
       </article>
     `;
   }
@@ -2225,17 +2399,22 @@ function portableSnapshotRuntime() {
     }
 
     const { recommendedCount, notRecommendedCount, discouragedCount } = getRecommendationBreakdown(model, useCaseId);
+    const hasAutoNotRecommended =
+      recommendedCount === 0 &&
+      notRecommendedCount === 0 &&
+      discouragedCount === 0 &&
+      Boolean(getLegacyAdvisoryMeta(model));
 
     if (filterValue === "recommended") {
       return recommendedCount > 0;
     }
     if (filterValue === "not_recommended") {
-      return notRecommendedCount > 0;
+      return notRecommendedCount > 0 || hasAutoNotRecommended;
     }
     if (filterValue === "discouraged") {
       return discouragedCount > 0;
     }
-    return recommendedCount === 0 && notRecommendedCount === 0 && discouragedCount === 0;
+    return recommendedCount === 0 && notRecommendedCount === 0 && discouragedCount === 0 && !hasAutoNotRecommended;
   }
 
   function getApprovalSummary(model, useCaseId) {
@@ -2291,6 +2470,8 @@ function portableSnapshotRuntime() {
         .join(" · ");
       return {
         label: "Mixed recommendation",
+        railLabel: getDashboardRailLabel("mixed"),
+        status: "mixed",
         title: details || "Mixed recommendation",
         toneClass: "snapshot-pill-muted",
       };
@@ -2298,6 +2479,8 @@ function portableSnapshotRuntime() {
     if (status === "recommended") {
       return {
         label: totalCount > 1 && recommendedCount < totalCount ? `${recommendedCount}/${totalCount} recommended` : "Recommended",
+        railLabel: getDashboardRailLabel("recommended"),
+        status: "recommended",
         title: approval?.recommendation_notes || "Recommended for this lens",
         toneClass: "snapshot-pill-strong",
       };
@@ -2305,6 +2488,8 @@ function portableSnapshotRuntime() {
     if (status === "not_recommended") {
       return {
         label: totalCount > 1 && notRecommendedCount < totalCount ? `${notRecommendedCount}/${totalCount} not recommended` : "Not recommended",
+        railLabel: getDashboardRailLabel("not_recommended"),
+        status: "not_recommended",
         title: approval?.recommendation_notes || "Approved but not a default recommendation",
         toneClass: "snapshot-pill-not-recommended",
       };
@@ -2312,11 +2497,30 @@ function portableSnapshotRuntime() {
     if (status === "discouraged") {
       return {
         label: totalCount > 1 && discouragedCount < totalCount ? `${discouragedCount}/${totalCount} discouraged` : "Discouraged",
+        railLabel: getDashboardRailLabel("discouraged"),
+        status: "discouraged",
         title: approval?.recommendation_notes || "Discouraged for this lens",
         toneClass: "snapshot-pill-warn",
       };
     }
-    return null;
+    const legacyMeta = getLegacyAdvisoryMeta(model);
+    if (legacyMeta) {
+      return {
+        auto: true,
+        label: "Not recommended",
+        railLabel: getDashboardRailLabel("not_recommended"),
+        status: "not_recommended",
+        title: legacyMeta.title,
+        toneClass: "snapshot-pill-not-recommended",
+      };
+    }
+    return {
+      label: "Unrated",
+      railLabel: getDashboardRailLabel("unrated"),
+      status: "unrated",
+      title: "No recommendation has been saved for this lens yet.",
+      toneClass: "snapshot-pill-muted",
+    };
   }
 
   function getModelCoveragePercent(model) {
@@ -2467,7 +2671,7 @@ function portableSnapshotRuntime() {
     }
     const openRouterAddedTimestamp = getTimestampOrZero(model?.openrouter_added_at);
     if (openRouterAddedTimestamp) {
-      return { label: `${formatAgeDays(openRouterAddedTimestamp)} via OpenRouter`, source: "openrouter" };
+      return { label: formatAgeDays(openRouterAddedTimestamp), source: "openrouter" };
     }
     return null;
   }
@@ -2673,7 +2877,7 @@ function portableSnapshotRuntime() {
     if (tab === "browser" || tab === "compare" || tab === "methodology" || tab === "history") {
       return tab;
     }
-    return "summary";
+    return DEFAULT_RUNTIME_TAB;
   }
 
   function getRecommendationFilterLabel(value) {
@@ -3093,7 +3297,7 @@ function normalizePortableTab(activeTab) {
   if (activeTab === "browser" || activeTab === "compare" || activeTab === "methodology" || activeTab === "history") {
     return activeTab;
   }
-  return "summary";
+  return DEFAULT_SNAPSHOT_TAB;
 }
 
 function buildExportTitle({ activeTab, selectedUseCaseLabel }) {
