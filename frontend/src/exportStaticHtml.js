@@ -573,6 +573,22 @@ const PORTABLE_SNAPSHOT_STYLE = `
     font-size: 0.9rem;
   }
 
+  .snapshot-legacy-note {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border: 1px solid rgba(120, 113, 108, 0.18);
+    border-left: 4px solid rgba(120, 113, 108, 0.45);
+    border-radius: 12px;
+    background: rgba(245, 245, 244, 0.72);
+    color: #57534e;
+    font-size: 0.8rem;
+    line-height: 1.45;
+  }
+
+  .snapshot-legacy-note strong {
+    color: #44403c;
+  }
+
   .snapshot-card-meta {
     gap: 8px;
   }
@@ -1755,6 +1771,7 @@ function portableSnapshotRuntime() {
     const recommendationSummary = getRecommendationSummary(model, selectedUseCase?.id);
     const familyMemberModels = getFamilyMemberModels(model);
     const legacySummary = getLegacyAdvisorySummary(model, familyMemberModels);
+    const legacyInline = compact ? null : getLegacyAdvisoryInline(model, familyMemberModels);
     const compareActive = state.compareIds.includes(model.id);
     const coverage = getModelCoveragePercent(model);
     const ageMeta = getModelAgeMeta(model);
@@ -1803,6 +1820,7 @@ function portableSnapshotRuntime() {
           ${approvalSummary ? `<span class="snapshot-pill ${approvalSummary.toneClass}">${escapeHtml(approvalSummary.label)}</span>` : ""}
           ${legacySummary ? `<span class="snapshot-pill ${legacySummary.toneClass}" title="${escapeAttribute(legacySummary.title)}">${escapeHtml(legacySummary.label)}</span>` : ""}
         </div>
+        ${legacyInline ? `<div class="snapshot-legacy-note" title="${escapeAttribute(legacyInline.title)}"><strong>${escapeHtml(legacyInline.headline)}</strong> ${escapeHtml(legacyInline.body)}</div>` : ""}
         <div class="snapshot-card-stats">
           <div class="snapshot-stat">
             <span>${escapeHtml(selectedUseCase ? "Lens rank" : "Popularity")}</span>
@@ -2338,6 +2356,31 @@ function portableSnapshotRuntime() {
       label: legacyMeta.label,
       title: legacyMeta.title,
       toneClass: "snapshot-pill-legacy",
+    };
+  }
+
+  function getLegacyAdvisoryInline(model, memberModels = null) {
+    const relatedModels = Array.isArray(memberModels) ? memberModels.filter(Boolean) : [];
+    if (relatedModels.length) {
+      const legacyModels = relatedModels.filter((entry) => getLegacyAdvisoryMeta(entry));
+      if (!legacyModels.length || legacyModels.length !== relatedModels.length) {
+        return null;
+      }
+      return {
+        headline: "Legacy family.",
+        body: "All tracked variants are legacy. Prefer a newer option unless you specifically need this family.",
+        title: `All ${relatedModels.length} tracked variant${relatedModels.length === 1 ? "" : "s"} in this family meet the legacy advisory.`,
+      };
+    }
+
+    const legacyMeta = getLegacyAdvisoryMeta(model);
+    if (!legacyMeta) {
+      return null;
+    }
+    return {
+      headline: "Legacy model.",
+      body: "Prefer a newer option unless you specifically need this one.",
+      title: legacyMeta.title,
     };
   }
 
