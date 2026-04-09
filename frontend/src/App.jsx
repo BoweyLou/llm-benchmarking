@@ -206,8 +206,8 @@ const RECOMMENDATION_STATUS_OPTIONS = [
   { id: "not_recommended", label: "Not recommended" },
   { id: "discouraged", label: "Discouraged" },
 ];
-const AUTO_NOT_RECOMMENDED_RELEASE_DAYS = 365;
-const AUTO_NOT_RECOMMENDED_OPENROUTER_DAYS = 365;
+const AUTO_LEGACY_RELEASE_DAYS = 365;
+const AUTO_LEGACY_OPENROUTER_DAYS = 365;
 const RECOMMENDATION_FILTER_OPTIONS = [
   { id: DEFAULT_RECOMMENDATION_FILTER, label: "All recommendation states" },
   ...RECOMMENDATION_STATUS_OPTIONS,
@@ -1578,6 +1578,13 @@ function RankedModelCard({
   const ageMeta = getModelAgeMeta(entry.model);
   const licenseLabel = getModelLicenseLabel(entry.model);
   const metadataLinks = getModelMetadataLinks(entry.model);
+  const detailPills = [
+    { label: "Benchmark coverage", value: `${Math.round(entry.coverage * 100)}%` },
+    { label: "Composite score", value: Math.round(entry.score) },
+    { label: "Context", value: entry.model.context_window || "Unknown" },
+    { label: "Released", value: entry.model.release_date || "Unknown" },
+    ageMeta ? { label: "Age", value: ageMeta.label } : null,
+  ].filter(Boolean);
 
   return (
     <article className={isTop ? "card card-top" : "card"}>
@@ -1603,7 +1610,6 @@ function RankedModelCard({
             ) : null}
           </div>
           <ScoreBar score={entry.score} />
-          <CoverageIndicator coverage={entry.coverage} />
         </div>
         <div className="card-actions">
           <button
@@ -1628,6 +1634,13 @@ function RankedModelCard({
 
       {isExpanded ? (
         <div className="card-details">
+          <div className="model-detail-summary">
+            {detailPills.map((item) => (
+              <span key={item.label} className="detail-pill">
+                {item.label} <strong>{item.value}</strong>
+              </span>
+            ))}
+          </div>
           <div className="detail-label">Benchmark breakdown</div>
           {criticalMissing.length ? (
             <div className="critical-gaps">
@@ -1651,6 +1664,9 @@ function RankedModelCard({
                 </span>
                 <span className="detail-weight">{Math.round(item.weight * 100)}% weight</span>
                 {item.variant_model_name && item.variant_model_name !== entry.model.name ? <span className="detail-note">via {item.variant_model_name}</span> : null}
+                {getBenchmarkScaleDescriptor(benchmarksById[item.benchmark_id], item.raw_value) ? (
+                  <span className="detail-note">Relative speed: {getBenchmarkScaleDescriptor(benchmarksById[item.benchmark_id], item.raw_value)}</span>
+                ) : null}
                 {item.notes ? <span className="detail-note">{item.notes}</span> : null}
               </div>
             ))}
@@ -1908,6 +1924,7 @@ function ModelBrowserCard({
   const isFamily = Boolean(model.family && model.family.member_count > 1);
   const familyBenchmarkWins = isFamily ? getFamilyBenchmarkWins(model) : {};
   const familyVariants = isFamily ? getFamilyVariants(model, exactModelsById, familyBenchmarkWins) : [];
+  const legacyAdvisoryMemberModels = isFamily ? familyVariants : null;
   const sortedBenchmarkIds = sortBenchmarkIdsForLens(model, selectedUseCase, benchmarksById);
   const openRouterLabel = getPreferredOpenRouterLabel(model, selectedUseCase);
   const openRouterDetail = getOpenRouterPopularityDetail(model, selectedUseCase);
@@ -1926,11 +1943,12 @@ function ModelBrowserCard({
     ? "Each row shows the best family result for that benchmark and names the variant that supplies it."
     : "";
   const detailPills = [
-    { label: "Coverage", value: `${coverage}%` },
-    lensEntry ? { label: "Score", value: Math.round(lensEntry.score) } : null,
+    { label: "Benchmark coverage", value: `${coverage}%` },
+    lensEntry ? { label: "Composite score", value: Math.round(lensEntry.score) } : null,
     { label: isFamily ? "Context range" : "Context", value: model.context_window || "Unknown" },
     { label: isFamily ? "Release range" : "Released", value: model.release_date || "Unknown" },
     ageMeta ? { label: "Age", value: ageMeta.label } : null,
+    openRouterDetail ? { label: "OpenRouter", value: openRouterDetail } : null,
   ].filter(Boolean);
 
   return (
@@ -1948,12 +1966,10 @@ function ModelBrowserCard({
             <CatalogStatusBadge model={model} />
             <ApprovalBadge model={model} useCaseId={selectedUseCase?.id} />
             <RecommendationBadge model={model} useCaseId={selectedUseCase?.id} />
+            <LegacyAdvisoryBadge model={model} memberModels={legacyAdvisoryMemberModels} />
             <TypeBadge type={model.type} />
             {licenseLabel ? <span className="tag tag-license">License: {licenseLabel}</span> : null}
             {isFamily ? <span className="tag tag-family">{model.family.member_count} variants</span> : null}
-            {model.inference_summary?.destination_count ? (
-              <span className="tag tag-inference">{model.inference_summary.destination_count} hyperscalers</span>
-            ) : null}
             {selectedUseCase ? (
               lensEntry ? (
                 <span className="tag tag-top">
@@ -1971,11 +1987,7 @@ function ModelBrowserCard({
             <span>Context: {model.context_window || "Unknown"}</span>
             <span>Released: {model.release_date || "Unknown"}</span>
             {ageMeta ? <span>Age: {ageMeta.label}</span> : null}
-            <span className={coverage >= 50 ? "coverage coverage-good" : "coverage coverage-warn"}>
-              {coverage}% benchmark coverage
-            </span>
-            {lensEntry ? <span className="coverage coverage-good">Score {Math.round(lensEntry.score)}</span> : null}
-            {openRouterDetail ? <span>{openRouterDetail}</span> : null}
+            {lensEntry ? <span className="submeta-score">Score {Math.round(lensEntry.score)}</span> : null}
             {selectedUseCase && !lensEntry && lensEligibility?.inlineLabel ? (
               <span className={lensEligibility.status === "missing_required" ? "lens-gap-note lens-gap-note-warning" : "lens-gap-note"}>
                 {lensEligibility.inlineLabel}
@@ -2176,6 +2188,7 @@ function ModelBrowserCard({
                 const normalizedValue =
                   score?.value != null ? normalizeBenchmarkValue(benchmark, score.value) : 0;
                 const benchmarkTone = getBenchmarkTone(benchmark, score?.value);
+                const benchmarkScaleDescriptor = getBenchmarkScaleDescriptor(benchmark, score?.value);
                 return (
                   <div key={benchmarkId} className="bench-row">
                     {benchmark?.url ? (
@@ -2199,6 +2212,7 @@ function ModelBrowserCard({
                         </span>
                         <div className="bench-meta">
                           {variantMetaLabel ? <span className="bench-meta-item">{variantMetaLabel}</span> : null}
+                          {benchmarkScaleDescriptor ? <span className="bench-meta-item">Relative speed: {benchmarkScaleDescriptor}</span> : null}
                           {score?.collected_at ? (
                             <span className="bench-meta-item">Updated {formatDate(score.collected_at)}</span>
                           ) : null}
@@ -5378,14 +5392,14 @@ function getAgeDays(timestamp) {
   return Math.max(0, Math.floor((Date.now() - timestamp) / 86400000));
 }
 
-function getAutoRecommendationMeta(model) {
+function getLegacyAdvisoryMeta(model) {
   const releaseTimestamp = getPreciseReleaseTimestamp(model?.release_date);
   const releaseAgeDays = getAgeDays(releaseTimestamp);
-  if (releaseAgeDays != null && releaseAgeDays >= AUTO_NOT_RECOMMENDED_RELEASE_DAYS) {
+  if (releaseAgeDays != null && releaseAgeDays >= AUTO_LEGACY_RELEASE_DAYS) {
     return {
-      status: "not_recommended",
-      label: "Not recommended · age",
-      title: `Auto-derived because this model is ${releaseAgeDays} days old based on its exact release date and no manual recommendation is saved for this lens.`,
+      status: "legacy",
+      label: "Legacy · consider newer",
+      title: `Auto-derived because this model is ${releaseAgeDays} days old based on its exact release date. Consider a newer model unless you specifically need this one.`,
       source: "release",
       ageDays: releaseAgeDays,
     };
@@ -5393,17 +5407,50 @@ function getAutoRecommendationMeta(model) {
 
   const openRouterAddedTimestamp = getTimestampOrZero(model?.openrouter_added_at);
   const openRouterAgeDays = getAgeDays(openRouterAddedTimestamp);
-  if (openRouterAgeDays != null && openRouterAgeDays >= AUTO_NOT_RECOMMENDED_OPENROUTER_DAYS) {
+  if (openRouterAgeDays != null && openRouterAgeDays >= AUTO_LEGACY_OPENROUTER_DAYS) {
     return {
-      status: "not_recommended",
-      label: "Not recommended · age",
-      title: `Auto-derived because this model was first added to OpenRouter ${openRouterAgeDays} days ago and no manual recommendation is saved for this lens.`,
+      status: "legacy",
+      label: "Legacy · consider newer",
+      title: `Auto-derived because this model was first added to OpenRouter ${openRouterAgeDays} days ago. Consider a newer model unless you specifically need this one.`,
       source: "openrouter",
       ageDays: openRouterAgeDays,
     };
   }
 
   return null;
+}
+
+function getLegacyAdvisorySummary(model, memberModels = null) {
+  const relatedModels = Array.isArray(memberModels) ? memberModels.filter(Boolean) : [];
+  if (relatedModels.length) {
+    const legacyModels = relatedModels.filter((entry) => getLegacyAdvisoryMeta(entry));
+    if (!legacyModels.length) {
+      return null;
+    }
+    const totalCount = relatedModels.length;
+    if (legacyModels.length === totalCount) {
+      return {
+        className: "tag tag-legacy",
+        label: totalCount > 1 ? "Legacy family" : "Legacy · consider newer",
+        title: `All ${totalCount} variant${totalCount === 1 ? "" : "s"} in this family are older than one year or have been on OpenRouter for over a year. Consider newer alternatives first.`,
+      };
+    }
+    return {
+      className: "tag tag-legacy",
+      label: `${legacyModels.length}/${totalCount} legacy variants`,
+      title: `${legacyModels.length} of ${totalCount} variants in this family are older than one year or have been on OpenRouter for over a year. Consider newer alternatives first.`,
+    };
+  }
+
+  const legacyMeta = getLegacyAdvisoryMeta(model);
+  if (!legacyMeta) {
+    return null;
+  }
+  return {
+    className: "tag tag-legacy",
+    label: legacyMeta.label,
+    title: legacyMeta.title,
+  };
 }
 
 function getRecommendationBreakdown(model, useCaseId) {
@@ -5415,7 +5462,6 @@ function getRecommendationBreakdown(model, useCaseId) {
       notRecommendedCount: 0,
       discouragedCount: 0,
       approval: null,
-      autoMeta: null,
     };
   }
 
@@ -5445,20 +5491,6 @@ function getRecommendationBreakdown(model, useCaseId) {
       notRecommendedCount,
       discouragedCount,
       approval,
-      autoMeta: null,
-    };
-  }
-
-  const autoMeta = getAutoRecommendationMeta(model);
-  if (autoMeta) {
-    return {
-      status: autoMeta.status,
-      totalCount,
-      recommendedCount: 0,
-      notRecommendedCount: autoMeta.status === "not_recommended" ? 1 : 0,
-      discouragedCount: autoMeta.status === "discouraged" ? 1 : 0,
-      approval,
-      autoMeta,
     };
   }
 
@@ -5469,7 +5501,6 @@ function getRecommendationBreakdown(model, useCaseId) {
     notRecommendedCount: 0,
     discouragedCount: 0,
     approval,
-    autoMeta: null,
   };
 }
 
@@ -5587,7 +5618,6 @@ function getRecommendationSummary(model, useCaseId) {
   }
   const {
     approval,
-    autoMeta,
     discouragedCount,
     notRecommendedCount,
     recommendedCount,
@@ -5620,10 +5650,8 @@ function getRecommendationSummary(model, useCaseId) {
   if (recommendationStatus === "not_recommended") {
     return {
       className: "tag tag-not-recommended",
-      label: autoMeta
-        ? autoMeta.label
-        : (totalCount > 1 && notRecommendedCount < totalCount ? `${notRecommendedCount}/${totalCount} not recommended` : "Not recommended"),
-      title: autoMeta?.title || approval?.recommendation_notes || "Approved but not a default recommendation",
+      label: totalCount > 1 && notRecommendedCount < totalCount ? `${notRecommendedCount}/${totalCount} not recommended` : "Not recommended",
+      title: approval?.recommendation_notes || "Approved but not a default recommendation",
     };
   }
   if (recommendationStatus === "discouraged") {
@@ -5638,6 +5666,18 @@ function getRecommendationSummary(model, useCaseId) {
 
 function RecommendationBadge({ model, useCaseId = "" }) {
   const summary = getRecommendationSummary(model, useCaseId);
+  if (!summary) {
+    return null;
+  }
+  return (
+    <span className={summary.className} title={summary.title}>
+      {summary.label}
+    </span>
+  );
+}
+
+function LegacyAdvisoryBadge({ model, memberModels = null }) {
+  const summary = getLegacyAdvisorySummary(model, memberModels);
   if (!summary) {
     return null;
   }
@@ -7562,9 +7602,17 @@ function buildPricingReference(inputValues, outputValues) {
 }
 
 function normalizePriceValues(values) {
-  return values
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value) && value >= 0);
+  return (Array.isArray(values) ? values : [])
+    .flatMap((value) => {
+      if (value == null) {
+        return [];
+      }
+      if (typeof value === "string" && value.trim() === "") {
+        return [];
+      }
+      const numeric = Number(value);
+      return Number.isFinite(numeric) && numeric >= 0 ? [numeric] : [];
+    });
 }
 
 function getModelPricingReference(model) {
@@ -7760,7 +7808,15 @@ function normalizeBenchmarkValue(benchmark, value) {
   const rangeMin = Number(benchmark?.range_min);
   const rangeMax = Number(benchmark?.range_max);
   if (Number.isFinite(rangeMin) && Number.isFinite(rangeMax) && rangeMax > rangeMin) {
-    const scaled = ((numeric - rangeMin) / (rangeMax - rangeMin)) * 100;
+    let scaled;
+    if (usesLogScaledBenchmark(benchmark) && numeric > 0) {
+      const safeMin = Math.max(rangeMin, 0.01);
+      const safeMax = Math.max(rangeMax, safeMin * 1.01);
+      const safeValue = Math.max(numeric, safeMin);
+      scaled = ((Math.log(safeValue) - Math.log(safeMin)) / (Math.log(safeMax) - Math.log(safeMin))) * 100;
+    } else {
+      scaled = ((numeric - rangeMin) / (rangeMax - rangeMin)) * 100;
+    }
     const normalized = benchmark?.higher_is_better === false ? 100 - scaled : scaled;
     return Math.max(0, Math.min(100, normalized));
   }
@@ -7770,6 +7826,10 @@ function normalizeBenchmarkValue(benchmark, value) {
   }
 
   return Math.max(0, Math.min(100, numeric <= 1.5 ? numeric * 100 : numeric));
+}
+
+function usesLogScaledBenchmark(benchmark) {
+  return String(benchmark?.metric || "").includes("Tokens/sec");
 }
 
 function getBenchmarkTone(benchmark, value) {
@@ -7784,6 +7844,29 @@ function getBenchmarkTone(benchmark, value) {
     return "warn";
   }
   return "bad";
+}
+
+function getBenchmarkScaleDescriptor(benchmark, value) {
+  if (!usesLogScaledBenchmark(benchmark)) {
+    return "";
+  }
+  const normalized = normalizeBenchmarkValue(benchmark, value);
+  if (!Number.isFinite(normalized)) {
+    return "";
+  }
+  if (normalized >= 80) {
+    return "Very fast";
+  }
+  if (normalized >= 65) {
+    return "Fast";
+  }
+  if (normalized >= 45) {
+    return "Mid-pack";
+  }
+  if (normalized >= 25) {
+    return "Slow";
+  }
+  return "Very slow";
 }
 
 function formatScore(value) {
@@ -7947,6 +8030,7 @@ function getBenchmarkContext(benchmark) {
     aa_speed: {
       source: "Artificial Analysis · throughput leaderboard",
       why: "strongest quick signal here for real-time UX, concurrency, and queue-processing latency.",
+      caveat: "Throughput bars use a log-scaled range in the UI because speed leaderboards are heavily skewed; a model can be genuinely fast without sitting near the absolute maximum.",
     },
     aa_cost: {
       source: "Artificial Analysis · normalized model pricing data",
@@ -8368,6 +8452,12 @@ const styles = `
     background: rgba(249, 115, 22, .16);
     color: #9a3412;
     border-color: rgba(249, 115, 22, .32);
+    font-weight: 800;
+  }
+  .tag-legacy {
+    background: rgba(120, 113, 108, .12);
+    color: #57534e;
+    border-color: rgba(120, 113, 108, .24);
     font-weight: 800;
   }
   .tag-detail {
@@ -8808,6 +8898,10 @@ const styles = `
     flex-wrap: wrap;
     gap: 12px;
     font-size: .78rem;
+  }
+  .submeta-score {
+    color: #0f172a;
+    font-weight: 600;
   }
   .coverage-good { color: #16a34a; }
   .coverage-warn { color: #d97706; }

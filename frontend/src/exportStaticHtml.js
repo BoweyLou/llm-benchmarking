@@ -179,6 +179,14 @@ const PORTABLE_SNAPSHOT_STYLE = `
     color: var(--soft);
   }
 
+  .snapshot-pill-legacy,
+  .tag-legacy {
+    border-color: rgba(120, 113, 108, 0.24);
+    background: rgba(120, 113, 108, 0.12);
+    color: #57534e;
+    font-weight: 800;
+  }
+
   .snapshot-pill-not-recommended,
   .tag-not-recommended {
     border-color: rgba(249, 115, 22, 0.32);
@@ -1008,8 +1016,8 @@ function buildPortableShellMarkup({ snapshot, methodologyMarkup, historyMarkup }
 function portableSnapshotRuntime() {
   const DEFAULT_INFERENCE_LOCATION_FILTER = "All";
   const DEFAULT_RECOMMENDATION_FILTER = "all";
-  const AUTO_NOT_RECOMMENDED_RELEASE_DAYS = 365;
-  const AUTO_NOT_RECOMMENDED_OPENROUTER_DAYS = 365;
+  const AUTO_LEGACY_RELEASE_DAYS = 365;
+  const AUTO_LEGACY_OPENROUTER_DAYS = 365;
   const BROWSER_SORT_OPTIONS = [
     { id: "smart", label: "Smart order" },
     { id: "popularity", label: "OpenRouter popularity" },
@@ -1573,6 +1581,8 @@ function portableSnapshotRuntime() {
   function buildModelCardMarkup(model, rankingEntry, { compact = false } = {}) {
     const approvalSummary = getApprovalSummary(model, selectedUseCase?.id);
     const recommendationSummary = getRecommendationSummary(model, selectedUseCase?.id);
+    const familyMemberModels = getFamilyMemberModels(model);
+    const legacySummary = getLegacyAdvisorySummary(model, familyMemberModels);
     const compareActive = state.compareIds.includes(model.id);
     const coverage = getModelCoveragePercent(model);
     const ageMeta = getModelAgeMeta(model);
@@ -1587,7 +1597,6 @@ function portableSnapshotRuntime() {
     const pricingLabel = getModelPricingReferenceLabel(model);
     const licenseLabel = getModelLicenseLabel(model);
     const metadataLinks = getModelMetadataLinks(model);
-    const familyMemberModels = getFamilyMemberModels(model);
     const canExpandFamily = state.catalogMode === "family" && familyMemberModels.length > 0;
     const familyExpanded = canExpandFamily && state.expandedFamilyIds.includes(model.id);
 
@@ -1619,6 +1628,7 @@ function portableSnapshotRuntime() {
           ${String(model.catalog_status || "") === "provisional" ? `<span class="snapshot-pill snapshot-pill-warn">OpenRouter provisional</span>` : ""}
           ${approvalSummary ? `<span class="snapshot-pill ${approvalSummary.toneClass}">${escapeHtml(approvalSummary.label)}</span>` : ""}
           ${recommendationSummary ? `<span class="snapshot-pill ${recommendationSummary.toneClass}" title="${escapeAttribute(recommendationSummary.title)}">${escapeHtml(recommendationSummary.label)}</span>` : ""}
+          ${legacySummary ? `<span class="snapshot-pill ${legacySummary.toneClass}" title="${escapeAttribute(legacySummary.title)}">${escapeHtml(legacySummary.label)}</span>` : ""}
         </div>
         <div class="snapshot-card-stats">
           <div class="snapshot-stat">
@@ -2100,28 +2110,61 @@ function portableSnapshotRuntime() {
     return Math.max(0, Math.floor((Date.now() - timestamp) / 86400000));
   }
 
-  function getAutoRecommendationMeta(model) {
+  function getLegacyAdvisoryMeta(model) {
     const releaseTimestamp = getPreciseReleaseTimestamp(model?.release_date);
     const releaseAgeDays = getAgeDays(releaseTimestamp);
-    if (releaseAgeDays != null && releaseAgeDays >= AUTO_NOT_RECOMMENDED_RELEASE_DAYS) {
+    if (releaseAgeDays != null && releaseAgeDays >= AUTO_LEGACY_RELEASE_DAYS) {
       return {
-        status: "not_recommended",
-        label: "Not recommended · age",
-        title: `Auto-derived because this model is ${releaseAgeDays} days old based on its exact release date and no manual recommendation is saved for this lens.`,
+        status: "legacy",
+        label: "Legacy · consider newer",
+        title: `Auto-derived because this model is ${releaseAgeDays} days old based on its exact release date. Consider a newer model unless you specifically need this one.`,
       };
     }
 
     const openRouterAddedTimestamp = getTimestampOrZero(model?.openrouter_added_at);
     const openRouterAgeDays = getAgeDays(openRouterAddedTimestamp);
-    if (openRouterAgeDays != null && openRouterAgeDays >= AUTO_NOT_RECOMMENDED_OPENROUTER_DAYS) {
+    if (openRouterAgeDays != null && openRouterAgeDays >= AUTO_LEGACY_OPENROUTER_DAYS) {
       return {
-        status: "not_recommended",
-        label: "Not recommended · age",
-        title: `Auto-derived because this model was first added to OpenRouter ${openRouterAgeDays} days ago and no manual recommendation is saved for this lens.`,
+        status: "legacy",
+        label: "Legacy · consider newer",
+        title: `Auto-derived because this model was first added to OpenRouter ${openRouterAgeDays} days ago. Consider a newer model unless you specifically need this one.`,
       };
     }
 
     return null;
+  }
+
+  function getLegacyAdvisorySummary(model, memberModels = null) {
+    const relatedModels = Array.isArray(memberModels) ? memberModels.filter(Boolean) : [];
+    if (relatedModels.length) {
+      const legacyModels = relatedModels.filter((entry) => getLegacyAdvisoryMeta(entry));
+      if (!legacyModels.length) {
+        return null;
+      }
+      const totalCount = relatedModels.length;
+      if (legacyModels.length === totalCount) {
+        return {
+          label: totalCount > 1 ? "Legacy family" : "Legacy · consider newer",
+          title: `All ${totalCount} variant${totalCount === 1 ? "" : "s"} in this family are older than one year or have been on OpenRouter for over a year. Consider newer alternatives first.`,
+          toneClass: "snapshot-pill-legacy",
+        };
+      }
+      return {
+        label: `${legacyModels.length}/${totalCount} legacy variants`,
+        title: `${legacyModels.length} of ${totalCount} variants in this family are older than one year or have been on OpenRouter for over a year. Consider newer alternatives first.`,
+        toneClass: "snapshot-pill-legacy",
+      };
+    }
+
+    const legacyMeta = getLegacyAdvisoryMeta(model);
+    if (!legacyMeta) {
+      return null;
+    }
+    return {
+      label: legacyMeta.label,
+      title: legacyMeta.title,
+      toneClass: "snapshot-pill-legacy",
+    };
   }
 
   function getRecommendationBreakdown(model, useCaseId) {
@@ -2133,7 +2176,6 @@ function portableSnapshotRuntime() {
         notRecommendedCount: 0,
         discouragedCount: 0,
         approval: null,
-        autoMeta: null,
       };
     }
 
@@ -2157,20 +2199,6 @@ function portableSnapshotRuntime() {
         notRecommendedCount,
         discouragedCount,
         approval,
-        autoMeta: null,
-      };
-    }
-
-    const autoMeta = getAutoRecommendationMeta(model);
-    if (autoMeta) {
-      return {
-        status: autoMeta.status,
-        totalCount,
-        recommendedCount: 0,
-        notRecommendedCount: autoMeta.status === "not_recommended" ? 1 : 0,
-        discouragedCount: autoMeta.status === "discouraged" ? 1 : 0,
-        approval,
-        autoMeta,
       };
     }
 
@@ -2181,7 +2209,6 @@ function portableSnapshotRuntime() {
       notRecommendedCount: 0,
       discouragedCount: 0,
       approval,
-      autoMeta: null,
     };
   }
 
@@ -2247,7 +2274,6 @@ function portableSnapshotRuntime() {
     }
     const {
       approval,
-      autoMeta,
       discouragedCount,
       notRecommendedCount,
       recommendedCount,
@@ -2278,10 +2304,8 @@ function portableSnapshotRuntime() {
     }
     if (status === "not_recommended") {
       return {
-        label: autoMeta
-          ? autoMeta.label
-          : (totalCount > 1 && notRecommendedCount < totalCount ? `${notRecommendedCount}/${totalCount} not recommended` : "Not recommended"),
-        title: autoMeta?.title || approval?.recommendation_notes || "Approved but not a default recommendation",
+        label: totalCount > 1 && notRecommendedCount < totalCount ? `${notRecommendedCount}/${totalCount} not recommended` : "Not recommended",
+        title: approval?.recommendation_notes || "Approved but not a default recommendation",
         toneClass: "snapshot-pill-not-recommended",
       };
     }
@@ -2396,8 +2420,16 @@ function portableSnapshotRuntime() {
 
   function normalizePriceValues(values) {
     return (Array.isArray(values) ? values : [])
-      .map((value) => Number(value))
-      .filter((value) => Number.isFinite(value) && value >= 0);
+      .flatMap((value) => {
+        if (value == null) {
+          return [];
+        }
+        if (typeof value === "string" && value.trim() === "") {
+          return [];
+        }
+        const numeric = Number(value);
+        return Number.isFinite(numeric) && numeric >= 0 ? [numeric] : [];
+      });
   }
 
   function formatPricingRange(minimum, maximum) {
