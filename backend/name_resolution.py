@@ -1,0 +1,258 @@
+"""Deterministic name normalization with conservative exact matching."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import re
+import unicodedata
+from typing import Any, Iterable, Mapping
+
+_STRIP_TOKENS = {
+    "official",
+    "preview",
+    "latest",
+    "model",
+    "release",
+    "edition",
+    "series",
+    "version",
+}
+
+_PROVIDER_PREFIX_RE = re.compile(r"^[a-z0-9_.-]+/")
+_TRAILING_ISO_DATE_RE = re.compile(r"[-_]?20\d{2}[-_]\d{2}[-_]\d{2}$", re.IGNORECASE)
+_TRAILING_COMPACT_DATE_RE = re.compile(r"[-_]?20\d{6}$", re.IGNORECASE)
+_TRAILING_PAREN_VARIANT_RE = re.compile(r"\s*\([^)]*\)\s*$")
+_TRAILING_SLUG_VARIANT_RE = re.compile(
+    r"-(?:\d+k-)?thinking(?:-\d+k)?$|"
+    r"-thinking(?:-\d+k)?$|"
+    r"-(?:no-thinking|max|adaptive|high|medium|low|xhigh)$|"
+    r"-non-reasoning(?:-low-effort)?$",
+    re.IGNORECASE,
+)
+
+_PUNCT_TRANSLATION = str.maketrans(
+    {
+        "–": "-",
+        "—": "-",
+        "‑": "-",
+        "·": " ",
+        "/": " ",
+        "_": " ",
+        "(": " ",
+        ")": " ",
+        "[": " ",
+        "]": " ",
+        "{": " ",
+        "}": " ",
+        ",": " ",
+        ":": " ",
+        ";": " ",
+        "!": " ",
+        "?": " ",
+    }
+)
+
+
+@dataclass(frozen=True)
+class NormalizedModel:
+    model_id: str
+    name: str
+    provider: str | None
+    exact_names: tuple[str, ...]
+    aliases: tuple[str, ...]
+    signatures: tuple[str, ...]
+
+
+def normalize_text(value: str) -> str:
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    value = value.translate(_PUNCT_TRANSLATION)
+    value = re.sub(r"[^0-9A-Za-z]+", " ", value).lower().strip()
+    tokens = [token for token in value.split() if token and token not in _STRIP_TOKENS]
+    return " ".join(tokens)
+
+
+def _compact_text(value: str) -> str:
+    return normalize_text(value).replace(" ", "")
+
+
+def token_signature(value: str) -> str:
+    normalized = normalize_text(value)
+    if not normalized:
+        return ""
+    return " ".join(sorted(normalized.split()))
+
+
+def name_signatures(value: str) -> tuple[str, ...]:
+    signatures = {
+        signature
+        for variant in _name_variants(value)
+        for signature in (token_signature(variant),)
+        if signature
+    }
+    return tuple(sorted(signatures, key=lambda item: (len(item.split()), len(item), item)))
+
+
+def _name_variants(value: str) -> tuple[str, ...]:
+    pending = [value.strip()]
+    seen: set[str] = set()
+
+    while pending:
+        candidate = pending.pop()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+
+        provider_stripped = _PROVIDER_PREFIX_RE.sub("", candidate, count=1)
+        if provider_stripped != candidate:
+            pending.append(provider_stripped)
+
+        for pattern in (_TRAILING_ISO_DATE_RE, _TRAILING_COMPACT_DATE_RE):
+            date_stripped = pattern.sub("", candidate).strip("-_ ")
+            if date_stripped != candidate:
+                pending.append(date_stripped)
+
+        paren_variant_stripped = _TRAILING_PAREN_VARIANT_RE.sub("", candidate).strip()
+        if paren_variant_stripped and paren_variant_stripped != candidate:
+            pending.append(paren_variant_stripped)
+
+        slug_variant_stripped = _TRAILING_SLUG_VARIANT_RE.sub("", candidate).strip("-_ ")
+        if slug_variant_stripped and slug_variant_stripped != candidate:
+            pending.append(slug_variant_stripped)
+
+    return tuple(seen)
+
+
+def _candidate_strings(model: Mapping[str, Any]) -> tuple[str, ...]:
+    candidates: list[str] = []
+    for key in ("name", "canonical_model_name", "family_name", "variant_label"):
+        raw = model.get(key)
+        if isinstance(raw, str) and raw.strip():
+            candidates.append(raw)
+    aliases = model.get("aliases")
+    if isinstance(aliases, Iterable) and not isinstance(aliases, str):
+        for alias in aliases:
+            if isinstance(alias, str) and alias.strip():
+                candidates.append(alias)
+    return tuple(dict.fromkeys(candidates))
+
+
+def normalize_model_entry(model: Mapping[str, Any]) -> NormalizedModel:
+    model_id = str(model["id"])
+    name = str(model.get("name", model_id))
+    provider = model.get("provider")
+    provider_str = str(provider) if isinstance(provider, str) else None
+    candidate_strings = _candidate_strings(model)
+    exact_name_set = {
+        normalized
+        for candidate in candidate_strings
+        for normalized in (normalize_text(candidate), _compact_text(candidate))
+        if normalized
+    }
+    alias_set = {
+        normalized
+        for candidate in candidate_strings
+        for variant in _name_variants(candidate)
+        for normalized in (normalize_text(variant), _compact_text(variant))
+        if normalized
+    }
+    alias_set.update(exact_name_set)
+    signature_set = {
+        signature
+        for candidate in candidate_strings
+        for signature in name_signatures(candidate)
+        if signature
+    }
+    exact_names = tuple(sorted(exact_name_set))
+    aliases = tuple(sorted(alias_set))
+    signatures = tuple(sorted(signature_set, key=lambda item: (len(item.split()), len(item), item)))
+    return NormalizedModel(
+        model_id=model_id,
+        name=name,
+        provider=provider_str,
+        exact_names=exact_names,
+        aliases=aliases,
+        signatures=signatures,
+    )
+
+
+def _model_candidates(models: Iterable[Mapping[str, Any]]) -> list[NormalizedModel]:
+    return [normalize_model_entry(model) for model in models]
+
+
+def _exact_match_priority(candidate: NormalizedModel) -> tuple[int, int, str]:
+    provider_unknown = 1 if not candidate.provider or candidate.provider.lower() == "unknown" else 0
+    has_provider_prefix = 1 if "/" in candidate.name else 0
+    return (provider_unknown, has_provider_prefix, candidate.model_id)
+
+
+def resolve_model_name(raw_name: str, models: Iterable[Mapping[str, Any]], *, threshold: float = 80.0) -> str | None:
+    """Resolve a raw leaderboard label to an existing model id.
+
+    The resolver intentionally prefers false negatives over false positives.
+    If a source label is not an exact normalized match for an existing model or
+    alias, it should create a new model instead of contaminating a seeded one.
+    """
+
+    raw_norm = normalize_text(raw_name)
+    if not raw_norm:
+        return None
+
+    candidates = _model_candidates(models)
+    raw_aliases = {
+        alias
+        for variant in _name_variants(raw_name)
+        for alias in (normalize_text(variant), _compact_text(variant))
+        if alias
+    }
+    raw_signatures = {
+        signature
+        for variant in _name_variants(raw_name)
+        for signature in (token_signature(variant),)
+        if signature
+    }
+    exact: list[NormalizedModel] = []
+    alias_matches: list[NormalizedModel] = []
+    signature_matches: list[NormalizedModel] = []
+
+    for candidate in candidates:
+        if any(alias in raw_aliases for alias in candidate.exact_names):
+            exact.append(candidate)
+            continue
+        if any(alias in raw_aliases for alias in candidate.aliases):
+            alias_matches.append(candidate)
+            continue
+        if any(signature in raw_signatures for signature in candidate.signatures):
+            signature_matches.append(candidate)
+
+    if exact:
+        exact.sort(key=_exact_match_priority)
+        return exact[0].model_id
+
+    if alias_matches:
+        alias_matches.sort(key=_exact_match_priority)
+        return alias_matches[0].model_id
+
+    if signature_matches:
+        signature_matches.sort(key=_exact_match_priority)
+        return signature_matches[0].model_id
+
+    # Threshold is intentionally unused for now. Fuzzy matching created
+    # cross-family and cross-generation collapses in live benchmark data.
+    _ = threshold
+    return None
+
+
+def build_model_lookup(models: Iterable[Mapping[str, Any]]) -> dict[str, NormalizedModel]:
+    return {model["id"]: normalize_model_entry(model) for model in models}
+
+
+__all__ = [
+    "NormalizedModel",
+    "build_model_lookup",
+    "name_signatures",
+    "normalize_model_entry",
+    "normalize_text",
+    "resolve_model_name",
+    "token_signature",
+]

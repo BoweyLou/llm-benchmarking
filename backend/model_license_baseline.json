@@ -1,0 +1,319 @@
+{
+  "exact_overrides": [
+    {
+      "model_id": "glm-5",
+      "license_id": "mit",
+      "license_name": "MIT",
+      "license_url": "https://huggingface.co/zai-org/GLM-5"
+    },
+    {
+      "model_id": "minimax-01",
+      "license_id": "model-agreement",
+      "license_name": "Model Agreement",
+      "license_url": "https://huggingface.co/MiniMaxAI/MiniMax-Text-01/blob/main/LICENSE-MODEL"
+    },
+    {
+      "model_id": "adept-fuyu-8b",
+      "license_id": "cc-by-nc-4.0",
+      "license_name": "cc-by-nc-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-nc/4.0/"
+    },
+    {
+      "model_id": "llama-3-3-70b-instruct-turbo-together",
+      "license_id": "llama3.3",
+      "license_name": "llama3.3",
+      "license_url": "https://www.llama.com/llama3_3/license/"
+    },
+    {
+      "model_id": "llama-3-3-nemotron-49b-super-v1",
+      "license_id": "other",
+      "license_name": "nvidia-open-model-license",
+      "license_url": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/"
+    },
+    {
+      "model_id": "qwen2-5-14b-instruct",
+      "license_id": "apache-2.0",
+      "license_name": "apache-2.0",
+      "license_url": "https://huggingface.co/Qwen/Qwen2.5-14B-Instruct/blob/main/LICENSE"
+    },
+    {
+      "model_id": "qwen3-235b-a22b-no-thinking",
+      "license_id": "apache-2.0",
+      "license_name": "apache-2.0",
+      "license_url": "https://huggingface.co/Qwen/Qwen3-235B-A22B/blob/main/LICENSE"
+    }
+  ],
+  "family_defaults": [
+    {
+      "family_id": "unknown::llama-2",
+      "license_id": "llama2",
+      "license_name": "Llama 2 Community License",
+      "license_url": "https://www.llama.com/llama2/license/"
+    },
+    {
+      "family_id": "unknown::llama-3-1",
+      "license_id": "llama3.1",
+      "license_name": "Llama 3.1 Community License",
+      "license_url": "https://www.llama.com/llama3_1/license/"
+    },
+    {
+      "family_id": "unknown::aya-vision",
+      "license_id": "cc-by-nc-4.0",
+      "license_name": "cc-by-nc-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-nc/4.0/"
+    },
+    {
+      "family_id": "unknown::blip-2",
+      "license_id": "mit",
+      "license_name": "mit",
+      "license_url": "https://opensource.org/licenses/MIT"
+    },
+    {
+      "family_id": "unknown::cambrian-1",
+      "license_id": "apache-2.0",
+      "license_name": "apache-2.0",
+      "license_url": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "family_id": "unknown::command-r",
+      "license_id": "cc-by-nc-4.0",
+      "license_name": "cc-by-nc-4.0",
+      "license_url": "https://creativecommons.org/licenses/by-nc/4.0/"
+    },
+    {
+      "family_id": "unknown::deepseek-vl2",
+      "license_id": "other",
+      "license_name": "deepseek",
+      "license_url": "https://huggingface.co/deepseek-ai/deepseek-vl2"
+    },
+    {
+      "family_id": "deepseek::deepseek-r1",
+      "license_id": "mit",
+      "license_name": "mit",
+      "license_url": "https://huggingface.co/deepseek-ai/DeepSeek-R1/blob/main/LICENSE"
+    },
+    {
+      "family_id": "deepseek::deepseek-v3",
+      "license_id": "mit",
+      "license_name": "mit",
+      "license_url": "https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/LICENSE-MODEL"
+    },
+    {
+      "family_id": "google::gemma",
+      "license_id": "gemma",
+      "license_name": "gemma",
+      "license_url": "https://ai.google.dev/gemma/terms"
+    },
+    {
+      "family_id": "unknown::granite-3-0",
+      "license_id": "apache-2.0",
+      "license_name": "apache-2.0",
+      "license_url": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "family_id": "unknown::granite-3-1",
+      "license_id": "apache-2.0",
+      "license_name": "apache-2.0",
+      "license_url": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "family_id": "unknown::instructblip-t5",
+      "license_id": "mit",
+      "license_name": "mit",
+      "license_url": "https://opensource.org/licenses/MIT"
+    },
+    {
+      "family_id": "unknown::internvl-chat",
+      "license_id": "mit",
+      "license_name": "mit",
+      "license_url": "https://opensource.org/licenses/MIT"
+    },
+    {
+      "family_id": "unknown::internvl2-5",
+      "license_id": "mit",
+      "license_name": "mit",
+      "license_url": "https://opensource.org/licenses/MIT"
+    },
+    {
+      "family_id": "unknown::jamba-1-5",
+      "license_id": "other",
+      "license_name": "jamba-open-model-license",
+      "license_url": "https://huggingface.co/ai21labs/AI21-Jamba-Mini-1.5/blob/main/LICENSE.txt"
+    },
+    {
+      "family_id": "meta::llama-4",
+      "license_id": "other",
+      "license_name": "llama4",
+      "license_url": "https://www.llama.com/llama4/license/"
+    },
+    {
+      "family_id": "unknown::llama-4",
+      "license_id": "other",
+      "license_name": "llama4",
+      "license_url": "https://www.llama.com/llama4/license/"
+    },
+    {
+      "family_id": "nex-agi::deepseek-v3",
+      "license_id": "apache-2.0",
+      "license_name": "apache-2.0",
+      "license_url": "https://huggingface.co/nex-agi/DeepSeek-V3.1-Nex-N1"
+    },
+    {
+      "family_id": "unknown::mimo-vl",
+      "license_id": "mit",
+      "license_name": "mit",
+      "license_url": "https://opensource.org/licenses/MIT"
+    },
+    {
+      "family_id": "unknown::olmo-7b",
+      "license_id": "apache-2.0",
+      "license_name": "apache-2.0",
+      "license_url": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "family_id": "unknown::openchat-3-5",
+      "license_id": "apache-2.0",
+      "license_name": "apache-2.0",
+      "license_url": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "family_id": "openai::gpt-oss-120b",
+      "license_id": "apache-2.0",
+      "license_name": "apache-2.0",
+      "license_url": "https://huggingface.co/openai/gpt-oss-120b/blob/main/LICENSE"
+    },
+    {
+      "family_id": "unknown::qianfan-vl",
+      "license_id": "other",
+      "license_url": "https://huggingface.co/baidu/Qianfan-VL-8B"
+    },
+    {
+      "family_id": "unknown::deepseek-r1",
+      "license_id": "mit",
+      "license_name": "mit",
+      "license_url": "https://huggingface.co/deepseek-ai/DeepSeek-R1/blob/main/LICENSE"
+    },
+    {
+      "family_id": "unknown::deepseek-v3",
+      "license_id": "mit",
+      "license_name": "mit",
+      "license_url": "https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/LICENSE-MODEL"
+    },
+    {
+      "family_id": "kimi::kimi-k2",
+      "license_id": "other",
+      "license_name": "modified-mit",
+      "license_url": "https://huggingface.co/moonshotai/Kimi-K2-Instruct-0905"
+    },
+    {
+      "family_id": "unknown::yi-1-5",
+      "license_id": "apache-2.0",
+      "license_name": "apache-2.0",
+      "license_url": "https://www.apache.org/licenses/LICENSE-2.0"
+    },
+    {
+      "family_id": "unknown::yi-vl",
+      "license_id": "apache-2.0",
+      "license_name": "yi-license",
+      "license_url": "https://huggingface.co/01-ai/Yi-VL-34B"
+    },
+    {
+      "family_id": "unknown::zephyr-7b",
+      "license_id": "mit",
+      "license_name": "mit",
+      "license_url": "https://opensource.org/licenses/MIT"
+    },
+    {
+      "family_id": "z-ai::glm-4-7",
+      "license_id": "mit",
+      "license_name": "mit",
+      "license_url": "https://huggingface.co/zai-org/GLM-4.7"
+    }
+  ],
+  "provider_type_defaults": [
+    {
+      "provider": "OpenAI",
+      "type": "proprietary",
+      "license_id": "proprietary",
+      "license_name": "Proprietary",
+      "license_url": "https://openai.com/policies/services-agreement/"
+    },
+    {
+      "provider": "Anthropic",
+      "type": "proprietary",
+      "license_id": "proprietary",
+      "license_name": "Proprietary",
+      "license_url": "https://www.anthropic.com/legal/commercial-terms"
+    },
+    {
+      "provider": "Google",
+      "type": "proprietary",
+      "license_id": "proprietary",
+      "license_name": "Proprietary",
+      "license_url": "https://ai.google.dev/gemini-api/terms"
+    },
+    {
+      "provider": "xAI",
+      "type": "proprietary",
+      "license_id": "proprietary",
+      "license_name": "Proprietary",
+      "license_url": "https://x.ai/legal/terms-of-service-enterprise/"
+    },
+    {
+      "provider": "Moonshot",
+      "type": "proprietary",
+      "license_id": "proprietary",
+      "license_name": "Proprietary",
+      "license_url": "https://platform.moonshot.ai/docs/agreement/modeluse.en-US"
+    },
+    {
+      "provider": "Moonshot AI",
+      "type": "proprietary",
+      "license_id": "proprietary",
+      "license_name": "Proprietary",
+      "license_url": "https://platform.moonshot.ai/docs/agreement/modeluse.en-US"
+    },
+    {
+      "provider": "Kimi",
+      "type": "proprietary",
+      "license_id": "proprietary",
+      "license_name": "Proprietary",
+      "license_url": "https://platform.moonshot.ai/docs/agreement/modeluse.en-US"
+    },
+    {
+      "provider": "DeepSeek",
+      "type": "proprietary",
+      "license_id": "proprietary",
+      "license_name": "Proprietary",
+      "license_url": "https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html"
+    },
+    {
+      "provider": "deepseek",
+      "type": "proprietary",
+      "license_id": "proprietary",
+      "license_name": "Proprietary",
+      "license_url": "https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html"
+    },
+    {
+      "provider": "Alibaba",
+      "type": "proprietary",
+      "license_id": "proprietary",
+      "license_name": "Proprietary",
+      "license_url": "https://www.alibabacloud.com/help/en/model-studio/support/read-and-agree-to-the-terms-of-service"
+    },
+    {
+      "provider": "Qwen",
+      "type": "proprietary",
+      "license_id": "proprietary",
+      "license_name": "Proprietary",
+      "license_url": "https://www.alibabacloud.com/help/en/model-studio/support/read-and-agree-to-the-terms-of-service"
+    },
+    {
+      "provider": "Z.ai",
+      "type": "proprietary",
+      "license_id": "proprietary",
+      "license_name": "Proprietary",
+      "license_url": "https://docs.z.ai/legal-agreement/terms-of-use"
+    }
+  ]
+}
