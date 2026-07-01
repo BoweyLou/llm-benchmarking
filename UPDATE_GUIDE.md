@@ -49,6 +49,11 @@ python -m backend list-models --format jsonl --output output/model-metadata.json
 - Hugging Face model-card metadata when `model-card-sync` is run
 - update history, source-run detail, and audit output
 
+OpenRouter market/ranking pages are optional enrichment sources. If their page
+shape changes and expected payloads such as `rankingData` are absent, the update
+log records a non-fatal `openrouter_market` warning while unrelated benchmark
+ingestion can still complete.
+
 ## How to Add Manual Metadata
 
 Use the existing backend commands and baselines:

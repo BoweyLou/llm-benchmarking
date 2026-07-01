@@ -63,13 +63,6 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: when the inference-sync CLI fails, the smoke script prints the captured JSON or stderr/stdout diagnostic plus the exit code before exiting nonzero; successful runs keep the current concise JSON report.
   - Validation: a failing destination run such as `PYTHON=python ./scripts/test_inference_sync_smoke.sh azure-ai-foundry` prints the destination failure reason; the AWS/Google subset still exits 0 and prints valid JSON.
 
-- [ ] LBM-013: P1 Harden OpenRouter ranking refresh when `rankingData` is absent
-  - Source: Codex update-script test 2026-07-01.
-  - Problem: `python -m backend update` and selected benchmark updates add scores but exit failed because the OpenRouter rankings page no longer exposes `rankingData`; the market refresh failure is coupled to otherwise successful benchmark ingestion.
-  - Scope: `backend/update_engine.py`, OpenRouter market/ranking parser tests, update-history/audit reporting.
-  - Acceptance: missing or changed OpenRouter ranking-page data is recorded as a visible degraded/skipped source result without failing unrelated benchmark updates; parser coverage includes the current page shape or a graceful fallback when the expected variable is absent.
-  - Validation: temp-database `python -m backend update`; temp-database `python -m backend update --benchmarks terminal_bench swebench_verified`; `python -m backend list-models --output /tmp/llm-benchmarking-models.json`; targeted parser tests for missing `rankingData`.
-
 - [ ] LBM-014: P2 Treat Azure pricing 429 as a retryable smoke-test skip
   - Source: Codex update-script test 2026-07-01.
   - Problem: Azure AI Foundry public pricing returned HTTP 429 during `inference-sync`, causing the all-destination smoke script to fail even though AWS Bedrock pricing-only and Google Vertex published-endpoints fallbacks completed.
@@ -110,3 +103,11 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: scripts honor an explicit `PYTHON` override and otherwise use the active environment interpreter; dependency/import failures identify the interpreter path and next setup command; README examples match the script behavior.
   - Validation: `PYTHON=python ./scripts/test_inference_suite.sh`; `PYTHON=python ./scripts/test_inference_sync_smoke.sh aws-bedrock google-vertex-ai`; README contributor command copy/paste check.
   - Completed: 2026-07-01. Inference scripts now use `PYTHON=${PYTHON:-python}` and preflight core project dependencies with the resolved interpreter path in failure output.
+
+- [x] LBM-013: P1 Harden OpenRouter ranking refresh when `rankingData` is absent
+  - Source: Codex update-script test 2026-07-01.
+  - Problem: `python -m backend update` and selected benchmark updates add scores but exit failed because the OpenRouter rankings page no longer exposes `rankingData`; the market refresh failure is coupled to otherwise successful benchmark ingestion.
+  - Scope: `backend/update_engine.py`, OpenRouter market/ranking parser tests, update-history/audit reporting.
+  - Acceptance: missing or changed OpenRouter ranking-page data is recorded as a visible degraded/skipped source result without failing unrelated benchmark updates; parser coverage includes the current page shape or a graceful fallback when the expected variable is absent.
+  - Validation: temp-database `python -m backend update`; temp-database `python -m backend update --benchmarks terminal_bench swebench_verified`; `python -m backend list-models --output /tmp/llm-benchmarking-models.json`; targeted parser tests for missing `rankingData`.
+  - Completed: 2026-07-01. Missing OpenRouter ranking payloads now record nonfatal `openrouter_market` warnings, full and selected temp updates complete, and list export wrote 826 models.

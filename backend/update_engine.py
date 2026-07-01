@@ -107,6 +107,12 @@ VALID_RECOMMENDATION_STATUSES = {
     RECOMMENDATION_STATUS_NOT_RECOMMENDED,
     RECOMMENDATION_STATUS_DISCOURAGED,
 }
+
+
+class OptionalSourceUnavailable(RuntimeError):
+    """Raised when an optional enrichment source is unavailable or has changed shape."""
+
+
 SOURCE_STEP_LABEL_OVERRIDES = {
     "ailuminate": "AiLuminate",
     "chatbot_arena": "Chatbot Arena",
@@ -2344,6 +2350,16 @@ def _run_update_job(
             _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
             try:
                 _refresh_openrouter_market_signals()
+            except OptionalSourceUnavailable as exc:
+                errors.append(
+                    {
+                        "benchmark_id": "",
+                        "source_id": "openrouter_market",
+                        "error_message": str(exc),
+                        "severity": "warning",
+                        "nonfatal": True,
+                    }
+                )
             except Exception as exc:
                 errors.append(
                     {
@@ -2394,7 +2410,7 @@ def _run_update_job(
         return
 
     final_status = "completed"
-    if errors or (audit_result is not None and audit_result.get("status") == "failed"):
+    if _has_fatal_update_errors(errors) or (audit_result is not None and audit_result.get("status") == "failed"):
         final_status = "failed"
     _finalize_update_log(
         log_id,
@@ -2443,6 +2459,10 @@ def _finalize_update_log(
             .where(update_log_table.c.id == log_id)
             .values(**values)
         )
+
+
+def _has_fatal_update_errors(errors: Iterable[dict[str, Any]]) -> bool:
+    return any(not bool(error.get("nonfatal")) for error in errors)
 
 
 def _create_update_log(triggered_by: str, step_plan: list[dict[str, Any]] | None = None) -> int:
@@ -3467,31 +3487,37 @@ def _fetch_openrouter_models() -> list[dict[str, Any]]:
 
 
 def _fetch_openrouter_global_rankings() -> list[dict[str, Any]]:
-    payloads = _fetch_openrouter_flight_payloads(OPENROUTER_RANKINGS_URL)
+    try:
+        payloads = _fetch_openrouter_flight_payloads(OPENROUTER_RANKINGS_URL)
+    except ValueError as exc:
+        raise OptionalSourceUnavailable(str(exc)) from exc
     ranking_payload = _find_openrouter_payload(
         payloads,
         lambda item: isinstance(item.get("rankingData"), list) and item["rankingData"],
     )
     if ranking_payload is None:
-        raise ValueError("OpenRouter rankings page did not expose rankingData.")
+        raise OptionalSourceUnavailable("OpenRouter rankings page did not expose rankingData.")
     ranking_data = ranking_payload.get("rankingData")
     if not isinstance(ranking_data, list):
-        raise ValueError("OpenRouter rankings page returned invalid rankingData.")
+        raise OptionalSourceUnavailable("OpenRouter rankings page returned invalid rankingData.")
     return [item for item in ranking_data if isinstance(item, dict)]
 
 
 def _fetch_openrouter_programming_rankings() -> list[dict[str, Any]]:
-    payloads = _fetch_openrouter_flight_payloads(OPENROUTER_PROGRAMMING_COLLECTION_URL)
+    try:
+        payloads = _fetch_openrouter_flight_payloads(OPENROUTER_PROGRAMMING_COLLECTION_URL)
+    except ValueError as exc:
+        raise OptionalSourceUnavailable(str(exc)) from exc
     categories_payload = _find_openrouter_payload(
         payloads,
         lambda item: isinstance(item.get("categories"), dict) and item["categories"],
     )
     if categories_payload is None:
-        raise ValueError("OpenRouter programming collection did not expose categories.")
+        raise OptionalSourceUnavailable("OpenRouter programming collection did not expose categories.")
 
     categories = categories_payload.get("categories")
     if not isinstance(categories, dict):
-        raise ValueError("OpenRouter programming collection returned invalid categories.")
+        raise OptionalSourceUnavailable("OpenRouter programming collection returned invalid categories.")
 
     entries: list[dict[str, Any]] = []
     for model_slug, model_categories in categories.items():

@@ -961,6 +961,47 @@ class RankingTests(unittest.TestCase):
 
         self.assertEqual(len(snapshots), 4)
 
+    def test_fetch_openrouter_global_rankings_reports_missing_ranking_data_as_optional(self) -> None:
+        with patch.object(update_engine, "_fetch_openrouter_flight_payloads", return_value=[{"props": {"page": "rankings"}}]):
+            with self.assertRaises(update_engine.OptionalSourceUnavailable) as context:
+                update_engine._fetch_openrouter_global_rankings()
+
+        self.assertIn("rankingData", str(context.exception))
+
+    def test_update_completes_with_nonfatal_openrouter_market_warning(self) -> None:
+        audit_result = {
+            "status": "passed",
+            "findings": [],
+            "blocker_count": 0,
+            "warning_count": 0,
+            "info_count": 0,
+        }
+
+        with (
+            patch.object(update_engine, "_refresh_openrouter_model_metadata"),
+            patch.object(update_engine, "_refresh_model_card_metadata"),
+            patch.object(update_engine, "_refresh_model_license_metadata"),
+            patch.object(
+                update_engine,
+                "_refresh_openrouter_market_signals",
+                side_effect=update_engine.OptionalSourceUnavailable(
+                    "OpenRouter rankings page did not expose rankingData."
+                ),
+            ),
+            patch.object(update_engine, "run_audit", return_value=audit_result),
+        ):
+            log = update_engine.run_update_now(benchmarks=["does-not-exist"], triggered_by="cli")
+
+        self.assertEqual(log["status"], "completed")
+        self.assertEqual(log["scores_added"], 0)
+        self.assertEqual(log["scores_updated"], 0)
+        self.assertEqual(len(log["errors"]), 1)
+        warning = log["errors"][0]
+        self.assertEqual(warning["source_id"], "openrouter_market")
+        self.assertEqual(warning["severity"], "warning")
+        self.assertTrue(warning["nonfatal"])
+        self.assertIn("rankingData", warning["error_message"])
+
     def test_refresh_openrouter_model_metadata_persists_created_timestamp_and_alias_match(self) -> None:
         self.add_model("nova-pro", "Nova Pro", provider="Amazon")
 
