@@ -10,13 +10,22 @@ from sqlalchemy import select, update
 
 from backend import audit_engine
 from backend import update_engine
-from backend.database import fetch_all, fetch_one, get_connection, get_engine, init_db, scores as scores_table
+from backend.database import (
+    benchmarks as benchmarks_table,
+    fetch_all,
+    fetch_one,
+    get_connection,
+    get_engine,
+    init_db,
+    scores as scores_table,
+)
 from backend.seed_data import seed_reference_data
 from backend.sources.artificial_analysis import ArtificialAnalysisAdapter
 from backend.sources.base import RawSourceRecord, SourceFetchResult
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
 from backend.sources.ifeval import IfevalAdapter
 from backend.sources.swebench import SwebenchAdapter
+from backend.sources.vectara_hallucination import VectaraHallucinationAdapter
 
 FUTURE_COLLECTED_AT = "2099-01-01T00:00:00Z"
 
@@ -244,6 +253,66 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(raw_rows[0]["normalized_model_id"], "gpt-5-4")
         self.assertEqual(raw_rows[0]["source_type"], "secondary")
         self.assertEqual(raw_rows[0]["verified"], 0)
+
+    def test_vectara_spot_check_persists_companion_metrics(self) -> None:
+        adapter = VectaraHallucinationAdapter()
+        raw_record = RawSourceRecord(
+            source_id=adapter.source_id,
+            benchmark_id="rag_groundedness",
+            raw_model_name="Claude Opus 4.6",
+            raw_value="98.2",
+            source_url=adapter.source_url,
+            collected_at=FUTURE_COLLECTED_AT,
+            raw_model_key="Claude Opus 4.6",
+            payload={
+                "table_row": "| Claude Opus 4.6 | 1.8% | 98.2% | 94.3% | 71 |",
+            },
+            metadata={
+                "rank": 1,
+                "hallucination_rate": 1.8,
+                "factual_consistency_rate": 98.2,
+                "answer_rate": 94.3,
+                "average_summary_length_words": 71.0,
+            },
+        )
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, [raw_record])
+
+        candidate_values = {candidate.benchmark_id: candidate.value for candidate in candidates}
+        self.assertEqual(
+            candidate_values,
+            {
+                "rag_groundedness": 98.2,
+                "rag_hallucination_rate": 1.8,
+                "rag_answer_rate": 94.3,
+            },
+        )
+
+        groundedness = self._latest_score("claude-opus-4-6", "rag_groundedness")
+        hallucination = self._latest_score("claude-opus-4-6", "rag_hallucination_rate")
+        answer = self._latest_score("claude-opus-4-6", "rag_answer_rate")
+
+        self.assertAlmostEqual(float(groundedness["value"]), 98.2)
+        self.assertAlmostEqual(float(hallucination["value"]), 1.8)
+        self.assertAlmostEqual(float(answer["value"]), 94.3)
+        self.assertIn("Lower is better", str(hallucination["notes"]))
+        self.assertIn("Coverage signal", str(answer["notes"]))
+
+        with get_connection(self.engine) as conn:
+            benchmark_rows = fetch_all(
+                conn,
+                select(benchmarks_table.c.id, benchmarks_table.c.higher_is_better).where(
+                    benchmarks_table.c.id.in_(["rag_hallucination_rate", "rag_answer_rate"])
+                ),
+            )
+        direction_by_id = {row["id"]: row["higher_is_better"] for row in benchmark_rows}
+        self.assertEqual(direction_by_id["rag_hallucination_rate"], 0)
+        self.assertEqual(direction_by_id["rag_answer_rate"], 1)
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 1)
+        self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
+        self.assertEqual(raw_rows[0]["resolution_status"], "resolved")
 
     def test_chatbot_arena_same_run_duplicate_resolution_keeps_single_best_score(self) -> None:
         adapter = ChatbotArenaAdapter()

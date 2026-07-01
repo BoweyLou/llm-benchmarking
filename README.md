@@ -124,6 +124,13 @@ Benchmark adapters:
 - FaithJudge
 - Vectara Hallucination
 
+The Vectara hallucination adapter records factual consistency, hallucination
+rate, and answer rate from the same public leaderboard row. Factual consistency
+remains the existing `rag_groundedness` benchmark, hallucination rate is stored
+as lower-is-better `rag_hallucination_rate`, and answer rate is stored as
+`rag_answer_rate`. These remain grounded-summarization faithfulness and coverage
+signals, not retrieval relevance scores.
+
 Metadata and catalog enrichments:
 
 - OpenRouter models and market/ranking signals

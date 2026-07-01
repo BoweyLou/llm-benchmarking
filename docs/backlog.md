@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-017: P2 Add Vectara hallucination companion metrics
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: the Vectara adapter already sees hallucination rate, answer rate, factual consistency, and average summary length, but only factual consistency became a catalog score.
+  - Scope: `backend/sources/vectara_hallucination.py`, benchmark seed rows, score normalization, docs/tests.
+  - Acceptance: preserve the existing factual-consistency benchmark while adding explicit hallucination-rate and answer-rate evidence with clear lower-is-better semantics where applicable; do not treat grounded summarization as retrieval relevance.
+  - Validation: fixture-backed Vectara normalization tests; selected temp-database update/export; source spot-check suite; docs and kit readiness checks.
+  - Completed: 2026-07-01. The adapter now emits `rag_groundedness`, lower-is-better `rag_hallucination_rate`, and `rag_answer_rate` from the same Vectara raw row while keeping average summary length as metadata.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.
