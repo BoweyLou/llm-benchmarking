@@ -8,6 +8,7 @@ from .faithjudge import FaithJudgeAdapter
 from .ifeval import IfevalAdapter
 from .mmmu import MmmuAdapter
 from .swebench import SwebenchAdapter
+from .taubench import TaubenchAdapter
 from .terminal_bench import TerminalBenchAdapter
 from .vectara_hallucination import VectaraHallucinationAdapter
 
@@ -22,6 +23,7 @@ def get_phase_one_adapters():
         IfevalAdapter(),
         MmmuAdapter(),
         SwebenchAdapter(),
+        TaubenchAdapter(),
         VectaraHallucinationAdapter(),
     ]
 
@@ -47,6 +49,7 @@ __all__ = [
     "FaithJudgeAdapter",
     "IfevalAdapter",
     "MmmuAdapter",
+    "TaubenchAdapter",
     "TerminalBenchAdapter",
     "SwebenchAdapter",
     "VectaraHallucinationAdapter",

@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-030: P2 Add tau-bench text and voice submission adapter
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: the ingest process did not use Sierra's official tau-bench submission feed, leaving customer-support and agentic task evidence out of model score history.
+  - Scope: `backend/sources/taubench.py`, adapter registration, benchmark seed rows, raw metadata persistence, docs, and source spot checks.
+  - Acceptance: ingest current text and voice submissions from the official manifest; persist per-domain pass^1 scores and complete-domain means for standard single-model submissions; preserve custom, cascaded, and partial-system submissions as raw evidence without inventing model scores; label normalized scores as secondary agent-system evidence.
+  - Validation: `python -m unittest backend.test_source_spot_checks`; temp-database `python -m backend update --benchmarks taubench_text_mean taubench_text_airline taubench_text_retail taubench_text_telecom taubench_text_banking_knowledge taubench_voice_mean taubench_voice_airline taubench_voice_retail taubench_voice_telecom`; `make docs-check`.
+  - Completed: 2026-07-01. The adapter imports the official current text and voice submission manifest into nine benchmark IDs while keeping custom/cascaded submissions raw-only.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.

@@ -17,6 +17,7 @@ from backend.sources.base import RawSourceRecord, SourceFetchResult
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
 from backend.sources.ifeval import IfevalAdapter
 from backend.sources.swebench import SwebenchAdapter
+from backend.sources.taubench import TaubenchAdapter
 
 FUTURE_COLLECTED_AT = "2099-01-01T00:00:00Z"
 
@@ -202,6 +203,140 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
         self.assertEqual(raw_rows[-1]["normalized_model_id"], "gpt-5-4")
         self.assertTrue(all(row["source_type"] == "secondary" for row in raw_rows))
+
+    def test_taubench_spot_check_persists_standard_scores_and_skips_custom_systems(self) -> None:
+        adapter = TaubenchAdapter()
+        complete_metrics = {
+            "airline": {
+                "domain": "airline",
+                "benchmark_id": "taubench_text_airline",
+                "label": "Airline",
+                "pass_1": 84.0,
+                "pass_2": 77.67,
+                "pass_3": 73.5,
+                "pass_4": 70.0,
+                "cost": 0.39919,
+                "retrieval_config": None,
+            },
+            "retail": {
+                "domain": "retail",
+                "benchmark_id": "taubench_text_retail",
+                "label": "Retail",
+                "pass_1": 79.61,
+                "pass_2": 67.4,
+                "pass_3": 58.77,
+                "pass_4": 51.75,
+                "cost": 0.38695,
+                "retrieval_config": None,
+            },
+            "telecom": {
+                "domain": "telecom",
+                "benchmark_id": "taubench_text_telecom",
+                "label": "Telecom",
+                "pass_1": 92.32,
+                "pass_2": 86.11,
+                "pass_3": 81.36,
+                "pass_4": 78.07,
+                "cost": 0.71992,
+                "retrieval_config": None,
+            },
+            "banking_knowledge": {
+                "domain": "banking_knowledge",
+                "benchmark_id": "taubench_text_banking_knowledge",
+                "label": "Banking knowledge",
+                "pass_1": 21.39,
+                "pass_2": 13.4,
+                "pass_3": 10.31,
+                "pass_4": 8.25,
+                "cost": None,
+                "retrieval_config": "alltools",
+            },
+        }
+        raw_records = [
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="taubench_text_mean",
+                raw_model_name="Claude Opus 4.6",
+                raw_value=json.dumps(complete_metrics, ensure_ascii=True, sort_keys=True),
+                source_url="https://sierra-tau-bench-public.s3.amazonaws.com/submissions/claude-opus-4-6_sierra_2026-05-05/submission.json",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="Claude Opus 4.6",
+                payload={"model_name": "Claude Opus 4.6"},
+                metadata={
+                    "submission_id": "claude-opus-4-6_sierra_2026-05-05",
+                    "modality": "text",
+                    "submission_type": "standard",
+                    "verified": True,
+                    "single_model_submission": True,
+                    "aggregate_submission": False,
+                    "self_reported": True,
+                    "agent_system_evidence": True,
+                    "complete_domain_set": True,
+                    "available_domain_count": 4,
+                    "expected_domain_count": 4,
+                    "domain_metrics": complete_metrics,
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="taubench_text_banking_knowledge",
+                raw_model_name="Distyl ButtonAgent",
+                raw_value=json.dumps(
+                    {"banking_knowledge": complete_metrics["banking_knowledge"]},
+                    ensure_ascii=True,
+                    sort_keys=True,
+                ),
+                source_url="https://sierra-tau-bench-public.s3.amazonaws.com/submissions/distyl-buttonagent_distyl_2026-03-25/submission.json",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="Distyl ButtonAgent",
+                payload={"model_name": "Distyl ButtonAgent"},
+                metadata={
+                    "submission_id": "distyl-buttonagent_distyl_2026-03-25",
+                    "modality": "text",
+                    "submission_type": "custom",
+                    "verified": True,
+                    "single_model_submission": False,
+                    "aggregate_submission": True,
+                    "self_reported": True,
+                    "agent_system_evidence": True,
+                    "complete_domain_set": False,
+                    "available_domain_count": 1,
+                    "expected_domain_count": 4,
+                    "domain_metrics": {"banking_knowledge": complete_metrics["banking_knowledge"]},
+                },
+            ),
+        ]
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, raw_records)
+
+        candidate_values = {candidate.benchmark_id: round(candidate.value, 3) for candidate in candidates}
+        self.assertEqual(
+            candidate_values,
+            {
+                "taubench_text_airline": 84.0,
+                "taubench_text_retail": 79.61,
+                "taubench_text_telecom": 92.32,
+                "taubench_text_banking_knowledge": 21.39,
+                "taubench_text_mean": 69.33,
+            },
+        )
+
+        mean = self._latest_score("claude-opus-4-6", "taubench_text_mean")
+        banking = self._latest_score("claude-opus-4-6", "taubench_text_banking_knowledge")
+        self.assertAlmostEqual(float(mean["value"]), 69.33)
+        self.assertAlmostEqual(float(banking["value"]), 21.39)
+        self.assertEqual(mean["source_type"], "secondary")
+        self.assertEqual(mean["verified"], 1)
+        self.assertIn("complete text domain set", str(mean["notes"]))
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 2)
+        self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
+        self.assertEqual(raw_rows[0]["source_type"], "secondary")
+        self.assertEqual(raw_rows[0]["resolution_status"], "resolved")
+        self.assertIsNone(raw_rows[1]["normalized_model_id"])
+        self.assertEqual(raw_rows[1]["source_type"], "secondary")
+        self.assertEqual(raw_rows[1]["resolution_status"], "skipped_aggregate")
 
     def test_ifeval_spot_check_preserves_secondary_trust_labels(self) -> None:
         adapter = IfevalAdapter()

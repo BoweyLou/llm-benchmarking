@@ -120,6 +120,7 @@ Benchmark adapters:
 - IFEval
 - MMMU
 - SWE-bench Verified
+- tau-bench text and voice submissions
 - Terminal-Bench
 - FaithJudge
 - Vectara Hallucination
