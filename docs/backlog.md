@@ -7,13 +7,6 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Open
 
-- [ ] LBM-003: P2 Make update execution single-flight and crash-aware
-  - Source: Codex repo review 2026-07-01.
-  - Problem: `/api/update` starts daemon-thread update work; concurrent requests can queue ambiguous running jobs, and process exit can abandon work mid-run.
-  - Scope: `backend/update_engine.py`, `backend/main.py`, update history tests.
-  - Acceptance: only one update can run at a time; duplicate update requests return the active log or a clear conflict; interrupted updates are recoverable and reported with a precise status.
-  - Validation: tests cover concurrent scheduling, active-log response, and interrupted update recovery; targeted backend unittest suite.
-
 - [ ] LBM-004: P2 Normalize Python test entrypoints and package discovery
   - Source: Codex repo review 2026-07-01.
   - Problem: targeted `python -m unittest ...` passes, but `python -m unittest discover backend` imports `backend/sources` as top-level `sources`; inference scripts hard-code `python3`, which resolves to an interpreter without deps on this machine.
@@ -111,3 +104,11 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: missing or changed OpenRouter ranking-page data is recorded as a visible degraded/skipped source result without failing unrelated benchmark updates; parser coverage includes the current page shape or a graceful fallback when the expected variable is absent.
   - Validation: temp-database `python -m backend update`; temp-database `python -m backend update --benchmarks terminal_bench swebench_verified`; `python -m backend list-models --output /tmp/llm-benchmarking-models.json`; targeted parser tests for missing `rankingData`.
   - Completed: 2026-07-01. Missing OpenRouter ranking payloads now record nonfatal `openrouter_market` warnings, full and selected temp updates complete, and list export wrote 826 models.
+
+- [x] LBM-003: P2 Make update execution single-flight and crash-aware
+  - Source: Codex repo review 2026-07-01.
+  - Problem: `/api/update` starts daemon-thread update work; concurrent requests can queue ambiguous running jobs, and process exit can abandon work mid-run.
+  - Scope: `backend/update_engine.py`, `backend/main.py`, update history tests.
+  - Acceptance: only one update can run at a time; duplicate update requests return the active log or a clear conflict; interrupted updates are recoverable and reported with a precise status.
+  - Validation: tests cover concurrent scheduling, active-log response, and interrupted update recovery; targeted backend unittest suite.
+  - Completed: 2026-07-01. Update scheduling now reuses an existing running log id, starts only one worker, and recovery marks interrupted running logs failed with a precise error.

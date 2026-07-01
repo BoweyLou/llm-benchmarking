@@ -1474,6 +1474,42 @@ January 2026
         self.assertEqual(log["progress_steps"][1]["status"], "running")
         self.assertEqual(log["progress_steps"][2]["status"], "pending")
 
+    def test_schedule_update_reuses_existing_running_log(self) -> None:
+        self.add_update_log(902, status="running", completed_at=None)
+
+        with patch.object(update_engine.threading, "Thread") as thread_cls:
+            log_id = update_engine.schedule_update(benchmarks=["terminal_bench"], triggered_by="api")
+
+        self.assertEqual(log_id, 902)
+        thread_cls.assert_not_called()
+
+    def test_schedule_update_creates_single_active_log_for_duplicate_requests(self) -> None:
+        with patch.object(update_engine.threading, "Thread") as thread_cls:
+            first_log_id = update_engine.schedule_update(benchmarks=["does-not-exist"], triggered_by="api")
+            second_log_id = update_engine.schedule_update(benchmarks=["does-not-exist"], triggered_by="api")
+
+        self.assertEqual(first_log_id, second_log_id)
+        self.assertEqual(thread_cls.call_count, 1)
+        thread_cls.return_value.start.assert_called_once()
+        log = update_engine.get_update_log(first_log_id)
+        self.assertIsNotNone(log)
+        assert log is not None
+        self.assertEqual(log["status"], "running")
+
+    def test_recover_interrupted_updates_marks_running_logs_failed(self) -> None:
+        self.add_update_log(903, status="running", completed_at=None)
+
+        update_engine._recover_interrupted_updates()
+
+        log = update_engine.get_update_log(903)
+        self.assertIsNotNone(log)
+        assert log is not None
+        self.assertEqual(log["status"], "failed")
+        self.assertIsNotNone(log["completed_at"])
+        self.assertEqual(len(log["errors"]), 1)
+        self.assertEqual(log["errors"][0]["source_id"], "update")
+        self.assertIn("interrupted", log["errors"][0]["error_message"].lower())
+
     def test_infer_provider_prefers_model_name_hint_over_submission_org(self) -> None:
         inferred = update_engine._infer_provider(
             {

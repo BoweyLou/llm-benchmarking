@@ -76,6 +76,7 @@ from .sources.base import BaseSourceAdapter, RawSourceRecord, ScoreCandidate, So
 
 ENGINE = get_engine()
 UPDATE_LOCK = threading.Lock()
+UPDATE_SCHEDULE_LOCK = threading.Lock()
 BOOTSTRAP_LOCK = threading.Lock()
 BOOTSTRAPPED = False
 HTTP_HEADERS = {
@@ -2020,14 +2021,19 @@ def schedule_update(benchmarks: Iterable[str] | None = None, triggered_by: str =
     adapters = _selected_adapters(selected_benchmarks or None)
     step_plan = _build_update_plan(adapters)
 
-    log_id = _create_update_log(triggered_by, step_plan)
+    with UPDATE_SCHEDULE_LOCK:
+        active_log_id = _find_running_update_log_id()
+        if active_log_id is not None:
+            return active_log_id
 
-    worker = threading.Thread(
-        target=_run_update_job,
-        args=(log_id, adapters, step_plan, triggered_by),
-        daemon=True,
-    )
-    worker.start()
+        log_id = _create_update_log(triggered_by, step_plan)
+
+        worker = threading.Thread(
+            target=_run_update_job,
+            args=(log_id, adapters, step_plan, triggered_by),
+            daemon=True,
+        )
+        worker.start()
     return log_id
 
 
@@ -2036,7 +2042,14 @@ def run_update_sync(benchmarks: Iterable[str] | None = None, triggered_by: str =
     selected_benchmarks = {benchmark_id for benchmark_id in (benchmarks or [])}
     adapters = _selected_adapters(selected_benchmarks or None)
     step_plan = _build_update_plan(adapters)
-    log_id = _create_update_log(triggered_by, step_plan)
+
+    with UPDATE_SCHEDULE_LOCK:
+        active_log_id = _find_running_update_log_id()
+        if active_log_id is not None:
+            return active_log_id
+
+        log_id = _create_update_log(triggered_by, step_plan)
+
     _run_update_job(log_id, adapters, step_plan, triggered_by)
     return log_id
 
@@ -2486,6 +2499,18 @@ def _create_update_log(triggered_by: str, step_plan: list[dict[str, Any]] | None
             )
         )
         return int(result.inserted_primary_key[0])
+
+
+def _find_running_update_log_id() -> int | None:
+    with get_connection(ENGINE) as conn:
+        row = fetch_one(
+            conn,
+            select(update_log_table.c.id)
+            .where(update_log_table.c.status == "running")
+            .order_by(update_log_table.c.started_at.desc(), update_log_table.c.id.desc())
+            .limit(1),
+        )
+    return int(row["id"]) if row is not None else None
 
 
 async def _collect_adapter(adapter: BaseSourceAdapter) -> SourceFetchResult:

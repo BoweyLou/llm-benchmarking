@@ -54,6 +54,11 @@ shape changes and expected payloads such as `rankingData` are absent, the update
 log records a non-fatal `openrouter_market` warning while unrelated benchmark
 ingestion can still complete.
 
+Only one update runs at a time. If an update is already `running`, another CLI
+or API update request returns the active update log id instead of starting a
+second worker. On startup, any update left `running` by a process crash is marked
+`failed` with an interruption error in the update log.
+
 ## How to Add Manual Metadata
 
 Use the existing backend commands and baselines:
