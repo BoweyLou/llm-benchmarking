@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-031: P3 Add direct RAGTruth corpus aggregate adapter
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: the ingest process only used RAGTruth indirectly through FaithJudge, leaving the official RAGTruth held-out corpus aggregates unavailable as raw score history.
+  - Scope: `backend/sources/ragtruth.py`, adapter registration, benchmark seed rows, raw metadata persistence, docs, and source spot checks.
+  - Acceptance: ingest official RAGTruth response/source JSONL artifacts; aggregate the `test` split by model and task; publish overall, summarization, QA, and data-to-text response-level hallucination rates as lower-is-better scores; preserve response counts and hallucination span counts in metadata.
+  - Validation: `python -m unittest backend.test_source_spot_checks`; temp-database `python -m backend update --benchmarks ragtruth_hallucination_rate ragtruth_summary_hallucination_rate ragtruth_qa_hallucination_rate ragtruth_data_to_text_hallucination_rate`; `make docs-check`.
+  - Completed: 2026-07-01. The adapter now imports official RAGTruth test-split corpus aggregates into four lower-is-better benchmark IDs.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.

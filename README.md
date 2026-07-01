@@ -122,6 +122,7 @@ Benchmark adapters:
 - SWE-bench Verified
 - Terminal-Bench
 - FaithJudge
+- RAGTruth
 - Vectara Hallucination
 
 Metadata and catalog enrichments:

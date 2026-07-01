@@ -16,6 +16,7 @@ from backend.sources.artificial_analysis import ArtificialAnalysisAdapter
 from backend.sources.base import RawSourceRecord, SourceFetchResult
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
 from backend.sources.ifeval import IfevalAdapter
+from backend.sources.ragtruth import RagtruthAdapter
 from backend.sources.swebench import SwebenchAdapter
 
 FUTURE_COLLECTED_AT = "2099-01-01T00:00:00Z"
@@ -202,6 +203,89 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
         self.assertEqual(raw_rows[-1]["normalized_model_id"], "gpt-5-4")
         self.assertTrue(all(row["source_type"] == "secondary" for row in raw_rows))
+
+    def test_ragtruth_spot_check_persists_overall_and_task_rates(self) -> None:
+        adapter = RagtruthAdapter()
+        metrics = {
+            "ragtruth_hallucination_rate": {
+                "label": "Overall",
+                "responses": 450,
+                "hallucinated_responses": 42,
+                "hallucination_spans": 73,
+                "hallucination_rate": 9.333333333333334,
+            },
+            "ragtruth_summary_hallucination_rate": {
+                "label": "Summarization",
+                "task_type": "Summary",
+                "responses": 150,
+                "hallucinated_responses": 6,
+                "hallucination_spans": 8,
+                "hallucination_rate": 4.0,
+            },
+            "ragtruth_qa_hallucination_rate": {
+                "label": "Question answering",
+                "task_type": "QA",
+                "responses": 150,
+                "hallucinated_responses": 1,
+                "hallucination_spans": 1,
+                "hallucination_rate": 0.6666666666666666,
+            },
+            "ragtruth_data_to_text_hallucination_rate": {
+                "label": "Data-to-text",
+                "task_type": "Data2txt",
+                "responses": 150,
+                "hallucinated_responses": 35,
+                "hallucination_spans": 64,
+                "hallucination_rate": 23.333333333333332,
+            },
+        }
+        raw_record = RawSourceRecord(
+            source_id=adapter.source_id,
+            benchmark_id="ragtruth_hallucination_rate",
+            raw_model_name="gpt-4-0613",
+            raw_value=json.dumps(metrics, ensure_ascii=True, sort_keys=True),
+            source_url="https://raw.githubusercontent.com/ParticleMedia/RAGTruth/main/dataset/response.jsonl",
+            collected_at=FUTURE_COLLECTED_AT,
+            raw_model_key="gpt-4-0613",
+            payload={"model": "gpt-4-0613", "split": "test", "metrics": metrics},
+            metadata={
+                "dataset_version": "2024-02",
+                "split": "test",
+                "response_url": "https://raw.githubusercontent.com/ParticleMedia/RAGTruth/main/dataset/response.jsonl",
+                "source_info_url": "https://raw.githubusercontent.com/ParticleMedia/RAGTruth/main/dataset/source_info.jsonl",
+                "metrics": metrics,
+                "source_policy": "official_ragtruth_test_split_response_hallucination_rate",
+            },
+        )
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, [raw_record])
+
+        candidate_values = {candidate.benchmark_id: round(candidate.value, 3) for candidate in candidates}
+        self.assertEqual(
+            candidate_values,
+            {
+                "ragtruth_hallucination_rate": 9.333,
+                "ragtruth_summary_hallucination_rate": 4.0,
+                "ragtruth_qa_hallucination_rate": 0.667,
+                "ragtruth_data_to_text_hallucination_rate": 23.333,
+            },
+        )
+
+        overall = self._latest_score("gpt-4-0613", "ragtruth_hallucination_rate")
+        data_to_text = self._latest_score("gpt-4-0613", "ragtruth_data_to_text_hallucination_rate")
+        self.assertAlmostEqual(float(overall["value"]), 9.333333333333334)
+        self.assertAlmostEqual(float(data_to_text["value"]), 23.333333333333332)
+        self.assertEqual(overall["source_type"], "primary")
+        self.assertEqual(overall["verified"], 1)
+        self.assertIn("historical corpus evidence", str(overall["notes"]))
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 1)
+        self.assertEqual(raw_rows[0]["normalized_model_id"], "gpt-4-0613")
+        self.assertEqual(raw_rows[0]["source_type"], "primary")
+        raw_note = json.loads(str(raw_rows[0]["notes"]))
+        self.assertEqual(raw_note["split"], "test")
+        self.assertEqual(raw_note["metrics"]["ragtruth_qa_hallucination_rate"]["responses"], 150)
 
     def test_ifeval_spot_check_preserves_secondary_trust_labels(self) -> None:
         adapter = IfevalAdapter()

@@ -7,6 +7,7 @@ from .epoch_gpqa import EpochGpqaAdapter
 from .faithjudge import FaithJudgeAdapter
 from .ifeval import IfevalAdapter
 from .mmmu import MmmuAdapter
+from .ragtruth import RagtruthAdapter
 from .swebench import SwebenchAdapter
 from .terminal_bench import TerminalBenchAdapter
 from .vectara_hallucination import VectaraHallucinationAdapter
@@ -21,6 +22,7 @@ def get_phase_one_adapters():
         FaithJudgeAdapter(),
         IfevalAdapter(),
         MmmuAdapter(),
+        RagtruthAdapter(),
         SwebenchAdapter(),
         VectaraHallucinationAdapter(),
     ]
@@ -47,6 +49,7 @@ __all__ = [
     "FaithJudgeAdapter",
     "IfevalAdapter",
     "MmmuAdapter",
+    "RagtruthAdapter",
     "TerminalBenchAdapter",
     "SwebenchAdapter",
     "VectaraHallucinationAdapter",
