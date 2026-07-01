@@ -50,6 +50,24 @@ class RankingTests(unittest.TestCase):
         self.engine.dispose()
         self.tempdir.cleanup()
 
+    def test_bootstrap_is_local_only_and_does_not_run_external_refreshes(self) -> None:
+        update_engine.BOOTSTRAPPED = False
+
+        with patch.object(update_engine, "_refresh_openrouter_model_metadata") as openrouter_models, patch.object(
+            update_engine,
+            "_refresh_model_card_metadata",
+        ) as model_cards, patch.object(update_engine, "_refresh_model_license_metadata") as model_licenses, patch.object(
+            update_engine,
+            "_refresh_openrouter_market_signals",
+        ) as openrouter_market:
+            update_engine.bootstrap()
+
+        openrouter_models.assert_not_called()
+        model_cards.assert_not_called()
+        model_licenses.assert_not_called()
+        openrouter_market.assert_not_called()
+        self.assertTrue(update_engine.BOOTSTRAPPED)
+
     def add_model(
         self,
         model_id: str,

@@ -219,6 +219,7 @@ _DISPLAY_TOKEN_MAP = {
 
 
 def bootstrap() -> None:
+    """Initialize and repair local database state without network refreshes."""
     global BOOTSTRAPPED
     if BOOTSTRAPPED:
         return
@@ -234,26 +235,11 @@ def bootstrap() -> None:
         _sync_provider_directory()
         apply_provider_origin_baseline(ENGINE)
         apply_model_curation_baseline(ENGINE)
+        apply_model_license_baseline(ENGINE)
         _migrate_legacy_model_approvals()
         _refresh_model_identity_metadata()
         _canonicalize_model_catalog()
         _refresh_model_identity_metadata()
-        try:
-            _refresh_openrouter_model_metadata()
-            if _repair_submitter_provider_leaks() > 0:
-                _refresh_model_identity_metadata()
-                _canonicalize_model_catalog()
-                _refresh_model_identity_metadata()
-        except Exception:
-            pass
-        try:
-            _refresh_model_license_metadata()
-        except Exception:
-            pass
-        try:
-            _refresh_openrouter_market_signals()
-        except Exception:
-            pass
         BOOTSTRAPPED = True
 
 

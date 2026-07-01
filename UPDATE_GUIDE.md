@@ -9,6 +9,12 @@ source .venv/bin/activate
 python -m backend update
 ```
 
+`python -m backend bootstrap` is local-only: it creates or repairs schema state,
+seeds reference rows, and reapplies tracked baselines. It does not call
+OpenRouter, Hugging Face, cloud pricing APIs, or other external metadata
+services. Run an explicit update or metadata sync command when the list needs a
+network refresh.
+
 To refresh only selected benchmark adapters:
 
 ```bash

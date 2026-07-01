@@ -36,9 +36,9 @@ python -m backend list-models --output output/model-metadata.json
 What those commands do:
 
 - `python -m backend bootstrap`
-  Creates the schema, seeds reference data, applies repo-backed provider-origin and model-curation baselines, and refreshes lightweight metadata such as OpenRouter catalog and market signals.
+  Creates the schema, repairs local runtime state, seeds reference data, and applies repo-backed provider-origin, model-curation, and model-license baselines. It does not call external metadata services.
 - `python -m backend update`
-  Runs the benchmark ingestion/update pipeline and writes update history plus audit results.
+  Runs the benchmark ingestion/update pipeline, refreshes external OpenRouter/model-card/market metadata, and writes update history plus audit results.
 - `python -m backend list-models`
   Prints or exports the complete active model metadata list.
 
@@ -81,7 +81,7 @@ Useful local URLs:
 - Model list API: `http://127.0.0.1:8000/api/models`
 - API docs: `http://127.0.0.1:8000/docs`
 
-The backend bootstraps the schema on startup if needed.
+The backend bootstraps local schema and repo-backed baselines on startup if needed. Startup does not perform network metadata refreshes; use the explicit CLI or API update paths for that work.
 
 ## Current Data Sources
 
@@ -123,7 +123,7 @@ SQLite is the runtime store, but important manual metadata is also kept in track
 - model curation baseline: [backend/model_curation_baseline.json](backend/model_curation_baseline.json)
 - model license baseline: [backend/model_license_baseline.json](backend/model_license_baseline.json)
 
-Those baselines are applied during bootstrap and can be re-exported from the live DB.
+Those baselines are applied during bootstrap and can be re-exported from the live DB. Network-backed metadata refreshes are intentionally kept out of bootstrap so API startup stays local and predictable.
 
 ## CLI Reference
 
