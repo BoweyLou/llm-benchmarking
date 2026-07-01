@@ -56,13 +56,6 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: `AGENTS.md` becomes a shorter route map; detailed rules move to scoped docs or checker-owned config; rule-like bullets have clear provenance/context.
   - Validation: `make agent-docs-lint`; `make docs-check`.
 
-- [ ] LBM-011: P1 Make inference scripts use the active project Python
-  - Source: Codex update-script test 2026-07-01.
-  - Problem: `scripts/test_inference_suite.sh` and `scripts/test_inference_sync_smoke.sh` hard-code `python3`; on this machine that resolves to Homebrew Python 3.14 without project dependencies, while `python` resolves to the dependency-bearing project environment.
-  - Scope: `scripts/test_inference_suite.sh`, `scripts/test_inference_sync_smoke.sh`, README contributor workflow.
-  - Acceptance: scripts honor an explicit `PYTHON` override and otherwise use the active environment interpreter; dependency/import failures identify the interpreter path and next setup command; README examples match the script behavior.
-  - Validation: `PYTHON=python ./scripts/test_inference_suite.sh`; `PYTHON=python ./scripts/test_inference_sync_smoke.sh aws-bedrock google-vertex-ai`; README contributor command copy/paste check.
-
 - [ ] LBM-012: P2 Print captured inference-sync smoke output on failure
   - Source: Codex update-script test 2026-07-01.
   - Problem: `scripts/test_inference_sync_smoke.sh` redirects CLI output to a temp JSON file, but `set -e` exits before printing the captured payload when the CLI returns nonzero.
@@ -109,3 +102,11 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: tracked source/docs/config files are intentionally staged; ignored runtime artifacts remain ignored; an initial baseline commit exists before feature work starts.
   - Validation: `git status --short`; `make docs-check`; `python -m unittest backend.test_api_auth backend.test_catalog_export backend.test_rankings`; `kit start --no-update --json`.
   - Completed: 2026-07-01. Local baseline commits now track source/docs/config files, generated runtime artifacts remain ignored, and kit sees a clean target-installed repo.
+
+- [x] LBM-011: P1 Make inference scripts use the active project Python
+  - Source: Codex update-script test 2026-07-01.
+  - Problem: `scripts/test_inference_suite.sh` and `scripts/test_inference_sync_smoke.sh` hard-code `python3`; on this machine that resolves to Homebrew Python 3.14 without project dependencies, while `python` resolves to the dependency-bearing project environment.
+  - Scope: `scripts/test_inference_suite.sh`, `scripts/test_inference_sync_smoke.sh`, README contributor workflow.
+  - Acceptance: scripts honor an explicit `PYTHON` override and otherwise use the active environment interpreter; dependency/import failures identify the interpreter path and next setup command; README examples match the script behavior.
+  - Validation: `PYTHON=python ./scripts/test_inference_suite.sh`; `PYTHON=python ./scripts/test_inference_sync_smoke.sh aws-bedrock google-vertex-ai`; README contributor command copy/paste check.
+  - Completed: 2026-07-01. Inference scripts now use `PYTHON=${PYTHON:-python}` and preflight core project dependencies with the resolved interpreter path in failure output.
