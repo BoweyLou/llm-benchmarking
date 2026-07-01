@@ -7,7 +7,12 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Open
 
-No open items.
+- [ ] LBM-034: P2 Add authoritative retrieval-model taxonomy and enterprise-default signals
+  - Source: Codex request 2026-07-02 after reviewing embedding/reranker export coverage.
+  - Problem: the catalog now includes embedding and reranking models through MTEB, but downstream users still have to infer "sentence transformers", provider-hosted embeddings, rerankers, TEI-deployable models, and corporate-mainstay retrieval defaults from names, providers, and benchmark IDs.
+  - Scope: authoritative retrieval-source config, model taxonomy/export fields, MTEB enrichment, official provider catalogs for OpenAI/Cohere/Voyage/Jina, official Hugging Face org discovery for Sentence Transformers/BAAI/intfloat/Alibaba-NLP/Jina/Nomic/Snowflake, and deployment-support signals from Hugging Face Text Embeddings Inference where stable.
+  - Acceptance: exported models expose explicit retrieval taxonomy fields such as retrieval role, retrieval family, official/provider-owned status, hosted API availability, self-hostability, TEI support, dimensions/context where available, and an evidence-backed enterprise retrieval default candidate flag with source URL and rationale.
+  - Validation: fixture-backed source tests for provider catalogs and official HF org discovery; export/API tests for new fields; ranking regression proving generator, embedding, and reranker use cases remain separated; `PYTHON=python ./scripts/test_inference_suite.sh`; `make docs-check`; `make version-check` if schema/API output changes.
 
 ## Done
 
