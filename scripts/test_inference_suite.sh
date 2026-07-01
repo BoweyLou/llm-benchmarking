@@ -32,8 +32,4 @@ if missing:
 PY
 
 "$PYTHON_BIN" -m py_compile backend/*.py backend/sources/*.py
-"$PYTHON_BIN" -m unittest \
-  backend.test_inference_catalog \
-  backend.test_inference_sync \
-  backend.test_rankings \
-  backend.test_model_taxonomy
+"$PYTHON_BIN" -m unittest discover -s backend -t .

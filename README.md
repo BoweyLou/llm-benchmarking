@@ -184,14 +184,17 @@ the run instructions above. GET routes remain read-only and unauthenticated.
 Backend checks:
 
 ```bash
-python -m py_compile backend/*.py backend/sources/*.py
-python -m unittest backend.test_catalog_export backend.test_rankings
+PYTHON=python ./scripts/test_inference_suite.sh
 ```
 
-Inference sync checks:
+The suite script compiles backend modules and runs package-aware unittest
+discovery with `python -m unittest discover -s backend -t .`. Do not use
+`python -m unittest discover backend`; that treats `backend/` as the import root
+and imports `backend/sources` as a top-level `sources` package.
+
+Inference sync smoke checks:
 
 ```bash
-PYTHON=python ./scripts/test_inference_suite.sh
 PYTHON=python ./scripts/test_inference_sync_smoke.sh
 ```
 

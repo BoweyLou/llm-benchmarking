@@ -7,13 +7,6 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Open
 
-- [ ] LBM-004: P2 Normalize Python test entrypoints and package discovery
-  - Source: Codex repo review 2026-07-01.
-  - Problem: targeted `python -m unittest ...` passes, but `python -m unittest discover backend` imports `backend/sources` as top-level `sources`; inference scripts hard-code `python3`, which resolves to an interpreter without deps on this machine.
-  - Scope: `scripts/test_inference_suite.sh`, `scripts/test_inference_sync_smoke.sh`, README contributor workflow, unittest discovery/package layout.
-  - Acceptance: documented test commands and scripts use the active environment interpreter; broad discovery either passes or is replaced by a documented canonical test command that cannot drift.
-  - Validation: `./scripts/test_inference_suite.sh`; `./scripts/test_inference_sync_smoke.sh`; README contributor command copy/paste check.
-
 - [ ] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.
@@ -112,3 +105,11 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: only one update can run at a time; duplicate update requests return the active log or a clear conflict; interrupted updates are recoverable and reported with a precise status.
   - Validation: tests cover concurrent scheduling, active-log response, and interrupted update recovery; targeted backend unittest suite.
   - Completed: 2026-07-01. Update scheduling now reuses an existing running log id, starts only one worker, and recovery marks interrupted running logs failed with a precise error.
+
+- [x] LBM-004: P2 Normalize Python test entrypoints and package discovery
+  - Source: Codex repo review 2026-07-01.
+  - Problem: targeted `python -m unittest ...` passes, but `python -m unittest discover backend` imports `backend/sources` as top-level `sources`; inference scripts hard-code `python3`, which resolves to an interpreter without deps on this machine.
+  - Scope: `scripts/test_inference_suite.sh`, `scripts/test_inference_sync_smoke.sh`, README contributor workflow, unittest discovery/package layout.
+  - Acceptance: documented test commands and scripts use the active environment interpreter; broad discovery either passes or is replaced by a documented canonical test command that cannot drift.
+  - Validation: `PYTHON=python ./scripts/test_inference_suite.sh`; `PYTHON=python ./scripts/test_inference_sync_smoke.sh`; README contributor command copy/paste check.
+  - Completed: 2026-07-01. The suite script now runs `python -m unittest discover -s backend -t .` and README warns against the broken `discover backend` import root.
