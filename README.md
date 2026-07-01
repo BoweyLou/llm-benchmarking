@@ -124,6 +124,12 @@ Benchmark adapters:
 - FaithJudge
 - Vectara Hallucination
 
+Terminal-Bench stores the model score separately from the agent and harness
+evidence that produced it. The `terminal_bench` benchmark remains the best
+verified single-model score, while raw source records retain agent name,
+version, organization, integration method, date, rank, stderr, and aggregate
+submission status for audit and review.
+
 Metadata and catalog enrichments:
 
 - OpenRouter models and market/ranking signals

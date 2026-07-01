@@ -108,6 +108,8 @@ class TerminalBenchAdapter(BaseSourceAdapter):
             "aggregate_submission": not single_model,
             "self_reported": True,
             "source_policy": "best_verified_single_model",
+            "agent_system_evidence": True,
+            "score_scope": "model_capability_from_agent_system_run",
         }
 
         return RawSourceRecord(

@@ -17,6 +17,7 @@ from backend.sources.base import RawSourceRecord, SourceFetchResult
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
 from backend.sources.ifeval import IfevalAdapter
 from backend.sources.swebench import SwebenchAdapter
+from backend.sources.terminal_bench import TerminalBenchAdapter
 
 FUTURE_COLLECTED_AT = "2099-01-01T00:00:00Z"
 
@@ -202,6 +203,91 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
         self.assertEqual(raw_rows[-1]["normalized_model_id"], "gpt-5-4")
         self.assertTrue(all(row["source_type"] == "secondary" for row in raw_rows))
+
+    def test_terminal_bench_spot_check_preserves_agent_harness_evidence(self) -> None:
+        adapter = TerminalBenchAdapter()
+        raw_records = [
+            adapter._build_raw_record(
+                {
+                    "agent": "Terminus",
+                    "agentName": "Terminus",
+                    "agentVersion": "2.3.1",
+                    "agentOrganization": "Acme Agents",
+                    "model": ["Claude Opus 4.6"],
+                    "modelNames": ["Claude Opus 4.6"],
+                    "modelOrganization": ["Anthropic"],
+                    "modelProviders": ["Anthropic"],
+                    "accuracy": 0.621,
+                    "stderr": 0.012,
+                    "integrationMethod": "Anthropic Messages API",
+                    "date": "2026-06-15",
+                    "rank": 3,
+                    "verified": True,
+                    "key": "terminus__claude-opus-4-6",
+                },
+                fetched_at=FUTURE_COLLECTED_AT,
+            ),
+            adapter._build_raw_record(
+                {
+                    "agent": "Multiple",
+                    "agentName": "Multiple",
+                    "agentVersion": "system",
+                    "agentOrganization": "Benchmark Lab",
+                    "model": ["Claude Opus 4.6", "GPT-5.4"],
+                    "modelNames": ["Claude Opus 4.6", "GPT-5.4"],
+                    "modelOrganization": ["Multiple"],
+                    "modelProviders": ["Anthropic", "OpenAI"],
+                    "accuracy": 0.7,
+                    "stderr": 0.009,
+                    "integrationMethod": "Mixed harness",
+                    "date": "2026-06-16",
+                    "rank": 1,
+                    "verified": True,
+                    "key": "mixed-agent-system",
+                },
+                fetched_at=FUTURE_COLLECTED_AT,
+            ),
+        ]
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, raw_records)
+
+        self.assertEqual(len(candidates), 1)
+        candidate = candidates[0]
+        self.assertEqual(candidate.raw_model_name, "Claude Opus 4.6")
+        self.assertAlmostEqual(candidate.value, 62.1)
+        self.assertEqual(candidate.source_type, "secondary")
+        self.assertTrue(candidate.verified)
+        self.assertIn("Terminus v2.3.1", str(candidate.notes))
+        self.assertIn("Anthropic Messages API", str(candidate.notes))
+
+        score = self._latest_score("claude-opus-4-6", "terminal_bench")
+        self.assertAlmostEqual(float(score["value"]), 62.1)
+        self.assertEqual(score["source_type"], "secondary")
+        self.assertEqual(score["verified"], 1)
+        self.assertIn("best verified single-model Terminal-Bench submission", str(score["notes"]))
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 2)
+
+        resolved = next(row for row in raw_rows if row["raw_model_name"] == "Claude Opus 4.6")
+        resolved_notes = json.loads(str(resolved["notes"]))
+        resolved_payload = json.loads(str(resolved["payload_json"]))
+        self.assertEqual(resolved["normalized_model_id"], "claude-opus-4-6")
+        self.assertEqual(resolved["resolution_status"], "resolved")
+        self.assertEqual(resolved_notes["agent"], "Terminus")
+        self.assertEqual(resolved_notes["agent_version"], "2.3.1")
+        self.assertEqual(resolved_notes["integration_method"], "Anthropic Messages API")
+        self.assertEqual(resolved_notes["stderr"], 0.012)
+        self.assertTrue(resolved_notes["agent_system_evidence"])
+        self.assertEqual(resolved_notes["score_scope"], "model_capability_from_agent_system_run")
+        self.assertEqual(resolved_payload["agentOrganization"], "Acme Agents")
+
+        aggregate = next(row for row in raw_rows if row["raw_model_name"] == "Multiple (multiple models)")
+        aggregate_notes = json.loads(str(aggregate["notes"]))
+        self.assertIsNone(aggregate["normalized_model_id"])
+        self.assertEqual(aggregate["resolution_status"], "skipped_aggregate")
+        self.assertTrue(aggregate_notes["aggregate_submission"])
+        self.assertEqual(aggregate_notes["integration_method"], "Mixed harness")
 
     def test_ifeval_spot_check_preserves_secondary_trust_labels(self) -> None:
         adapter = IfevalAdapter()

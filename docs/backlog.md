@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-020: P2 Preserve Terminal-Bench agent and harness evidence
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: Terminal-Bench rows include agent, version, integration method, date, and stderr details, but the current score collapses harness effects into a single model capability score.
+  - Scope: `backend/sources/terminal_bench.py`, raw metadata persistence, companion evidence for agent systems, ranking/docs/tests.
+  - Acceptance: preserve model-only ranking compatibility while making agent/harness metadata queryable; document the difference between model capability and best agent system evidence.
+  - Validation: fixture-backed Terminal-Bench persistence test; source spot-check suite; selected temp-database update/export; docs and kit readiness checks.
+  - Completed: 2026-07-01. Terminal-Bench raw records now carry explicit agent-system evidence markers, resolved single-model rows keep the current `terminal_bench` score, and aggregate/multi-model rows are retained as `skipped_aggregate` raw evidence instead of model scores.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.
