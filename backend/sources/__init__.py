@@ -2,6 +2,7 @@
 
 from .ailuminate import AILuminateAdapter
 from .artificial_analysis import ArtificialAnalysisAdapter
+from .bfcl import BfclAdapter
 from .chatbot_arena import ChatbotArenaAdapter
 from .epoch_gpqa import EpochGpqaAdapter
 from .faithjudge import FaithJudgeAdapter
@@ -16,6 +17,7 @@ def get_phase_one_adapters():
     return [
         ArtificialAnalysisAdapter(),
         AILuminateAdapter(),
+        BfclAdapter(),
         ChatbotArenaAdapter(),
         EpochGpqaAdapter(),
         FaithJudgeAdapter(),
@@ -42,6 +44,7 @@ def get_source_adapters(*, include_phase_two: bool = False):
 __all__ = [
     "AILuminateAdapter",
     "ArtificialAnalysisAdapter",
+    "BfclAdapter",
     "ChatbotArenaAdapter",
     "EpochGpqaAdapter",
     "FaithJudgeAdapter",

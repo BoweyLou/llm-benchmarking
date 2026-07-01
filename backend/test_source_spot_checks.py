@@ -14,6 +14,7 @@ from backend.database import fetch_all, fetch_one, get_connection, get_engine, i
 from backend.seed_data import seed_reference_data
 from backend.sources.artificial_analysis import ArtificialAnalysisAdapter
 from backend.sources.base import RawSourceRecord, SourceFetchResult
+from backend.sources.bfcl import BfclAdapter
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
 from backend.sources.ifeval import IfevalAdapter
 from backend.sources.swebench import SwebenchAdapter
@@ -244,6 +245,77 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(raw_rows[0]["normalized_model_id"], "gpt-5-4")
         self.assertEqual(raw_rows[0]["source_type"], "secondary")
         self.assertEqual(raw_rows[0]["verified"], 0)
+
+    def test_bfcl_spot_check_preserves_components_and_evaluation_mode(self) -> None:
+        adapter = BfclAdapter()
+        header = (
+            "Rank,Overall Acc,Model,Model Link,Total Cost ($),Latency Mean (s),"
+            "Latency Standard Deviation (s),Latency 95th Percentile (s),"
+            "Non-Live AST Acc,Non-Live Simple AST,Non-Live Multiple AST,"
+            "Non-Live Parallel AST,Non-Live Parallel Multiple AST,Live Acc,"
+            "Live Simple AST,Live Multiple AST,Live Parallel AST,Live Parallel Multiple AST,"
+            "Multi Turn Acc,Multi Turn Base,Multi Turn Miss Func,Multi Turn Miss Param,"
+            "Multi Turn Long Context,Web Search Acc,Web Search Base,Web Search No Snippet,"
+            "Memory Acc,Memory KV,Memory Vector,Memory Recursive Summarization,"
+            "Relevance Detection,Irrelevance Detection,Format Sensitivity Max Delta,"
+            "Format Sensitivity Standard Deviation,Organization,License"
+        )
+        table_csv = "\n".join(
+            [
+                header,
+                (
+                    "7,62.5%,Claude Opus 4.6 (FC),https://www.anthropic.com/claude,"
+                    "86.55,4.38,3.13,7.56,88.58%,76.83%,95.50%,93.50%,88.50%,"
+                    "79.79%,86.43%,78.16%,87.50%,75.00%,68.38%,81.00%,64.00%,"
+                    "58.00%,70.50%,84.50%,84.00%,85.00%,73.76%,70.97%,72.90%,"
+                    "77.42%,62.50%,84.72%,N/A,N/A,Anthropic,Proprietary"
+                ),
+                (
+                    "8,55.87%,GPT-5.4 (Prompt),https://openai.com/gpt-5,85.65,5.1,2.0,"
+                    "8.2,81.85%,70.00%,90.00%,88.00%,84.00%,70.39%,72.00%,68.00%,"
+                    "75.00%,69.00%,28.12%,35.00%,25.00%,20.00%,32.00%,75.50%,76.00%,"
+                    "75.00%,45.81%,42.00%,46.00%,49.00%,60.00%,80.00%,8.5,1.7,OpenAI,Proprietary"
+                ),
+                (
+                    "9,N/A,Missing Overall (FC),https://example.com,1.0,1.0,0.1,1.2,"
+                    "10%,10%,10%,10%,10%,10%,10%,10%,10%,10%,10%,10%,10%,10%,10%,"
+                    "10%,10%,10%,10%,10%,10%,10%,10%,10%,N/A,N/A,Example,Proprietary"
+                ),
+            ]
+        )
+
+        raw_records = adapter._build_raw_records(table_csv, collected_at=FUTURE_COLLECTED_AT)
+        self.assertEqual(len(raw_records), 2)
+        claude_record = raw_records[0]
+        self.assertEqual(claude_record.raw_model_name, "Claude Opus 4.6")
+        self.assertEqual(claude_record.raw_model_key, "Claude Opus 4.6 (FC)")
+        self.assertEqual(claude_record.metadata["evaluation_mode"], "FC")
+        self.assertEqual(claude_record.metadata["organization"], "Anthropic")
+        self.assertEqual(claude_record.metadata["license"], "Proprietary")
+        self.assertAlmostEqual(claude_record.metadata["overall_acc"], 62.5)
+        self.assertAlmostEqual(claude_record.metadata["component_scores"]["multi_turn_acc"], 68.38)
+        self.assertAlmostEqual(claude_record.metadata["component_scores"]["web_search_acc"], 84.5)
+        self.assertIsNone(claude_record.metadata["format_sensitivity"]["max_delta"])
+
+        candidates = adapter.normalize(raw_records)
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual(candidates[0].benchmark_id, "bfcl_overall")
+        self.assertEqual(candidates[0].source_type, "primary")
+        self.assertTrue(candidates[0].verified)
+        self.assertAlmostEqual(candidates[0].value, 62.5)
+
+        _, source_run_id, _, _ = self._persist_records(adapter, raw_records)
+
+        score = self._latest_score("claude-opus-4-6", "bfcl_overall")
+        self.assertAlmostEqual(float(score["value"]), 62.5)
+        self.assertEqual(score["source_type"], "primary")
+        self.assertEqual(score["verified"], 1)
+        self.assertIn("BFCL V4", str(score["notes"]))
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 2)
+        self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
+        self.assertEqual(raw_rows[0]["resolution_status"], "resolved")
 
     def test_chatbot_arena_same_run_duplicate_resolution_keeps_single_best_score(self) -> None:
         adapter = ChatbotArenaAdapter()

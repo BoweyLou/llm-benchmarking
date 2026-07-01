@@ -114,6 +114,7 @@ Fresh SQLite databases are initialized from the current schema in [backend/datab
 Benchmark adapters:
 
 - Artificial Analysis
+- Berkeley Function Calling Leaderboard
 - Chatbot Arena
 - AILuminate
 - GPQA Diamond
@@ -130,6 +131,11 @@ Metadata and catalog enrichments:
   Recent OpenRouter models from the last 60 days are imported as provisional rows when no exact OpenRouter ID or canonical slug is already represented.
 - Hugging Face model-card metadata
 - Hyperscaler inference catalogs for AWS Bedrock, Azure AI Foundry, and Google Vertex AI
+
+The Berkeley Function Calling Leaderboard adapter imports the official BFCL V4
+overall CSV from Berkeley Gorilla and stores the overall function-calling score
+while preserving category, multi-turn, web-search, memory, cost, latency,
+license, organization, and evaluation-mode fields in source metadata.
 
 ## Governance Model
 

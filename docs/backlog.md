@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-026: P1 Add a Berkeley Function Calling Leaderboard source adapter
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: the catalog lacked a function-calling/tool-use benchmark even though BFCL is a public executable benchmark for function invocation, multi-turn, and multi-step tool-use behavior.
+  - Scope: `backend/sources/bfcl.py`, benchmark seed row, source registry, source metadata/trust labels, docs/tests.
+  - Acceptance: ingest model scores with evaluation mode and component metadata; keep BFCL distinct from broader agentic benchmarks such as Terminal-Bench.
+  - Validation: fixture-backed parser/persistence tests; selected temp-database update; `make docs-check`.
+  - Completed: 2026-07-01. The adapter imports the official Berkeley Gorilla BFCL V4 `data_overall.csv`, emits `bfcl_overall`, strips `(FC)` / `(Prompt)` into metadata, and preserves component, cost, latency, organization, and license evidence.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.

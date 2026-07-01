@@ -358,6 +358,20 @@ BENCHMARKS: list[dict[str, Any]] = [
         "description": "ELO from blind human preference votes.",
         "active": 1,
     },
+    {
+        "id": "bfcl_overall",
+        "name": "Berkeley Function Calling Leaderboard",
+        "short": "BFCL",
+        "source": "Berkeley Gorilla",
+        "url": "https://gorilla.cs.berkeley.edu/leaderboard.html",
+        "category": "Agentic & Tool Use",
+        "metric": "Overall Accuracy %",
+        "higher_is_better": 1,
+        "tier": 2,
+        "scraper_id": "BfclAdapter",
+        "description": "Official Berkeley Function Calling Leaderboard V4 overall accuracy for function invocation and tool-use behavior. Component scores, costs, latency, and evaluation mode are preserved as source metadata.",
+        "active": 1,
+    },
 ]
 
 PROVIDERS: list[dict[str, Any]] = [
