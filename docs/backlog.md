@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-015: P1 Add Australian-bank recommendation proposals
+  - Source: Product clarification 2026-07-01.
+  - Problem: manual `recommended` / `not_recommended` ratings need a generated, auditable proposal layer that reflects regulated Australian-bank deployment considerations.
+  - Scope: recommendation proposal schema, policy engine, CLI audit/sync commands, serialized model-list/API fields, docs, and tests.
+  - Acceptance: generated proposals are stored separately from manual ratings; list/API payloads expose proposed and effective statuses; the default profile covers license, provenance, catalog, model-card, approved-route, Australian-route, privacy, operational-risk, and benchmark-evidence gates.
+  - Validation: recommendation engine unit tests; schema migration tests; `python -m backend recommendation-sync`; `python -m backend list-models --output /tmp/llm-benchmarking-models.json`.
+  - Completed: 2026-07-01. The `australian_bank` profile now generates and stores auditable per-model/use-case recommendation proposals and exposes them in model-list exports.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.

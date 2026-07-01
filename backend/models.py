@@ -109,6 +109,16 @@ class UseCaseApprovalOut(APIModel):
     recommended_member_count: int = 0
     not_recommended_member_count: int = 0
     discouraged_member_count: int = 0
+    proposed_recommendation_status: RecommendationStatusOut = "unrated"
+    proposed_recommendation_score: float | None = None
+    proposed_recommendation_confidence: float | None = None
+    proposed_recommendation_blockers: list[str] = Field(default_factory=list)
+    proposed_recommendation_warnings: list[str] = Field(default_factory=list)
+    proposed_recommendation_reasons: list[str] = Field(default_factory=list)
+    proposed_recommendation_required_controls: list[str] = Field(default_factory=list)
+    proposed_recommendation_policy_version: str | None = None
+    proposed_recommendation_computed_at: datetime | None = None
+    effective_recommendation_status: RecommendationStatusOut = "unrated"
     inference_route_approvals: list["InferenceRouteApprovalOut"] = Field(default_factory=list)
 
 

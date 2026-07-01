@@ -68,6 +68,24 @@ model_use_case_approvals = Table(
     Column("recommendation_updated_at", String),
 )
 
+model_use_case_recommendation_proposals = Table(
+    "model_use_case_recommendation_proposals",
+    metadata,
+    Column("profile_id", String, primary_key=True),
+    Column("model_id", String, ForeignKey("models.id"), primary_key=True),
+    Column("use_case_id", String, primary_key=True),
+    Column("proposed_status", String, nullable=False),
+    Column("score", Float),
+    Column("confidence", Float),
+    Column("blockers_json", Text, nullable=False, server_default=text("'[]'")),
+    Column("warnings_json", Text, nullable=False, server_default=text("'[]'")),
+    Column("reasons_json", Text, nullable=False, server_default=text("'[]'")),
+    Column("required_controls_json", Text, nullable=False, server_default=text("'[]'")),
+    Column("policy_version", String, nullable=False),
+    Column("computed_at", String, nullable=False),
+    Column("source_profile_json", Text, nullable=False, server_default=text("'{}'")),
+)
+
 model_use_case_inference_approvals = Table(
     "model_use_case_inference_approvals",
     metadata,
@@ -336,6 +354,7 @@ TABLES: tuple[Table, ...] = (
     benchmarks,
     providers,
     model_use_case_approvals,
+    model_use_case_recommendation_proposals,
     model_use_case_inference_approvals,
     model_identity_overrides,
     model_duplicate_overrides,
@@ -486,6 +505,24 @@ def _create_schema_sql() -> list[str]:
             recommendation_notes TEXT,
             recommendation_updated_at TEXT,
             PRIMARY KEY (model_id, use_case_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS model_use_case_recommendation_proposals (
+            profile_id TEXT NOT NULL,
+            model_id TEXT NOT NULL REFERENCES models(id),
+            use_case_id TEXT NOT NULL,
+            proposed_status TEXT NOT NULL,
+            score REAL,
+            confidence REAL,
+            blockers_json TEXT NOT NULL DEFAULT '[]',
+            warnings_json TEXT NOT NULL DEFAULT '[]',
+            reasons_json TEXT NOT NULL DEFAULT '[]',
+            required_controls_json TEXT NOT NULL DEFAULT '[]',
+            policy_version TEXT NOT NULL,
+            computed_at TEXT NOT NULL,
+            source_profile_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (profile_id, model_id, use_case_id)
         )
         """,
         """
@@ -994,6 +1031,7 @@ def _migration_20260701_schema_repairs(conn: Connection) -> None:
     for column_name, statement in expected_approval_columns.items():
         if column_name not in approval_columns:
             conn.exec_driver_sql(statement)
+    conn.exec_driver_sql(_recommendation_proposal_table_sql())
     inference_approval_columns = {
         str(row[1])
         for row in conn.exec_driver_sql("PRAGMA table_info(model_use_case_inference_approvals)").fetchall()
@@ -1024,8 +1062,34 @@ def _migration_20260701_schema_repairs(conn: Connection) -> None:
             conn.exec_driver_sql(statement)
 
 
+def _recommendation_proposal_table_sql() -> str:
+    return """
+        CREATE TABLE IF NOT EXISTS model_use_case_recommendation_proposals (
+            profile_id TEXT NOT NULL,
+            model_id TEXT NOT NULL REFERENCES models(id),
+            use_case_id TEXT NOT NULL,
+            proposed_status TEXT NOT NULL,
+            score REAL,
+            confidence REAL,
+            blockers_json TEXT NOT NULL DEFAULT '[]',
+            warnings_json TEXT NOT NULL DEFAULT '[]',
+            reasons_json TEXT NOT NULL DEFAULT '[]',
+            required_controls_json TEXT NOT NULL DEFAULT '[]',
+            policy_version TEXT NOT NULL,
+            computed_at TEXT NOT NULL,
+            source_profile_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (profile_id, model_id, use_case_id)
+        )
+    """
+
+
+def _migration_20260701_recommendation_proposals(conn: Connection) -> None:
+    conn.exec_driver_sql(_recommendation_proposal_table_sql())
+
+
 SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
+    ("20260701_002_recommendation_proposals", _migration_20260701_recommendation_proposals),
 )
 
 
@@ -1080,6 +1144,7 @@ __all__ = [
     "model_market_snapshots",
     "model_use_case_inference_approvals",
     "model_use_case_approvals",
+    "model_use_case_recommendation_proposals",
     "providers",
     "raw_source_records",
     "row_to_dict",

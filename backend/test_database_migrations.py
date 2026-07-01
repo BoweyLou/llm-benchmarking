@@ -13,12 +13,14 @@ class DatabaseMigrationTests(unittest.TestCase):
 
         with engine.begin() as conn:
             migration_ids = _migration_ids(conn)
+            table_names = _tables(conn)
             model_columns = _columns(conn, "models")
             latest_scores_view = conn.exec_driver_sql(
                 "SELECT name FROM sqlite_master WHERE type = 'view' AND name = 'latest_scores'"
             ).fetchone()
 
         self.assertEqual(migration_ids, [migration_id for migration_id, _migration in SCHEMA_MIGRATIONS])
+        self.assertIn("model_use_case_recommendation_proposals", table_names)
         self.assertIn("provider_id", model_columns)
         self.assertIn("openrouter_global_rank", model_columns)
         self.assertIsNotNone(latest_scores_view)
@@ -33,6 +35,7 @@ class DatabaseMigrationTests(unittest.TestCase):
 
         with engine.begin() as conn:
             migration_ids = _migration_ids(conn)
+            table_names = _tables(conn)
             provider_columns = _columns(conn, "providers")
             model_columns = _columns(conn, "models")
             raw_record_columns = _columns(conn, "raw_source_records")
@@ -48,6 +51,7 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("openrouter_programming_request_count", model_columns)
         self.assertIn("resolution_status", raw_record_columns)
         self.assertIn("recommendation_status", approval_columns)
+        self.assertIn("model_use_case_recommendation_proposals", table_names)
         self.assertIn("location_label", inference_approval_columns)
         self.assertIn("approval_updated_at", inference_approval_columns)
         self.assertIn("current_step_key", update_log_columns)
@@ -61,6 +65,11 @@ def _columns(conn: Connection, table_name: str) -> set[str]:
 def _migration_ids(conn: Connection) -> list[str]:
     rows = conn.exec_driver_sql("SELECT id FROM schema_migrations ORDER BY id").fetchall()
     return [str(row[0]) for row in rows]
+
+
+def _tables(conn: Connection) -> set[str]:
+    rows = conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    return {str(row[0]) for row in rows}
 
 
 def _create_legacy_schema(conn: Connection) -> None:

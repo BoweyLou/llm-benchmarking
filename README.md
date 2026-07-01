@@ -9,7 +9,7 @@ python -m backend list-models
 ```
 
 That command prints a JSON array. Each model item includes the serialized metadata used by the old dashboard, including scores, source details, provider origin, license policy, provenance policy, use-case approvals, inference destinations, OpenRouter market metadata, model-card fields, and family/duplicate curation fields.
-It also writes a CSV sidecar to `output/model-list.csv` by default for spreadsheet review.
+It also writes a CSV sidecar to `output/model-list.csv` by default for spreadsheet review. When recommendation proposals have been synced, use-case approvals include proposed and effective recommendation fields.
 
 ## Stack
 
@@ -78,6 +78,28 @@ Write only CSV:
 python -m backend list-models --format csv --output output/model-metadata.csv
 ```
 
+## Recommendation Proposals
+
+Manual use-case recommendation ratings remain the source of human approval. The recommendation proposal engine adds a separate, auditable policy layer that can be regenerated from the current catalog:
+
+```bash
+python -m backend recommendation-audit
+python -m backend recommendation-sync
+python -m backend list-models --output output/model-metadata.json
+```
+
+`recommendation-audit` is read-only and prints a summary by default; pass `--json` for the full proposal payload. `recommendation-sync` stores proposal rows in SQLite under `model_use_case_recommendation_proposals`. Both commands support `--use-case <id>` to limit the run.
+
+The first profile is `australian_bank`. It applies conservative gates for regulated banking use: commercial license and unverified derivative provenance blockers, tracked-catalog requirements for governed use cases, model-card requirements, bank-approved inference-route requirements, Australian-route requirements for customer or personal-information use cases, and benchmark score/confidence thresholds. The profile was shaped around official guidance from [APRA CPS 230](https://www.apra.gov.au/standards/cps-230), [APRA CPS 234 cyber security guidance](https://www.apra.gov.au/cyber-security), [OAIC commercial AI privacy guidance](https://www.oaic.gov.au/privacy/privacy-guidance-for-organisations-and-government-agencies/guidance-on-privacy-and-the-use-of-commercially-available-ai-products), and [ASIC AI governance observations](https://www.asic.gov.au/about-asic/news-centre/find-a-media-release/2024-releases/24-238mr-asic-warns-governance-gap-could-emerge-in-first-report-on-ai-adoption-by-licensees/).
+
+Each use-case approval can then carry:
+
+- `recommendation_status`: manual human rating.
+- `auto_recommendation_status`: existing automatic hard blockers from license/provenance overlays.
+- `proposed_recommendation_status`: generated profile proposal.
+- `effective_recommendation_status`: manual rating when present, otherwise automatic hard blocker, otherwise proposal.
+- proposal blockers, warnings, reasons, required controls, score, confidence, policy version, and computed timestamp.
+
 ## Run Locally
 
 ```bash
@@ -137,6 +159,7 @@ The approval model is more than a global allow-list:
 
 - approval is stored per `model x use case`
 - recommendation is stored separately from approval
+- recommendation proposals are regenerated policy output stored separately from manual ratings
 - inference-route approval can be stored per `model x use case x provider x location`
 - family bulk approval actions write through to exact models rather than using hidden inheritance
 - new models discovered in updates can be surfaced for review
@@ -167,6 +190,8 @@ python -m backend inference-sync
 python -m backend inference-sync --destinations aws-bedrock azure-ai-foundry
 python -m backend model-card-sync
 python -m backend model-card-audit
+python -m backend recommendation-audit
+python -m backend recommendation-sync
 python -m backend model-license-sync
 python -m backend model-license-sync --refresh-model-cards
 python -m backend provider-origin-export
@@ -178,6 +203,7 @@ Notes:
 - `inference-sync` supports destination subsets.
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.
+- `recommendation-audit` previews generated use-case recommendation proposals. `recommendation-sync` persists them so `list-models`, CSV export, and the API include proposed/effective recommendation fields.
 - `model-license-sync` fills missing licenses using safe open-weight family propagation, a `Proprietary` fallback for missing proprietary licenses, and tracked exact/family overrides from [backend/model_license_baseline.json](backend/model_license_baseline.json).
 - `list-models` writes `output/model-list.csv` by default in addition to the requested stdout/file format; pass `--no-csv` when you do not want the sidecar.
 - `provider-origin-export` and `model-curation-export` push live curation back into the tracked baseline JSON files.

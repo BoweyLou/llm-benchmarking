@@ -26,6 +26,7 @@ from .database import (
     model_market_snapshots as model_market_snapshots_table,
     model_use_case_inference_approvals as model_use_case_inference_approvals_table,
     model_use_case_approvals as model_use_case_approvals_table,
+    model_use_case_recommendation_proposals as model_use_case_recommendation_proposals_table,
     models as models_table,
     providers as providers_table,
     raw_source_records as raw_source_records_table,
@@ -100,6 +101,7 @@ RECOMMENDATION_STATUS_RECOMMENDED = "recommended"
 RECOMMENDATION_STATUS_NOT_RECOMMENDED = "not_recommended"
 RECOMMENDATION_STATUS_DISCOURAGED = "discouraged"
 RECOMMENDATION_STATUS_MIXED = "mixed"
+DEFAULT_RECOMMENDATION_PROFILE_ID = "australian_bank"
 VALID_RECOMMENDATION_STATUSES = {
     RECOMMENDATION_STATUS_UNRATED,
     RECOMMENDATION_STATUS_RECOMMENDED,
@@ -459,6 +461,21 @@ def _serialize_use_case_approval(row: dict[str, Any]) -> dict[str, Any]:
         "discouraged_member_count": int(
             row.get("discouraged_member_count") or (1 if recommendation_status == RECOMMENDATION_STATUS_DISCOURAGED else 0)
         ),
+        "proposed_recommendation_status": _normalize_recommendation_status(row.get("proposed_recommendation_status")),
+        "proposed_recommendation_score": row.get("proposed_recommendation_score"),
+        "proposed_recommendation_confidence": row.get("proposed_recommendation_confidence"),
+        "proposed_recommendation_blockers": _decode_json_string_list(row.get("proposed_recommendation_blockers_json")),
+        "proposed_recommendation_warnings": _decode_json_string_list(row.get("proposed_recommendation_warnings_json")),
+        "proposed_recommendation_reasons": _decode_json_string_list(row.get("proposed_recommendation_reasons_json")),
+        "proposed_recommendation_required_controls": _decode_json_string_list(
+            row.get("proposed_recommendation_required_controls_json")
+        ),
+        "proposed_recommendation_policy_version": _clean_text(row.get("proposed_recommendation_policy_version")),
+        "proposed_recommendation_computed_at": row.get("proposed_recommendation_computed_at"),
+        "effective_recommendation_status": _normalize_recommendation_status(
+            row.get("effective_recommendation_status"),
+            allow_mixed=True,
+        ),
         "inference_route_approvals": [],
     }
 
@@ -480,6 +497,16 @@ def _default_use_case_approval_payload(use_case_id: str) -> dict[str, Any]:
         "recommended_member_count": 0,
         "not_recommended_member_count": 0,
         "discouraged_member_count": 0,
+        "proposed_recommendation_status": RECOMMENDATION_STATUS_UNRATED,
+        "proposed_recommendation_score": None,
+        "proposed_recommendation_confidence": None,
+        "proposed_recommendation_blockers": [],
+        "proposed_recommendation_warnings": [],
+        "proposed_recommendation_reasons": [],
+        "proposed_recommendation_required_controls": [],
+        "proposed_recommendation_policy_version": None,
+        "proposed_recommendation_computed_at": None,
+        "effective_recommendation_status": RECOMMENDATION_STATUS_UNRATED,
     }
 
 
@@ -527,6 +554,51 @@ def _attach_provenance_policy_use_case_overlays(model: dict[str, Any]) -> None:
         _set_auto_not_recommended_overlay(approval, auto_note)
 
 
+def _attach_recommendation_proposals(
+    model: dict[str, Any],
+    proposals_by_use_case: dict[str, dict[str, Any]] | None,
+) -> None:
+    use_case_approvals = model.get("use_case_approvals")
+    if not isinstance(use_case_approvals, dict):
+        return
+
+    for use_case_id, proposal in (proposals_by_use_case or {}).items():
+        approval = use_case_approvals.setdefault(use_case_id, _default_use_case_approval_payload(use_case_id))
+        approval["proposed_recommendation_status"] = _normalize_recommendation_status(proposal.get("proposed_status"))
+        approval["proposed_recommendation_score"] = proposal.get("score")
+        approval["proposed_recommendation_confidence"] = proposal.get("confidence")
+        approval["proposed_recommendation_blockers"] = _decode_json_string_list(proposal.get("blockers"))
+        approval["proposed_recommendation_warnings"] = _decode_json_string_list(proposal.get("warnings"))
+        approval["proposed_recommendation_reasons"] = _decode_json_string_list(proposal.get("reasons"))
+        approval["proposed_recommendation_required_controls"] = _decode_json_string_list(proposal.get("required_controls"))
+        approval["proposed_recommendation_policy_version"] = _clean_text(proposal.get("policy_version"))
+        approval["proposed_recommendation_computed_at"] = proposal.get("computed_at")
+
+    _attach_effective_recommendation_statuses(use_case_approvals)
+
+
+def _attach_effective_recommendation_statuses(use_case_approvals: dict[str, dict[str, Any]]) -> None:
+    for approval in use_case_approvals.values():
+        manual_status = _normalize_recommendation_status(
+            approval.get("recommendation_status"),
+            allow_mixed=True,
+        )
+        auto_status = _normalize_recommendation_status(
+            approval.get("auto_recommendation_status"),
+            allow_mixed=True,
+        )
+        proposed_status = _normalize_recommendation_status(approval.get("proposed_recommendation_status"))
+        if manual_status != RECOMMENDATION_STATUS_UNRATED:
+            effective_status = manual_status
+        elif auto_status == RECOMMENDATION_STATUS_NOT_RECOMMENDED:
+            effective_status = RECOMMENDATION_STATUS_NOT_RECOMMENDED
+        elif proposed_status != RECOMMENDATION_STATUS_UNRATED:
+            effective_status = proposed_status
+        else:
+            effective_status = RECOMMENDATION_STATUS_UNRATED
+        approval["effective_recommendation_status"] = effective_status
+
+
 def _set_auto_not_recommended_overlay(approval: dict[str, Any], note: str | None) -> None:
     approval["auto_recommendation_status"] = RECOMMENDATION_STATUS_NOT_RECOMMENDED
     approval["auto_not_recommended_member_count"] = max(
@@ -566,6 +638,47 @@ def _load_model_use_case_approvals(
         if not model_id or not use_case_id:
             continue
         payload.setdefault(model_id, {})[use_case_id] = _serialize_use_case_approval(row)
+    return payload
+
+
+def _serialize_recommendation_proposal(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "profile_id": str(row.get("profile_id") or ""),
+        "model_id": str(row.get("model_id") or ""),
+        "use_case_id": str(row.get("use_case_id") or ""),
+        "proposed_status": _normalize_recommendation_status(row.get("proposed_status")),
+        "score": row.get("score"),
+        "confidence": row.get("confidence"),
+        "blockers": _decode_json_string_list(row.get("blockers_json")),
+        "warnings": _decode_json_string_list(row.get("warnings_json")),
+        "reasons": _decode_json_string_list(row.get("reasons_json")),
+        "required_controls": _decode_json_string_list(row.get("required_controls_json")),
+        "policy_version": _clean_text(row.get("policy_version")),
+        "computed_at": row.get("computed_at"),
+        "source_profile": _decode_json_object(row.get("source_profile_json")),
+    }
+
+
+def _load_model_use_case_recommendation_proposals(
+    conn,
+    model_ids: Iterable[str] | None = None,
+    *,
+    profile_id: str = DEFAULT_RECOMMENDATION_PROFILE_ID,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    statement = select(model_use_case_recommendation_proposals_table).where(
+        model_use_case_recommendation_proposals_table.c.profile_id == profile_id
+    )
+    normalized_model_ids = [str(model_id) for model_id in (model_ids or []) if str(model_id).strip()]
+    if normalized_model_ids:
+        statement = statement.where(model_use_case_recommendation_proposals_table.c.model_id.in_(normalized_model_ids))
+    rows = fetch_all(conn, statement)
+    payload: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in rows:
+        model_id = str(row.get("model_id") or "").strip()
+        use_case_id = str(row.get("use_case_id") or "").strip()
+        if not model_id or not use_case_id:
+            continue
+        payload.setdefault(model_id, {})[use_case_id] = _serialize_recommendation_proposal(row)
     return payload
 
 
@@ -640,7 +753,7 @@ def _approval_summary_from_use_case_approvals(use_case_approvals: dict[str, dict
     }
 
 
-def list_models() -> list[dict[str, Any]]:
+def list_models(*, include_recommendation_proposals: bool = True) -> list[dict[str, Any]]:
     bootstrap()
     benchmarks = list_benchmarks()
     benchmark_ids = [benchmark["id"] for benchmark in benchmarks]
@@ -659,6 +772,11 @@ def list_models() -> list[dict[str, Any]]:
         )
         model_ids = [str(row["id"]) for row in model_rows]
         approvals_by_model_id = _load_model_use_case_approvals(conn, model_ids)
+        recommendation_proposals_by_model_id = (
+            _load_model_use_case_recommendation_proposals(conn, model_ids)
+            if include_recommendation_proposals
+            else {}
+        )
         inference_approvals_by_model_id = _load_model_use_case_inference_approvals(conn, model_ids)
         inference_rows_by_model = load_synced_inference_catalog(conn, model_ids)
         authoritative_destination_ids = load_authoritative_destination_ids(conn)
@@ -676,6 +794,7 @@ def list_models() -> list[dict[str, Any]]:
             row,
             provider_metadata=_resolve_provider_metadata(row, providers_by_id, providers_by_name),
             use_case_approvals=approvals_by_model_id.get(str(row["id"]), {}),
+            recommendation_proposals=recommendation_proposals_by_model_id.get(str(row["id"]), {}),
             inference_route_approvals=inference_approvals_by_model_id.get(str(row["id"]), {}),
         )
         model = attach_inference_catalog(
@@ -845,6 +964,7 @@ def _load_model_update_context(conn, model_ids: list[str]) -> tuple[
     dict[str, dict[str, Any]],
     dict[str, dict[str, Any]],
     dict[str, dict[str, dict[str, Any]]],
+    dict[str, dict[str, dict[str, Any]]],
     dict[str, dict[str, list[dict[str, Any]]]],
     dict[str, list[dict[str, Any]]],
     set[str],
@@ -857,6 +977,7 @@ def _load_model_update_context(conn, model_ids: list[str]) -> tuple[
         if str(row.get("name") or "").strip()
     }
     approvals_by_model_id = _load_model_use_case_approvals(conn, model_ids)
+    recommendation_proposals_by_model_id = _load_model_use_case_recommendation_proposals(conn, model_ids)
     inference_approvals_by_model_id = _load_model_use_case_inference_approvals(conn, model_ids)
     inference_rows_by_model = load_synced_inference_catalog(conn, model_ids)
     authoritative_destination_ids = load_authoritative_destination_ids(conn)
@@ -864,6 +985,7 @@ def _load_model_update_context(conn, model_ids: list[str]) -> tuple[
         providers_by_id,
         providers_by_name,
         approvals_by_model_id,
+        recommendation_proposals_by_model_id,
         inference_approvals_by_model_id,
         inference_rows_by_model,
         authoritative_destination_ids,
@@ -878,6 +1000,7 @@ def _load_serialized_model_for_response(conn, model_id: str) -> dict[str, Any] |
         providers_by_id,
         providers_by_name,
         approvals_by_model_id,
+        recommendation_proposals_by_model_id,
         inference_approvals_by_model_id,
         inference_rows_by_model,
         authoritative_destination_ids,
@@ -886,6 +1009,7 @@ def _load_serialized_model_for_response(conn, model_id: str) -> dict[str, Any] |
         existing,
         provider_metadata=_resolve_provider_metadata(existing, providers_by_id, providers_by_name),
         use_case_approvals=approvals_by_model_id.get(model_id, {}),
+        recommendation_proposals=recommendation_proposals_by_model_id.get(model_id, {}),
         inference_route_approvals=inference_approvals_by_model_id.get(model_id, {}),
     )
     model = attach_inference_catalog(
@@ -962,6 +1086,7 @@ def update_model_use_case_approval(
             providers_by_id,
             providers_by_name,
             approvals_by_model_id,
+            recommendation_proposals_by_model_id,
             inference_approvals_by_model_id,
             inference_rows_by_model,
             authoritative_destination_ids,
@@ -974,6 +1099,7 @@ def update_model_use_case_approval(
         updated,
         provider_metadata=_resolve_provider_metadata(updated, providers_by_id, providers_by_name),
         use_case_approvals=approvals_by_model_id.get(model_id, {}),
+        recommendation_proposals=recommendation_proposals_by_model_id.get(model_id, {}),
         inference_route_approvals=inference_approvals_by_model_id.get(model_id, {}),
     )
     model = attach_inference_catalog(
@@ -1221,6 +1347,7 @@ def update_model_use_case_inference_approval(
             providers_by_id,
             providers_by_name,
             approvals_by_model_id,
+            recommendation_proposals_by_model_id,
             inference_approvals_by_model_id,
             inference_rows_by_model,
             authoritative_destination_ids,
@@ -1230,6 +1357,7 @@ def update_model_use_case_inference_approval(
             existing,
             provider_metadata=_resolve_provider_metadata(existing, providers_by_id, providers_by_name),
             use_case_approvals=approvals_by_model_id.get(model_id, {}),
+            recommendation_proposals=recommendation_proposals_by_model_id.get(model_id, {}),
             inference_route_approvals=inference_approvals_by_model_id.get(model_id, {}),
         )
         model = attach_inference_catalog(
@@ -1299,6 +1427,7 @@ def update_model_use_case_inference_approval(
             providers_by_id,
             providers_by_name,
             approvals_by_model_id,
+            recommendation_proposals_by_model_id,
             inference_approvals_by_model_id,
             inference_rows_by_model,
             authoritative_destination_ids,
@@ -1311,6 +1440,7 @@ def update_model_use_case_inference_approval(
         updated,
         provider_metadata=_resolve_provider_metadata(updated, providers_by_id, providers_by_name),
         use_case_approvals=approvals_by_model_id.get(model_id, {}),
+        recommendation_proposals=recommendation_proposals_by_model_id.get(model_id, {}),
         inference_route_approvals=inference_approvals_by_model_id.get(model_id, {}),
     )
     model = attach_inference_catalog(
@@ -1365,6 +1495,7 @@ def apply_model_inference_route_approval_bulk(
             providers_by_id,
             providers_by_name,
             approvals_by_model_id,
+            recommendation_proposals_by_model_id,
             inference_approvals_by_model_id,
             inference_rows_by_model,
             authoritative_destination_ids,
@@ -1381,6 +1512,7 @@ def apply_model_inference_route_approval_bulk(
                 row,
                 provider_metadata=_resolve_provider_metadata(row, providers_by_id, providers_by_name),
                 use_case_approvals=approvals_by_model_id.get(model_id, {}),
+                recommendation_proposals=recommendation_proposals_by_model_id.get(model_id, {}),
                 inference_route_approvals=inference_approvals_by_model_id.get(model_id, {}),
             )
             model = attach_inference_catalog(
@@ -1920,6 +2052,17 @@ def _aggregate_use_case_approvals(members: list[dict[str, Any]]) -> dict[str, di
         auto_not_recommended_member_count = sum(
             1 for entry in entries if _normalize_recommendation_status(entry.get("auto_recommendation_status")) == RECOMMENDATION_STATUS_NOT_RECOMMENDED
         )
+        distinct_proposed_recommendation_statuses = {
+            _normalize_recommendation_status(entry.get("proposed_recommendation_status"))
+            for entry in entries
+            if _normalize_recommendation_status(entry.get("proposed_recommendation_status")) != RECOMMENDATION_STATUS_UNRATED
+        }
+        distinct_effective_recommendation_statuses = {
+            _normalize_recommendation_status(entry.get("effective_recommendation_status"), allow_mixed=True)
+            for entry in entries
+            if _normalize_recommendation_status(entry.get("effective_recommendation_status"), allow_mixed=True)
+            != RECOMMENDATION_STATUS_UNRATED
+        }
         distinct_recommendation_statuses = {
             status
             for status in (
@@ -1933,6 +2076,16 @@ def _aggregate_use_case_approvals(members: list[dict[str, Any]]) -> dict[str, di
             RECOMMENDATION_STATUS_MIXED
             if len(distinct_recommendation_statuses) > 1
             else next(iter(distinct_recommendation_statuses), RECOMMENDATION_STATUS_UNRATED)
+        )
+        aggregated_proposed_recommendation_status = (
+            RECOMMENDATION_STATUS_MIXED
+            if len(distinct_proposed_recommendation_statuses) > 1
+            else next(iter(distinct_proposed_recommendation_statuses), RECOMMENDATION_STATUS_UNRATED)
+        )
+        aggregated_effective_recommendation_status = (
+            RECOMMENDATION_STATUS_MIXED
+            if len(distinct_effective_recommendation_statuses) > 1
+            else next(iter(distinct_effective_recommendation_statuses), RECOMMENDATION_STATUS_UNRATED)
         )
         aggregated[use_case_id] = {
             "use_case_id": use_case_id,
@@ -1954,8 +2107,61 @@ def _aggregate_use_case_approvals(members: list[dict[str, Any]]) -> dict[str, di
             "recommended_member_count": recommended_member_count,
             "not_recommended_member_count": not_recommended_member_count,
             "discouraged_member_count": discouraged_member_count,
+            "proposed_recommendation_status": aggregated_proposed_recommendation_status,
+            "proposed_recommendation_score": _average_numeric(
+                entry.get("proposed_recommendation_score") for entry in entries
+            ),
+            "proposed_recommendation_confidence": _average_numeric(
+                entry.get("proposed_recommendation_confidence") for entry in entries
+            ),
+            "proposed_recommendation_blockers": _merge_serialized_string_lists(
+                *(entry.get("proposed_recommendation_blockers") for entry in entries)
+            ),
+            "proposed_recommendation_warnings": _merge_serialized_string_lists(
+                *(entry.get("proposed_recommendation_warnings") for entry in entries)
+            ),
+            "proposed_recommendation_reasons": _merge_serialized_string_lists(
+                *(entry.get("proposed_recommendation_reasons") for entry in entries)
+            ),
+            "proposed_recommendation_required_controls": _merge_serialized_string_lists(
+                *(entry.get("proposed_recommendation_required_controls") for entry in entries)
+            ),
+            "proposed_recommendation_policy_version": _merge_overlay_notes(
+                *(entry.get("proposed_recommendation_policy_version") for entry in entries)
+            ),
+            "proposed_recommendation_computed_at": max(
+                str(entry.get("proposed_recommendation_computed_at") or "") for entry in entries
+            )
+            or None,
+            "effective_recommendation_status": aggregated_effective_recommendation_status,
         }
     return aggregated
+
+
+def _merge_serialized_string_lists(*values: Any) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for item in _decode_json_string_list(value):
+            if item in seen:
+                continue
+            seen.add(item)
+            merged.append(item)
+    return merged
+
+
+def _average_numeric(values: Iterable[Any]) -> float | None:
+    numeric_values: list[float] = []
+    for value in values:
+        if value is None:
+            continue
+        try:
+            numeric_values.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    if not numeric_values:
+        return None
+    return sum(numeric_values) / len(numeric_values)
 
 
 def _choose_group_representative(members: list[dict[str, Any]], display_name: str) -> dict[str, Any]:
@@ -4701,6 +4907,7 @@ def _serialize_model(
     row: dict[str, Any],
     provider_metadata: dict[str, Any] | None = None,
     use_case_approvals: dict[str, dict[str, Any]] | None = None,
+    recommendation_proposals: dict[str, dict[str, Any]] | None = None,
     inference_route_approvals: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     payload = dict(row)
@@ -4761,6 +4968,7 @@ def _serialize_model(
         )["inference_route_approvals"] = [dict(entry) for entry in route_entries]
     _attach_license_policy_use_case_overlays(payload)
     _attach_provenance_policy_use_case_overlays(payload)
+    _attach_recommendation_proposals(payload, recommendation_proposals)
     approval_summary = _approval_summary_from_use_case_approvals(payload["use_case_approvals"])
     payload["approved_for_use"] = bool(approval_summary["approved_for_use"] or payload.get("approved_for_use", 0))
     payload["approval_use_case_count"] = int(approval_summary["approval_use_case_count"] or 0)
