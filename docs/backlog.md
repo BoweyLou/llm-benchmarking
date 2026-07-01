@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-025: P1 Add a LiveBench source adapter
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: LiveBench is designed for contamination-resistant, objectively scored public evaluation with newer question releases, but the catalog had no LiveBench signal for general reasoning, math, coding, data analysis, language, or instruction-following.
+  - Scope: `backend/sources/livebench.py`, benchmark seed rows, source registry, source-run/raw-record tests, docs.
+  - Acceptance: import LiveBench category-level scores first; include release/version metadata and source URLs; keep task-level scores as raw metadata until category ingestion is stable.
+  - Validation: fixture-backed parser and persistence tests; selected temp-database update; ranking coverage check notes that benchmark rows are available but first-slice use-case weights are unchanged.
+  - Completed: 2026-07-01. The adapter now imports the official public LiveBench static table and category map for release `2026-01-08`, emits overall plus category scores, and preserves all task scores in raw metadata.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.

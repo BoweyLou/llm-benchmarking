@@ -118,6 +118,7 @@ Benchmark adapters:
 - AILuminate
 - GPQA Diamond
 - IFEval
+- LiveBench
 - MMMU
 - SWE-bench Verified
 - Terminal-Bench
@@ -130,6 +131,11 @@ Metadata and catalog enrichments:
   Recent OpenRouter models from the last 60 days are imported as provisional rows when no exact OpenRouter ID or canonical slug is already represented.
 - Hugging Face model-card metadata
 - Hyperscaler inference catalogs for AWS Bedrock, Azure AI Foundry, and Google Vertex AI
+
+The LiveBench adapter imports the latest public static LiveBench leaderboard
+release from the official site artifacts, currently `2026-01-08`, and stores
+overall plus category-level scores. Task-level LiveBench scores remain raw
+metadata until a use case needs that granularity.
 
 ## Governance Model
 

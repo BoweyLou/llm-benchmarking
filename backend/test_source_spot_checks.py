@@ -16,6 +16,7 @@ from backend.sources.artificial_analysis import ArtificialAnalysisAdapter
 from backend.sources.base import RawSourceRecord, SourceFetchResult
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
 from backend.sources.ifeval import IfevalAdapter
+from backend.sources.livebench import LiveBenchAdapter
 from backend.sources.swebench import SwebenchAdapter
 
 FUTURE_COLLECTED_AT = "2099-01-01T00:00:00Z"
@@ -244,6 +245,72 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(raw_rows[0]["normalized_model_id"], "gpt-5-4")
         self.assertEqual(raw_rows[0]["source_type"], "secondary")
         self.assertEqual(raw_rows[0]["verified"], 0)
+
+    def test_livebench_spot_check_derives_category_scores_and_skips_malformed_rows(self) -> None:
+        adapter = LiveBenchAdapter()
+        categories_json = json.dumps(
+            {
+                "Reasoning": ["theory_of_mind", "zebra_puzzle", "spatial", "logic_with_navigation"],
+                "Coding": ["code_generation", "code_completion"],
+                "Agentic Coding": ["javascript", "typescript", "python"],
+                "Mathematics": ["AMPS_Hard", "integrals_with_game", "math_comp", "olympiad"],
+                "Data Analysis": ["consecutive_events", "tablejoin", "tablereformat"],
+                "Language": ["connections", "plot_unscrambling", "typos"],
+                "IF": ["paraphrase", "simplify", "story_generation", "summarize"],
+            }
+        )
+        table_csv = "\n".join(
+            [
+                (
+                    "model,AMPS_Hard,code_completion,code_generation,connections,"
+                    "consecutive_events,integrals_with_game,javascript,logic_with_navigation,"
+                    "math_comp,olympiad,paraphrase,plot_unscrambling,python,simplify,spatial,"
+                    "story_generation,summarize,tablejoin,tablereformat,theory_of_mind,"
+                    "typescript,typos,zebra_puzzle"
+                ),
+                (
+                    "Claude Sonnet 4.6,80,50,70,90,15,60,0,40,40,20,20,60,60,40,30,"
+                    "60,80,45,75,10,30,30,20"
+                ),
+                "malformed-short-row,80,50",
+            ]
+        )
+
+        raw_records = adapter._build_raw_records(table_csv, categories_json, collected_at=FUTURE_COLLECTED_AT)
+        self.assertEqual(len(raw_records), 1)
+        raw_record = raw_records[0]
+        self.assertEqual(raw_record.raw_model_name, "Claude Sonnet 4.6")
+        self.assertEqual(raw_record.metadata["release"], "2026-01-08")
+        self.assertIn("artifact_sha256", raw_record.metadata)
+
+        candidates = adapter.normalize(raw_records)
+        candidate_values = {candidate.benchmark_id: candidate.value for candidate in candidates}
+        self.assertEqual(len(candidate_values), 8)
+        self.assertAlmostEqual(candidate_values["livebench_reasoning"], 25.0)
+        self.assertAlmostEqual(candidate_values["livebench_coding"], 60.0)
+        self.assertAlmostEqual(candidate_values["livebench_agentic_coding"], 30.0)
+        self.assertAlmostEqual(candidate_values["livebench_math"], 50.0)
+        self.assertAlmostEqual(candidate_values["livebench_data_analysis"], 45.0)
+        self.assertAlmostEqual(candidate_values["livebench_language"], 60.0)
+        self.assertAlmostEqual(candidate_values["livebench_instruction_following"], 50.0)
+        self.assertAlmostEqual(candidate_values["livebench_overall"], 45.714285714285715)
+        self.assertTrue(all(candidate.source_type == "primary" for candidate in candidates))
+        self.assertTrue(all(candidate.verified for candidate in candidates))
+
+        _, source_run_id, _, _ = self._persist_records(adapter, raw_records)
+
+        overall = self._latest_score("claude-sonnet-4-6", "livebench_overall")
+        coding = self._latest_score("claude-sonnet-4-6", "livebench_coding")
+        self.assertAlmostEqual(float(overall["value"]), 45.714285714285715)
+        self.assertAlmostEqual(float(coding["value"]), 60.0)
+        self.assertEqual(overall["source_type"], "primary")
+        self.assertEqual(overall["verified"], 1)
+        self.assertIn("LiveBench 2026-01-08", str(overall["notes"]))
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 1)
+        self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-sonnet-4-6")
+        self.assertEqual(raw_rows[0]["resolution_status"], "resolved")
 
     def test_chatbot_arena_same_run_duplicate_resolution_keeps_single_best_score(self) -> None:
         adapter = ChatbotArenaAdapter()

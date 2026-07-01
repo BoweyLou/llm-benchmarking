@@ -6,6 +6,7 @@ from .chatbot_arena import ChatbotArenaAdapter
 from .epoch_gpqa import EpochGpqaAdapter
 from .faithjudge import FaithJudgeAdapter
 from .ifeval import IfevalAdapter
+from .livebench import LiveBenchAdapter
 from .mmmu import MmmuAdapter
 from .swebench import SwebenchAdapter
 from .terminal_bench import TerminalBenchAdapter
@@ -20,6 +21,7 @@ def get_phase_one_adapters():
         EpochGpqaAdapter(),
         FaithJudgeAdapter(),
         IfevalAdapter(),
+        LiveBenchAdapter(),
         MmmuAdapter(),
         SwebenchAdapter(),
         VectaraHallucinationAdapter(),
@@ -46,6 +48,7 @@ __all__ = [
     "EpochGpqaAdapter",
     "FaithJudgeAdapter",
     "IfevalAdapter",
+    "LiveBenchAdapter",
     "MmmuAdapter",
     "TerminalBenchAdapter",
     "SwebenchAdapter",
