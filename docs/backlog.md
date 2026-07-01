@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-023: P2 Expand SWE-bench coverage beyond Verified while preserving scaffold metadata
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: the SWE-bench adapter only imported Verified, leaving the official Full/Test, Lite, Multilingual, and Multimodal boards unused and hiding useful scaffold/system variation.
+  - Scope: `backend/sources/swebench.py`, benchmark seed rows, raw metadata persistence, docs, and source spot checks.
+  - Acceptance: ingest official additional SWE-bench splits with distinct benchmark IDs; preserve submitter, organization, system-attempt, date, split, and single-model policy metadata; keep current Verified behavior stable.
+  - Validation: fixture-backed split parsing and persistence tests; selected temp database update/export; source spot-check suite; docs and kit readiness checks.
+  - Completed: 2026-07-01. The adapter now emits `swebench_verified`, `swebench_full`, `swebench_lite`, `swebench_multilingual`, and `swebench_multimodal` candidates while retaining best-single-model-per-split selection and raw scaffold metadata.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.

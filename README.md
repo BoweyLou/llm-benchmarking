@@ -119,7 +119,7 @@ Benchmark adapters:
 - GPQA Diamond
 - IFEval
 - MMMU
-- SWE-bench Verified
+- SWE-bench Verified plus Full, Lite, Multilingual, and Multimodal companion splits
 - Terminal-Bench
 - FaithJudge
 - Vectara Hallucination

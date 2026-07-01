@@ -203,6 +203,151 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(raw_rows[-1]["normalized_model_id"], "gpt-5-4")
         self.assertTrue(all(row["source_type"] == "secondary" for row in raw_rows))
 
+    def test_swebench_spot_check_persists_additional_split_scores(self) -> None:
+        adapter = SwebenchAdapter()
+        raw_records = [
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="swebench_verified",
+                raw_model_name="Claude Opus 4.6",
+                raw_value="0.61",
+                source_url=adapter.page_url,
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="Claude Opus 4.6",
+                payload={"resolved": 0.61},
+                metadata={
+                    "verified": True,
+                    "leaderboard_name": "Verified",
+                    "leaderboard_date": "2026-02-17",
+                    "submission_name": "mini-SWE-agent + Claude Opus 4.6",
+                    "single_model_submission": True,
+                    "tags": ["Model: Claude Opus 4.6", "Org: Test Lab", "System: Attempts - 1"],
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="swebench_lite",
+                raw_model_name="Claude Opus 4.6",
+                raw_value="0.44",
+                source_url="https://www.swebench.com/#lite",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="Claude Opus 4.6",
+                payload={"resolved": 0.44},
+                metadata={
+                    "verified": True,
+                    "leaderboard_name": "Lite",
+                    "leaderboard_date": "2026-02-16",
+                    "submission_name": "older Lite submission",
+                    "single_model_submission": True,
+                    "tags": ["Model: Claude Opus 4.6"],
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="swebench_lite",
+                raw_model_name="Claude Opus 4.6",
+                raw_value="0.48",
+                source_url="https://www.swebench.com/#lite",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="Claude Opus 4.6",
+                payload={"resolved": 0.48},
+                metadata={
+                    "verified": True,
+                    "leaderboard_name": "Lite",
+                    "leaderboard_date": "2026-02-17",
+                    "submission_name": "better Lite submission",
+                    "single_model_submission": True,
+                    "tags": ["Model: Claude Opus 4.6"],
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="swebench_multilingual",
+                raw_model_name="Claude Opus 4.6",
+                raw_value="0.72",
+                source_url="https://www.swebench.com/#multilingual",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="Claude Opus 4.6",
+                payload={"resolved": 0.72},
+                metadata={
+                    "verified": True,
+                    "leaderboard_name": "Multilingual",
+                    "leaderboard_date": "2026-02-18",
+                    "submission_name": "multilingual submission",
+                    "single_model_submission": True,
+                    "tags": ["Model: Claude Opus 4.6"],
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="swebench_full",
+                raw_model_name="GPT-5.4 (xhigh)",
+                raw_value="0.52",
+                source_url="https://www.swebench.com/#full",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="GPT-5.4 (xhigh)",
+                payload={"resolved": 0.52},
+                metadata={
+                    "verified": True,
+                    "leaderboard_name": "Full",
+                    "leaderboard_date": "2026-02-18",
+                    "submission_name": "full submission",
+                    "single_model_submission": True,
+                    "tags": ["Model: GPT-5.4 (xhigh)"],
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="swebench_multimodal",
+                raw_model_name="GPT-5.4 (xhigh)",
+                raw_value="0.35",
+                source_url="https://www.swebench.com/#multimodal",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="GPT-5.4 (xhigh)",
+                payload={"resolved": 0.35},
+                metadata={
+                    "verified": True,
+                    "leaderboard_name": "Multimodal",
+                    "leaderboard_date": "2026-02-18",
+                    "submission_name": "multimodal submission",
+                    "single_model_submission": True,
+                    "tags": ["Model: GPT-5.4 (xhigh)"],
+                },
+            ),
+        ]
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, raw_records)
+
+        candidate_values = {(candidate.raw_model_name, candidate.benchmark_id): candidate.value for candidate in candidates}
+        self.assertEqual(len(candidates), 5)
+        self.assertAlmostEqual(candidate_values[("Claude Opus 4.6", "swebench_verified")], 61.0)
+        self.assertAlmostEqual(candidate_values[("Claude Opus 4.6", "swebench_lite")], 48.0)
+        self.assertAlmostEqual(candidate_values[("Claude Opus 4.6", "swebench_multilingual")], 72.0)
+        self.assertAlmostEqual(candidate_values[("GPT-5.4 (xhigh)", "swebench_full")], 52.0)
+        self.assertAlmostEqual(candidate_values[("GPT-5.4 (xhigh)", "swebench_multimodal")], 35.0)
+
+        claude_lite = self._latest_score("claude-opus-4-6", "swebench_lite")
+        claude_multilingual = self._latest_score("claude-opus-4-6", "swebench_multilingual")
+        gpt_full = self._latest_score("gpt-5-4", "swebench_full")
+        gpt_multimodal = self._latest_score("gpt-5-4", "swebench_multimodal")
+        self.assertAlmostEqual(float(claude_lite["value"]), 48.0)
+        self.assertIn("official SWE-bench Lite board", str(claude_lite["notes"]))
+        self.assertAlmostEqual(float(claude_multilingual["value"]), 72.0)
+        self.assertIn("official SWE-bench Multilingual board", str(claude_multilingual["notes"]))
+        self.assertAlmostEqual(float(gpt_full["value"]), 52.0)
+        self.assertIn("official SWE-bench Full board", str(gpt_full["notes"]))
+        self.assertAlmostEqual(float(gpt_multimodal["value"]), 35.0)
+        self.assertIn("official SWE-bench Multimodal board", str(gpt_multimodal["notes"]))
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 6)
+        self.assertTrue(all(row["source_type"] == "secondary" for row in raw_rows))
+        raw_notes = [json.loads(str(row["notes"])) for row in raw_rows]
+        self.assertEqual(
+            {note["leaderboard_name"] for note in raw_notes},
+            {"Verified", "Lite", "Multilingual", "Full", "Multimodal"},
+        )
+
     def test_ifeval_spot_check_preserves_secondary_trust_labels(self) -> None:
         adapter = IfevalAdapter()
         raw_record = RawSourceRecord(
