@@ -7,9 +7,43 @@ import httpx
 from .base import BaseSourceAdapter, RawSourceRecord, ScoreCandidate, percent_score, utc_now_iso
 
 
+SPLIT_CONFIGS = (
+    {
+        "leaderboard_name": "Verified",
+        "display_name": "Verified",
+        "benchmark_id": "swebench_verified",
+        "page_url": "https://www.swebench.com/#verified",
+    },
+    {
+        "leaderboard_name": "Test",
+        "display_name": "Full",
+        "benchmark_id": "swebench_full",
+        "page_url": "https://www.swebench.com/#full",
+    },
+    {
+        "leaderboard_name": "Lite",
+        "display_name": "Lite",
+        "benchmark_id": "swebench_lite",
+        "page_url": "https://www.swebench.com/#lite",
+    },
+    {
+        "leaderboard_name": "Multilingual",
+        "display_name": "Multilingual",
+        "benchmark_id": "swebench_multilingual",
+        "page_url": "https://www.swebench.com/#multilingual",
+    },
+    {
+        "leaderboard_name": "Multimodal",
+        "display_name": "Multimodal",
+        "benchmark_id": "swebench_multimodal",
+        "page_url": "https://www.swebench.com/#multimodal",
+    },
+)
+
+
 class SwebenchAdapter(BaseSourceAdapter):
     source_id = "swebench"
-    benchmark_ids = ("swebench_verified",)
+    benchmark_ids = tuple(str(config["benchmark_id"]) for config in SPLIT_CONFIGS)
     source_url = "https://raw.githubusercontent.com/swe-bench/swe-bench.github.io/master/data/leaderboards.json"
     page_url = "https://www.swebench.com/#verified"
 
@@ -18,53 +52,56 @@ class SwebenchAdapter(BaseSourceAdapter):
         response.raise_for_status()
         payload = response.json()
 
-        leaderboard = self._select_verified_leaderboard(payload)
-        rows = leaderboard.get("results") or leaderboard.get("rows") or leaderboard.get("entries") or []
         fetched_at = utc_now_iso()
         raw_records: list[RawSourceRecord] = []
 
-        for row in rows:
-            model_name = self._extract_model_name(row)
-            if not model_name:
-                continue
+        for config in SPLIT_CONFIGS:
+            leaderboard = self._select_leaderboard(payload, str(config["leaderboard_name"]))
+            rows = leaderboard.get("results") or leaderboard.get("rows") or leaderboard.get("entries") or []
+            for row in rows:
+                model_name = self._extract_model_name(row)
+                if not model_name:
+                    continue
 
-            raw_score = row.get("resolved")
-            if not model_name or raw_score is None:
-                continue
+                raw_score = row.get("resolved")
+                if not model_name or raw_score is None:
+                    continue
 
-            tags = row.get("tags") or []
-            organization = self._extract_tag_value(tags, "Org: ")
-            system_attempts = self._extract_tag_value(tags, "System: ")
+                tags = row.get("tags") or []
+                organization = self._extract_tag_value(tags, "Org: ")
+                system_attempts = self._extract_tag_value(tags, "System: ")
 
-            raw_records.append(
-                RawSourceRecord(
-                    source_id=self.source_id,
-                    benchmark_id="swebench_verified",
-                    raw_model_name=model_name,
-                    raw_value=str(raw_score),
-                    source_url=self.page_url,
-                    collected_at=fetched_at,
-                    raw_model_key=model_name,
-                    payload=row,
-                    metadata={
-                        "leaderboard_name": "Verified",
-                        "leaderboard_date": row.get("date"),
-                        "submission_name": row.get("name"),
-                        "submission_organization": organization,
-                        "system_attempts": system_attempts,
-                        "os_model": bool(row.get("os_model")),
-                        "os_system": bool(row.get("os_system")),
-                        "verified": True,
-                        "single_model_submission": True,
-                        "tags": tags,
-                    },
+                raw_records.append(
+                    RawSourceRecord(
+                        source_id=self.source_id,
+                        benchmark_id=str(config["benchmark_id"]),
+                        raw_model_name=model_name,
+                        raw_value=str(raw_score),
+                        source_url=str(config["page_url"]),
+                        collected_at=fetched_at,
+                        raw_model_key=model_name,
+                        payload=row,
+                        metadata={
+                            "leaderboard_name": str(config["display_name"]),
+                            "source_leaderboard_name": str(config["leaderboard_name"]),
+                            "leaderboard_date": row.get("date"),
+                            "submission_name": row.get("name"),
+                            "submission_organization": organization,
+                            "system_attempts": system_attempts,
+                            "os_model": bool(row.get("os_model")),
+                            "os_system": bool(row.get("os_system")),
+                            "verified": True,
+                            "single_model_submission": True,
+                            "benchmark_id": str(config["benchmark_id"]),
+                            "tags": tags,
+                        },
+                    )
                 )
-            )
 
         return raw_records
 
     def normalize(self, raw_records: Sequence[RawSourceRecord]) -> list[ScoreCandidate]:
-        best_by_model: dict[str, RawSourceRecord] = {}
+        best_by_model_and_benchmark: dict[tuple[str, str], RawSourceRecord] = {}
 
         for record in raw_records:
             model_key = record.raw_model_key or record.raw_model_name
@@ -72,13 +109,17 @@ class SwebenchAdapter(BaseSourceAdapter):
             if current_value is None:
                 continue
 
-            best = best_by_model.get(model_key)
+            candidate_key = (model_key, record.benchmark_id)
+            best = best_by_model_and_benchmark.get(candidate_key)
             best_value = percent_score(best.raw_value) if best else None
             if best is None or best_value is None or current_value > best_value:
-                best_by_model[model_key] = record
+                best_by_model_and_benchmark[candidate_key] = record
 
         candidates: list[ScoreCandidate] = []
-        for model_key, record in sorted(best_by_model.items(), key=lambda item: item[0].lower()):
+        for (model_key, benchmark_id), record in sorted(
+            best_by_model_and_benchmark.items(),
+            key=lambda item: (item[0][0].lower(), item[0][1]),
+        ):
             value = percent_score(record.raw_value)
             if value is None:
                 continue
@@ -86,7 +127,7 @@ class SwebenchAdapter(BaseSourceAdapter):
             candidates.append(
                 ScoreCandidate(
                     source_id=self.source_id,
-                    benchmark_id="swebench_verified",
+                    benchmark_id=benchmark_id,
                     raw_model_name=record.raw_model_name,
                     raw_model_key=model_key,
                     value=value,
@@ -96,7 +137,8 @@ class SwebenchAdapter(BaseSourceAdapter):
                     source_type="secondary",
                     verified=bool(record.metadata.get("verified", True)),
                     notes=(
-                        "Best single-model submission from the official SWE-bench Verified board: "
+                        "Best single-model submission from the official "
+                        f'SWE-bench {record.metadata.get("leaderboard_name") or "unknown"} board: '
                         f'{record.metadata.get("submission_name") or "Unknown submission"} '
                         f'on {record.metadata.get("leaderboard_date") or "unknown date"}.'
                     ),
@@ -106,12 +148,12 @@ class SwebenchAdapter(BaseSourceAdapter):
 
         return candidates
 
-    def _select_verified_leaderboard(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _select_leaderboard(self, payload: dict[str, Any], name: str) -> dict[str, Any]:
         leaderboards = payload.get("leaderboards") or []
         for item in leaderboards:
-            if str(item.get("name", "")).strip() == "Verified":
+            if str(item.get("name", "")).strip() == name:
                 return item
-        raise ValueError("Could not find Verified leaderboard in SWE-bench payload.")
+        raise ValueError(f"Could not find {name} leaderboard in SWE-bench payload.")
 
     def _extract_model_name(self, row: dict[str, Any]) -> str:
         model_tags = self._extract_model_tags(row.get("tags") or [])

@@ -24,6 +24,24 @@ GRADE_TO_SCORE.setdefault("Good", 50.0)
 GRADE_TO_SCORE.setdefault("Fair", 25.0)
 GRADE_TO_SCORE.setdefault("Poor", 0.0)
 
+LOCALE_BENCHMARK_IDS = {
+    "en_us": "ailuminate_en_us",
+    "fr_fr": "ailuminate_fr_fr",
+}
+
+SYSTEM_CLASS_BENCHMARK_IDS = {
+    "AI Systems": "ailuminate_ai_systems",
+    "Bare Models": "ailuminate_bare_models",
+}
+
+BENCHMARK_VIEW_LABELS = {
+    "ailuminate": "best public grade",
+    "ailuminate_en_us": "en_us locale",
+    "ailuminate_fr_fr": "fr_fr locale",
+    "ailuminate_ai_systems": "AI Systems",
+    "ailuminate_bare_models": "Bare Models",
+}
+
 
 @dataclass(slots=True)
 class _RowCandidate:
@@ -31,11 +49,19 @@ class _RowCandidate:
     score: float
     system_priority: int
     locale_priority: int
+    benchmark_id: str
+    score_scope: str
 
 
 class AILuminateAdapter(BaseSourceAdapter):
     source_id = "ailuminate"
-    benchmark_ids = ("ailuminate",)
+    benchmark_ids = (
+        "ailuminate",
+        "ailuminate_en_us",
+        "ailuminate_fr_fr",
+        "ailuminate_ai_systems",
+        "ailuminate_bare_models",
+    )
     source_url = AILUMINATE_PAGES[0]
 
     async def fetch_raw(self, client: httpx.AsyncClient) -> list[RawSourceRecord]:
@@ -109,7 +135,7 @@ class AILuminateAdapter(BaseSourceAdapter):
         return raw_records
 
     def normalize(self, raw_records: Sequence[RawSourceRecord]) -> list[ScoreCandidate]:
-        best_by_model: dict[str, _RowCandidate] = {}
+        best_by_model_and_benchmark: dict[tuple[str, str], _RowCandidate] = {}
 
         for record in raw_records:
             score = GRADE_TO_SCORE.get(record.raw_value)
@@ -117,23 +143,37 @@ class AILuminateAdapter(BaseSourceAdapter):
                 continue
 
             model_key = record.raw_model_key or record.raw_model_name
-            current = _RowCandidate(
-                raw_record=record,
-                score=score,
-                system_priority=1 if record.metadata.get("system_class") == "AI Systems" else 0,
-                locale_priority=1 if record.metadata.get("locale") == "en_us" else 0,
-            )
-            previous = best_by_model.get(model_key)
-            if previous is None or self._candidate_sort_key(current) > self._candidate_sort_key(previous):
-                best_by_model[model_key] = current
+            for benchmark_id, score_scope in self._benchmark_views(record):
+                current = _RowCandidate(
+                    raw_record=record,
+                    score=score,
+                    system_priority=1 if record.metadata.get("system_class") == "AI Systems" else 0,
+                    locale_priority=1 if record.metadata.get("locale") == "en_us" else 0,
+                    benchmark_id=benchmark_id,
+                    score_scope=score_scope,
+                )
+                candidate_key = (model_key, benchmark_id)
+                previous = best_by_model_and_benchmark.get(candidate_key)
+                if previous is None or self._candidate_sort_key(current) > self._candidate_sort_key(previous):
+                    best_by_model_and_benchmark[candidate_key] = current
 
         candidates: list[ScoreCandidate] = []
-        for model_key, entry in sorted(best_by_model.items(), key=lambda item: item[0].lower()):
+        for (model_key, benchmark_id), entry in sorted(
+            best_by_model_and_benchmark.items(),
+            key=lambda item: (item[0][0].lower(), item[0][1]),
+        ):
             record = entry.raw_record
+            metadata = dict(record.metadata)
+            metadata.update(
+                {
+                    "score_scope": entry.score_scope,
+                    "score_view": BENCHMARK_VIEW_LABELS.get(benchmark_id, benchmark_id),
+                }
+            )
             candidates.append(
                 ScoreCandidate(
                     source_id=self.source_id,
-                    benchmark_id="ailuminate",
+                    benchmark_id=benchmark_id,
                     raw_model_name=record.raw_model_name,
                     raw_model_key=model_key,
                     value=entry.score,
@@ -145,17 +185,31 @@ class AILuminateAdapter(BaseSourceAdapter):
                     notes="; ".join(
                         part
                         for part in (
+                            f"View: {metadata.get('score_view')}",
                             f"Locale: {record.metadata.get('locale')}",
                             f"System class: {record.metadata.get('system_class')}",
+                            f"Risk ordinal: {record.metadata.get('risk_ordinal')}"
+                            if record.metadata.get("risk_ordinal") is not None
+                            else "",
                             f"Detail: {record.metadata.get('detail_url')}",
                         )
                         if part
                     ),
-                    metadata=dict(record.metadata),
+                    metadata=metadata,
                 )
             )
 
         return candidates
+
+    def _benchmark_views(self, record: RawSourceRecord) -> list[tuple[str, str]]:
+        views = [("ailuminate", "best_public_grade")]
+        locale_benchmark_id = LOCALE_BENCHMARK_IDS.get(str(record.metadata.get("locale") or ""))
+        if locale_benchmark_id:
+            views.append((locale_benchmark_id, "locale"))
+        system_benchmark_id = SYSTEM_CLASS_BENCHMARK_IDS.get(str(record.metadata.get("system_class") or ""))
+        if system_benchmark_id:
+            views.append((system_benchmark_id, "system_class"))
+        return views
 
     def _candidate_sort_key(self, candidate: _RowCandidate) -> tuple[float, int, int]:
         return (candidate.score, candidate.system_priority, candidate.locale_priority)

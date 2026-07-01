@@ -14,7 +14,7 @@ LEADERBOARD_MARKER = "<!-- LEADERBOARD_START -->"
 
 class VectaraHallucinationAdapter(BaseSourceAdapter):
     source_id = "vectara_hallucination"
-    benchmark_ids = ("rag_groundedness",)
+    benchmark_ids = ("rag_groundedness", "rag_hallucination_rate", "rag_answer_rate")
     source_url = VECTARA_PAGE_URL
 
     async def fetch_raw(self, client: httpx.AsyncClient) -> list[RawSourceRecord]:
@@ -60,26 +60,49 @@ class VectaraHallucinationAdapter(BaseSourceAdapter):
         candidates: list[ScoreCandidate] = []
 
         for record in sorted(raw_records, key=lambda item: int(item.metadata.get("rank", 10**9))):
-            value = safe_float(record.raw_value)
-            if value is None:
+            factual_consistency = safe_float(record.raw_value)
+            hallucination_rate = safe_float(record.metadata.get("hallucination_rate"))
+            answer_rate = safe_float(record.metadata.get("answer_rate"))
+            if factual_consistency is None:
                 continue
 
-            candidates.append(
-                ScoreCandidate(
-                    source_id=self.source_id,
-                    benchmark_id="rag_groundedness",
-                    raw_model_name=record.raw_model_name,
-                    raw_model_key=record.raw_model_key or record.raw_model_name,
-                    value=value,
-                    raw_value=f"{value:.1f}",
-                    source_url=record.source_url,
-                    collected_at=record.collected_at,
-                    source_type="primary",
-                    verified=True,
-                    notes="Vectara factual consistency to supplied source text. RAG-adjacent faithfulness signal, not retrieval relevance.",
-                    metadata=dict(record.metadata),
+            metrics = [
+                (
+                    "rag_groundedness",
+                    factual_consistency,
+                    "Vectara factual consistency to supplied source text. RAG-adjacent faithfulness signal, not retrieval relevance.",
+                ),
+                (
+                    "rag_hallucination_rate",
+                    hallucination_rate,
+                    "Vectara hallucination rate for grounded summaries. Lower is better; this is not retrieval relevance.",
+                ),
+                (
+                    "rag_answer_rate",
+                    answer_rate,
+                    "Vectara answer rate for grounded summaries. Coverage signal, not retrieval relevance.",
+                ),
+            ]
+
+            for benchmark_id, value, notes in metrics:
+                if value is None:
+                    continue
+                candidates.append(
+                    ScoreCandidate(
+                        source_id=self.source_id,
+                        benchmark_id=benchmark_id,
+                        raw_model_name=record.raw_model_name,
+                        raw_model_key=record.raw_model_key or record.raw_model_name,
+                        value=value,
+                        raw_value=f"{value:.1f}",
+                        source_url=record.source_url,
+                        collected_at=record.collected_at,
+                        source_type="primary",
+                        verified=True,
+                        notes=notes,
+                        metadata=dict(record.metadata),
+                    )
                 )
-            )
 
         return candidates
 

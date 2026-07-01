@@ -31,6 +31,7 @@ from backend.database import (
 )
 from backend.model_curation import build_model_curation_match_key
 from backend.seed_data import seed_reference_data
+from backend.sources.base import ScoreCandidate, SourceFetchResult
 
 
 class RankingTests(unittest.TestCase):
@@ -170,6 +171,33 @@ class RankingTests(unittest.TestCase):
                     }
                 ],
             )
+
+    def add_source_run(
+        self,
+        source_name: str,
+        benchmark_id: str,
+        *,
+        status: str = "completed",
+        started_at: str = "2026-04-08T00:00:00Z",
+        completed_at: str | None = "2026-04-08T00:01:00Z",
+        records_found: int = 1,
+        error_message: str | None = None,
+    ) -> int:
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                source_runs_table.insert().values(
+                    update_log_id=None,
+                    source_name=source_name,
+                    benchmark_id=benchmark_id,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    status=status,
+                    records_found=records_found,
+                    error_message=error_message,
+                    details_json=None,
+                )
+            )
+            return int(result.inserted_primary_key[0])
 
     def ranking_for(self, use_case_id: str, model_name: str) -> dict:
         rankings = update_engine.get_rankings(use_case_id)
@@ -1004,6 +1032,66 @@ class RankingTests(unittest.TestCase):
         self.assertTrue(warning["nonfatal"])
         self.assertIn("rankingData", warning["error_message"])
 
+    def test_list_models_exposes_stale_source_freshness_after_failed_run(self) -> None:
+        self.add_model("acme-model", "Acme Model", provider="Acme")
+        self.add_score("acme-model", "chatbot_arena", 1234.0, collected_at="2026-04-08T00:00:00Z")
+        self.add_source_run(
+            "chatbot_arena",
+            "chatbot_arena",
+            status="completed",
+            started_at="2026-04-08T00:00:00Z",
+            completed_at="2026-04-08T00:01:00Z",
+            records_found=1,
+        )
+        self.add_source_run(
+            "chatbot_arena",
+            "chatbot_arena",
+            status="failed",
+            started_at="2026-04-09T00:00:00Z",
+            completed_at="2026-04-09T00:01:00Z",
+            records_found=0,
+            error_message="upstream changed shape",
+        )
+
+        models = update_engine.list_models()
+        model = next(model for model in models if model["id"] == "acme-model")
+        source = next(entry for entry in model["source_freshness"] if entry["source_name"] == "chatbot_arena")
+
+        self.assertEqual(source["source_label"], "Chatbot Arena")
+        self.assertEqual(source["latest_source_status"], "failed")
+        self.assertEqual(source["latest_success_at"], "2026-04-08T00:01:00Z")
+        self.assertEqual(source["latest_failure_at"], "2026-04-09T00:01:00Z")
+        self.assertEqual(source["latest_error"], "upstream changed shape")
+        self.assertEqual(source["latest_model_score_at"], "2026-04-08T00:00:00Z")
+        self.assertEqual(source["model_evidence_status"], "stale")
+        self.assertTrue(source["has_model_score"])
+        self.assertTrue(source["degraded"])
+        self.assertTrue(source["stale"])
+        self.assertFalse(source["missing_because_source_failed"])
+
+    def test_list_models_marks_missing_score_when_latest_source_failed(self) -> None:
+        self.add_model("acme-model", "Acme Model", provider="Acme")
+        self.add_source_run(
+            "ifeval",
+            "ifeval",
+            status="failed",
+            started_at="2026-04-09T00:00:00Z",
+            completed_at="2026-04-09T00:01:00Z",
+            records_found=0,
+            error_message="rate limited",
+        )
+
+        models = update_engine.list_models()
+        model = next(model for model in models if model["id"] == "acme-model")
+        source = next(entry for entry in model["source_freshness"] if entry["source_name"] == "ifeval")
+
+        self.assertEqual(source["latest_source_status"], "failed")
+        self.assertEqual(source["model_evidence_status"], "missing_source_failed")
+        self.assertFalse(source["has_model_score"])
+        self.assertTrue(source["degraded"])
+        self.assertFalse(source["stale"])
+        self.assertTrue(source["missing_because_source_failed"])
+
     def test_refresh_openrouter_model_metadata_persists_created_timestamp_and_alias_match(self) -> None:
         self.add_model("nova-pro", "Nova Pro", provider="Amazon")
 
@@ -1047,6 +1135,178 @@ class RankingTests(unittest.TestCase):
         self.assertIn("image-input", nova["capabilities"])
         self.assertIn("tool-use", nova["capabilities"])
         self.assertIn("structured-output", nova["capabilities"])
+
+    def test_persist_source_result_promotes_missing_chatbot_arena_metadata(self) -> None:
+        self.add_model("acme-model", "Acme Model", provider="Unknown")
+        source_run_id = self.add_source_run("chatbot_arena", "chatbot_arena")
+        result = SourceFetchResult(
+            source_id="chatbot_arena",
+            source_url="https://arena.ai/leaderboard/text",
+            fetched_at="2026-04-08T00:00:00Z",
+            raw_records=[],
+            candidates=[
+                ScoreCandidate(
+                    source_id="chatbot_arena",
+                    benchmark_id="chatbot_arena",
+                    raw_model_name="Acme Model",
+                    raw_model_key="Acme Model",
+                    value=1234.0,
+                    raw_value="1234",
+                    source_url="https://arena.ai/leaderboard/text",
+                    collected_at="2026-04-08T00:00:00Z",
+                    source_type="primary",
+                    verified=True,
+                    metadata={
+                        "organization": "Acme AI",
+                        "license": "Apache 2.0",
+                        "input_price_per_million": "0.25",
+                        "output_price_per_million": "1.25",
+                        "context_length": "128K",
+                        "model_url": "https://example.com/acme-model",
+                    },
+                )
+            ],
+        )
+
+        added, updated = update_engine._persist_source_result(source_run_id, result)
+
+        self.assertEqual((added, updated), (1, 0))
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                select(models_table).where(models_table.c.id == "acme-model")
+            ).mappings().one()
+
+        self.assertEqual(row["provider"], "Acme AI")
+        self.assertEqual(row["provider_id"], update_engine.provider_id_from_name("Acme AI"))
+        self.assertEqual(row["license_name"], "Apache 2.0")
+        self.assertEqual(row["context_window"], "128K tokens")
+        self.assertEqual(row["context_window_tokens"], 128000)
+        self.assertEqual(row["price_input_per_mtok"], 0.25)
+        self.assertEqual(row["price_output_per_mtok"], 1.25)
+        self.assertEqual(row["documentation_url"], "https://example.com/acme-model")
+        self.assertEqual(row["metadata_source_name"], "Chatbot Arena")
+        self.assertEqual(row["metadata_source_url"], "https://arena.ai/leaderboard/text")
+        self.assertEqual(row["metadata_verified_at"], "2026-04-08T00:00:00Z")
+
+    def test_persist_source_result_does_not_override_existing_higher_trust_metadata(self) -> None:
+        self.add_model("acme-model", "Acme Model", provider="OpenAI")
+        with self.engine.begin() as conn:
+            conn.execute(
+                update(models_table)
+                .where(models_table.c.id == "acme-model")
+                .values(
+                    provider_id=update_engine.provider_id_from_name("OpenAI"),
+                    context_window="200K tokens",
+                    context_window_tokens=200000,
+                    price_input_per_mtok=2.0,
+                    price_output_per_mtok=8.0,
+                    license_name="Curated License",
+                    documentation_url="https://docs.example.com/acme",
+                    metadata_source_name="openrouter",
+                    metadata_source_url="https://openrouter.ai/api/v1/models",
+                    metadata_verified_at="2026-04-01T00:00:00Z",
+                )
+            )
+
+        source_run_id = self.add_source_run("chatbot_arena", "chatbot_arena")
+        result = SourceFetchResult(
+            source_id="chatbot_arena",
+            source_url="https://arena.ai/leaderboard/text",
+            fetched_at="2026-04-08T00:00:00Z",
+            raw_records=[],
+            candidates=[
+                ScoreCandidate(
+                    source_id="chatbot_arena",
+                    benchmark_id="chatbot_arena",
+                    raw_model_name="Acme Model",
+                    raw_model_key="Acme Model",
+                    value=1234.0,
+                    raw_value="1234",
+                    source_url="https://arena.ai/leaderboard/text",
+                    collected_at="2026-04-08T00:00:00Z",
+                    source_type="primary",
+                    verified=True,
+                    metadata={
+                        "organization": "Acme AI",
+                        "license": "Apache 2.0",
+                        "input_price_per_million": "0.25",
+                        "output_price_per_million": "1.25",
+                        "context_length": "128K",
+                        "model_url": "https://example.com/acme-model",
+                    },
+                )
+            ],
+        )
+
+        update_engine._persist_source_result(source_run_id, result)
+
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                select(models_table).where(models_table.c.id == "acme-model")
+            ).mappings().one()
+
+        self.assertEqual(row["provider"], "OpenAI")
+        self.assertEqual(row["provider_id"], update_engine.provider_id_from_name("OpenAI"))
+        self.assertEqual(row["license_name"], "Curated License")
+        self.assertEqual(row["context_window"], "200K tokens")
+        self.assertEqual(row["context_window_tokens"], 200000)
+        self.assertEqual(row["price_input_per_mtok"], 2.0)
+        self.assertEqual(row["price_output_per_mtok"], 8.0)
+        self.assertEqual(row["documentation_url"], "https://docs.example.com/acme")
+        self.assertEqual(row["metadata_source_name"], "openrouter")
+        self.assertEqual(row["metadata_source_url"], "https://openrouter.ai/api/v1/models")
+        self.assertEqual(row["metadata_verified_at"], "2026-04-01T00:00:00Z")
+
+    def test_persist_source_result_promotes_verified_ifeval_metadata(self) -> None:
+        self.add_model("verified-model", "Verified Model", provider="Unknown")
+        source_run_id = self.add_source_run("ifeval", "ifeval")
+        result = SourceFetchResult(
+            source_id="ifeval",
+            source_url="https://llm-stats.com/benchmarks/ifeval",
+            fetched_at="2026-04-08T00:00:00Z",
+            raw_records=[],
+            candidates=[
+                ScoreCandidate(
+                    source_id="ifeval",
+                    benchmark_id="ifeval",
+                    raw_model_name="Verified Model",
+                    raw_model_key="verified/model",
+                    value=82.0,
+                    raw_value="82",
+                    source_url="https://llm-stats.com/benchmarks/ifeval",
+                    collected_at="2026-04-08T00:00:00Z",
+                    source_type="primary",
+                    verified=True,
+                    metadata={
+                        "details_url": "https://api.llm-stats.com/leaderboard/benchmarks/ifeval/details",
+                        "organization_name": "Verified Org",
+                        "verified": True,
+                        "self_reported": False,
+                        "input_cost_per_million": "0.3",
+                        "output_cost_per_million": "0.9",
+                        "context_window": 32768,
+                    },
+                )
+            ],
+        )
+
+        update_engine._persist_source_result(source_run_id, result)
+
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                select(models_table).where(models_table.c.id == "verified-model")
+            ).mappings().one()
+
+        self.assertEqual(row["provider"], "Verified Org")
+        self.assertEqual(row["context_window"], "32.8K tokens")
+        self.assertEqual(row["context_window_tokens"], 32768)
+        self.assertEqual(row["price_input_per_mtok"], 0.3)
+        self.assertEqual(row["price_output_per_mtok"], 0.9)
+        self.assertEqual(row["metadata_source_name"], "IFEval")
+        self.assertEqual(
+            row["metadata_source_url"],
+            "https://api.llm-stats.com/leaderboard/benchmarks/ifeval/details",
+        )
 
     def test_refresh_openrouter_model_metadata_imports_untracked_openrouter_model_as_provisional(self) -> None:
         openrouter_items = [

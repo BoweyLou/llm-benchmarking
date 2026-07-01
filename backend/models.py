@@ -83,6 +83,26 @@ class InferenceSummaryOut(APIModel):
     deployment_modes: list[str] = Field(default_factory=list)
 
 
+class SourceFreshnessOut(APIModel):
+    source_name: str
+    source_label: str
+    benchmark_ids: list[str] = Field(default_factory=list)
+    model_benchmark_ids: list[str] = Field(default_factory=list)
+    latest_source_status: str | None = None
+    latest_attempted_at: datetime | None = None
+    latest_success_at: datetime | None = None
+    latest_failure_at: datetime | None = None
+    latest_error: str | None = None
+    latest_model_score_at: datetime | None = None
+    latest_model_raw_record_at: datetime | None = None
+    has_model_score: bool = False
+    has_model_raw_record: bool = False
+    model_evidence_status: str = "unknown"
+    degraded: bool = False
+    stale: bool = False
+    missing_because_source_failed: bool = False
+
+
 class OriginCountryOut(APIModel):
     code: str | None = None
     name: str
@@ -297,6 +317,7 @@ class ModelOut(APIModel):
     active: bool = True
     inference_destinations: list[InferenceDestinationOut] = Field(default_factory=list)
     inference_summary: InferenceSummaryOut = Field(default_factory=InferenceSummaryOut)
+    source_freshness: list[SourceFreshnessOut] = Field(default_factory=list)
     scores: dict[str, ScoreOut | None] = Field(default_factory=dict)
 
 
@@ -367,6 +388,7 @@ class ModelSummaryOut(APIModel):
     approval_updated_at: datetime | None = None
     active: bool = True
     inference_summary: InferenceSummaryOut = Field(default_factory=InferenceSummaryOut)
+    source_freshness: list[SourceFreshnessOut] = Field(default_factory=list)
 
 
 class ProviderOut(APIModel):
@@ -628,6 +650,7 @@ __all__ = [
     "RankingOut",
     "RankingsResponseOut",
     "ScoreOut",
+    "SourceFreshnessOut",
     "SourceRunOut",
     "UpdateLogOut",
     "UpdateStartIn",

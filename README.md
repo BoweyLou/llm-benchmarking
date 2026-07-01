@@ -111,15 +111,26 @@ Fresh SQLite databases are initialized from the current schema in [backend/datab
 
 ## Current Data Sources
 
+For a detailed source-by-source data-flow diagram, source inventory, and
+recommended ingest gaps, see [docs/data-ingest-map.md](docs/data-ingest-map.md).
+
 Benchmark adapters:
 
 - Artificial Analysis
+- Artificial Analysis IFBench
 - Chatbot Arena
 - AILuminate
+- Berkeley Function Calling Leaderboard
+- BigCodeBench
 - GPQA Diamond
+- HELM Capabilities
 - IFEval
+- LiveBench
+- LiveCodeBench
 - MMMU
-- SWE-bench Verified
+- RAGTruth
+- SWE-bench Verified, Lite, Full, Multilingual, and Multimodal
+- tau-bench
 - Terminal-Bench
 - FaithJudge
 - Vectara Hallucination

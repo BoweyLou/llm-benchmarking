@@ -106,6 +106,10 @@ VALID_RECOMMENDATION_STATUSES = {
     RECOMMENDATION_STATUS_NOT_RECOMMENDED,
     RECOMMENDATION_STATUS_DISCOURAGED,
 }
+SOURCE_METADATA_PROMOTION_LABELS = {
+    "chatbot_arena": "Chatbot Arena",
+    "ifeval": "IFEval",
+}
 
 
 class OptionalSourceUnavailable(RuntimeError):
@@ -644,6 +648,7 @@ def list_models() -> list[dict[str, Any]]:
     bootstrap()
     benchmarks = list_benchmarks()
     benchmark_ids = [benchmark["id"] for benchmark in benchmarks]
+    benchmark_source_ids = _benchmark_source_ids(benchmarks)
     latest_scores = _load_latest_scores()
 
     with get_connection(ENGINE) as conn:
@@ -662,6 +667,12 @@ def list_models() -> list[dict[str, Any]]:
         inference_approvals_by_model_id = _load_model_use_case_inference_approvals(conn, model_ids)
         inference_rows_by_model = load_synced_inference_catalog(conn, model_ids)
         authoritative_destination_ids = load_authoritative_destination_ids(conn)
+        source_freshness_by_model_id = _load_source_freshness_by_model_id(
+            conn,
+            model_ids,
+            benchmark_source_ids=benchmark_source_ids,
+            latest_scores=latest_scores,
+        )
 
     providers_by_id = {str(row["id"]): _serialize_provider(row) for row in provider_rows}
     providers_by_name = {
@@ -678,6 +689,7 @@ def list_models() -> list[dict[str, Any]]:
             use_case_approvals=approvals_by_model_id.get(str(row["id"]), {}),
             inference_route_approvals=inference_approvals_by_model_id.get(str(row["id"]), {}),
         )
+        model["source_freshness"] = source_freshness_by_model_id.get(str(row["id"]), [])
         model = attach_inference_catalog(
             model,
             synced_destinations=inference_rows_by_model.get(model["id"]),
@@ -692,6 +704,197 @@ def list_models() -> list[dict[str, Any]]:
         }
         payload.append(model)
     return payload
+
+
+def _benchmark_source_ids(benchmarks: list[dict[str, Any]]) -> dict[str, str]:
+    source_id_by_scraper = {
+        adapter.__class__.__name__: adapter.source_id
+        for adapter in get_source_adapters(include_phase_two=True)
+    }
+    payload: dict[str, str] = {}
+    for benchmark in benchmarks:
+        benchmark_id = str(benchmark.get("id") or "").strip()
+        scraper_id = str(benchmark.get("scraper_id") or "").strip()
+        source_id = source_id_by_scraper.get(scraper_id)
+        if benchmark_id and source_id:
+            payload[benchmark_id] = source_id
+    return payload
+
+
+def _load_source_freshness_by_model_id(
+    conn,
+    model_ids: list[str],
+    *,
+    benchmark_source_ids: dict[str, str],
+    latest_scores: dict[tuple[str, str], dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    if not model_ids:
+        return {}
+
+    source_benchmark_ids: dict[str, set[str]] = {}
+    for benchmark_id, source_name in benchmark_source_ids.items():
+        source_benchmark_ids.setdefault(source_name, set()).add(benchmark_id)
+    source_names = sorted(source_benchmark_ids)
+
+    source_runs = fetch_all(
+        conn,
+        select(source_runs_table).where(source_runs_table.c.source_name.in_(source_names)),
+    ) if source_names else []
+    latest_attempt_by_source: dict[str, dict[str, Any]] = {}
+    latest_success_by_source: dict[str, dict[str, Any]] = {}
+    latest_failure_by_source: dict[str, dict[str, Any]] = {}
+    for row in source_runs:
+        source_name = str(row.get("source_name") or "").strip()
+        if not source_name:
+            continue
+        if _source_run_is_newer(row, latest_attempt_by_source.get(source_name)):
+            latest_attempt_by_source[source_name] = row
+        status = str(row.get("status") or "").strip()
+        if status == "completed" and _source_run_is_newer(row, latest_success_by_source.get(source_name)):
+            latest_success_by_source[source_name] = row
+        if status == "failed" and _source_run_is_newer(row, latest_failure_by_source.get(source_name)):
+            latest_failure_by_source[source_name] = row
+
+    score_data: dict[str, dict[str, dict[str, Any]]] = {model_id: {} for model_id in model_ids}
+    for (model_id, benchmark_id), score in latest_scores.items():
+        model_id = str(model_id)
+        source_name = benchmark_source_ids.get(str(benchmark_id))
+        if model_id not in score_data or source_name is None:
+            continue
+        current = score_data[model_id].setdefault(
+            source_name,
+            {"benchmark_ids": set(), "latest_model_score_at": None},
+        )
+        current["benchmark_ids"].add(str(benchmark_id))
+        collected_at = str(score.get("collected_at") or "")
+        if collected_at and collected_at > str(current.get("latest_model_score_at") or ""):
+            current["latest_model_score_at"] = collected_at
+
+    raw_data: dict[str, dict[str, dict[str, Any]]] = {model_id: {} for model_id in model_ids}
+    raw_join = raw_source_records_table.join(
+        source_runs_table,
+        raw_source_records_table.c.source_run_id == source_runs_table.c.id,
+    )
+    raw_rows = fetch_all(
+        conn,
+        select(
+            raw_source_records_table.c.normalized_model_id,
+            raw_source_records_table.c.benchmark_id,
+            raw_source_records_table.c.collected_at,
+            source_runs_table.c.source_name,
+        )
+        .select_from(raw_join)
+        .where(raw_source_records_table.c.normalized_model_id.in_(model_ids)),
+    )
+    for row in raw_rows:
+        model_id = str(row.get("normalized_model_id") or "").strip()
+        source_name = str(row.get("source_name") or "").strip()
+        benchmark_id = str(row.get("benchmark_id") or "").strip()
+        if model_id not in raw_data or source_name not in source_benchmark_ids:
+            continue
+        current = raw_data[model_id].setdefault(
+            source_name,
+            {"benchmark_ids": set(), "latest_model_raw_record_at": None},
+        )
+        if benchmark_id:
+            current["benchmark_ids"].add(benchmark_id)
+        collected_at = str(row.get("collected_at") or "")
+        if collected_at and collected_at > str(current.get("latest_model_raw_record_at") or ""):
+            current["latest_model_raw_record_at"] = collected_at
+
+    payload: dict[str, list[dict[str, Any]]] = {}
+    for model_id in model_ids:
+        entries = []
+        for source_name in source_names:
+            entries.append(
+                _source_freshness_entry(
+                    source_name,
+                    benchmark_ids=sorted(source_benchmark_ids.get(source_name, set())),
+                    latest_attempt=latest_attempt_by_source.get(source_name),
+                    latest_success=latest_success_by_source.get(source_name),
+                    latest_failure=latest_failure_by_source.get(source_name),
+                    score_data=score_data.get(model_id, {}).get(source_name, {}),
+                    raw_data=raw_data.get(model_id, {}).get(source_name, {}),
+                )
+            )
+        payload[model_id] = entries
+    return payload
+
+
+def _source_freshness_entry(
+    source_name: str,
+    *,
+    benchmark_ids: list[str],
+    latest_attempt: dict[str, Any] | None,
+    latest_success: dict[str, Any] | None,
+    latest_failure: dict[str, Any] | None,
+    score_data: dict[str, Any],
+    raw_data: dict[str, Any],
+) -> dict[str, Any]:
+    latest_source_status = str(latest_attempt.get("status") or "") if latest_attempt is not None else None
+    latest_attempted_at = _source_run_timestamp(latest_attempt)
+    latest_success_at = _source_run_timestamp(latest_success)
+    latest_failure_at = _source_run_timestamp(latest_failure)
+    latest_model_score_at = score_data.get("latest_model_score_at")
+    latest_model_raw_record_at = raw_data.get("latest_model_raw_record_at")
+    has_model_score = bool(score_data.get("benchmark_ids"))
+    has_model_raw_record = bool(raw_data.get("benchmark_ids"))
+    has_model_evidence = has_model_score or has_model_raw_record
+    degraded = latest_source_status == "failed"
+
+    if degraded and has_model_evidence:
+        model_evidence_status = "stale"
+    elif degraded:
+        model_evidence_status = "missing_source_failed"
+    elif latest_source_status == "running" and has_model_evidence:
+        model_evidence_status = "refreshing"
+    elif has_model_evidence:
+        model_evidence_status = "current"
+    elif latest_source_status == "completed":
+        model_evidence_status = "missing"
+    else:
+        model_evidence_status = "unknown"
+
+    return {
+        "source_name": source_name,
+        "source_label": _humanize_source_name(source_name),
+        "benchmark_ids": benchmark_ids,
+        "model_benchmark_ids": sorted(
+            set(score_data.get("benchmark_ids") or set())
+            | set(raw_data.get("benchmark_ids") or set())
+        ),
+        "latest_source_status": latest_source_status,
+        "latest_attempted_at": latest_attempted_at,
+        "latest_success_at": latest_success_at,
+        "latest_failure_at": latest_failure_at,
+        "latest_error": latest_failure.get("error_message") if latest_failure is not None else None,
+        "latest_model_score_at": latest_model_score_at,
+        "latest_model_raw_record_at": latest_model_raw_record_at,
+        "has_model_score": has_model_score,
+        "has_model_raw_record": has_model_raw_record,
+        "model_evidence_status": model_evidence_status,
+        "degraded": degraded,
+        "stale": model_evidence_status == "stale",
+        "missing_because_source_failed": model_evidence_status == "missing_source_failed",
+    }
+
+
+def _source_run_timestamp(row: dict[str, Any] | None) -> str | None:
+    if row is None:
+        return None
+    return str(row.get("completed_at") or row.get("started_at") or "") or None
+
+
+def _source_run_is_newer(row: dict[str, Any], current: dict[str, Any] | None) -> bool:
+    if current is None:
+        return True
+    return (
+        str(row.get("completed_at") or row.get("started_at") or ""),
+        int(row.get("id") or 0),
+    ) > (
+        str(current.get("completed_at") or current.get("started_at") or ""),
+        int(current.get("id") or 0),
+    )
 
 
 def list_providers() -> list[dict[str, Any]]:
@@ -2494,6 +2697,7 @@ def _persist_source_result(
         resolved_candidates[candidate_key] = (model_id, candidate)
 
     for model_id, candidate in resolved_candidates.values():
+        _promote_score_candidate_metadata(model_id, candidate)
         _, outcome = _persist_score_candidate(candidate, resolved_model_id=model_id)
         if outcome == "added":
             scores_added += 1
@@ -2535,6 +2739,180 @@ def _persist_source_result(
         )
 
     return scores_added, scores_updated
+
+
+def _promote_score_candidate_metadata(model_id: str, candidate: ScoreCandidate) -> bool:
+    source_id = str(candidate.source_id or "").strip()
+    if source_id not in SOURCE_METADATA_PROMOTION_LABELS:
+        return False
+
+    trust_level = _source_metadata_trust_level(
+        source_id,
+        candidate.metadata,
+        source_type=candidate.source_type,
+        verified=candidate.verified,
+    )
+    if trust_level is None:
+        return False
+
+    with ENGINE.begin() as conn:
+        row = fetch_one(conn, select(models_table).where(models_table.c.id == model_id))
+        if row is None:
+            return False
+
+        values: dict[str, Any] = {}
+        provider_name = _source_metadata_provider(source_id, candidate.metadata)
+        if provider_name and trust_level != "self_reported":
+            current_provider = str(row.get("provider") or "").strip()
+            current_provider_unknown = not current_provider or current_provider.lower() == "unknown"
+            current_provider_id = str(row.get("provider_id") or "").strip()
+            if current_provider_unknown or (
+                not current_provider_id and normalize_text(current_provider) == normalize_text(provider_name)
+            ):
+                values["provider"] = provider_name
+                values["provider_id"] = _ensure_provider_row(provider_name, conn=conn)
+
+        context_tokens = _source_metadata_context_tokens(source_id, candidate.metadata)
+        if context_tokens is not None and row.get("context_window_tokens") is None:
+            values["context_window_tokens"] = context_tokens
+            if _model_field_missing(row, "context_window"):
+                values["context_window"] = _format_context_window_tokens(context_tokens)
+
+        input_price = _source_metadata_price_per_mtok(source_id, candidate.metadata, input_price=True)
+        if input_price is not None and row.get("price_input_per_mtok") is None:
+            values["price_input_per_mtok"] = input_price
+
+        output_price = _source_metadata_price_per_mtok(source_id, candidate.metadata, input_price=False)
+        if output_price is not None and row.get("price_output_per_mtok") is None:
+            values["price_output_per_mtok"] = output_price
+
+        license_name = _source_metadata_license_name(source_id, candidate.metadata)
+        if license_name and trust_level != "self_reported" and _model_field_missing(row, "license_id") and _model_field_missing(row, "license_name"):
+            values["license_name"] = license_name
+
+        documentation_url = _source_metadata_documentation_url(source_id, candidate.metadata)
+        if documentation_url and _model_field_missing(row, "documentation_url"):
+            values["documentation_url"] = documentation_url
+
+        if values and _model_field_missing(row, "metadata_source_name"):
+            values["metadata_source_name"] = SOURCE_METADATA_PROMOTION_LABELS[source_id]
+            values["metadata_source_url"] = _source_metadata_source_url(source_id, candidate.metadata, candidate.source_url)
+            values["metadata_verified_at"] = candidate.collected_at
+
+        if not values:
+            return False
+
+        conn.execute(
+            update(models_table)
+            .where(models_table.c.id == model_id)
+            .values(**values)
+        )
+        return True
+
+
+def _source_metadata_trust_level(
+    source_id: str,
+    metadata: dict[str, Any],
+    *,
+    source_type: str,
+    verified: bool,
+) -> str | None:
+    if source_id == "chatbot_arena":
+        return "verified"
+
+    if source_id != "ifeval":
+        return None
+
+    self_reported = bool(metadata.get("self_reported"))
+    if verified and not self_reported:
+        return "verified"
+    if self_reported and _clean_text(metadata.get("self_reported_source")):
+        return "self_reported"
+    if source_type == "primary" and verified:
+        return "verified"
+    return None
+
+
+def _source_metadata_provider(source_id: str, metadata: dict[str, Any]) -> str | None:
+    if source_id == "chatbot_arena":
+        return _clean_text(metadata.get("organization") or metadata.get("modelOrganization"))
+    if source_id == "ifeval":
+        return _clean_text(metadata.get("organization_name"))
+    return None
+
+
+def _source_metadata_context_tokens(source_id: str, metadata: dict[str, Any]) -> int | None:
+    if source_id == "chatbot_arena":
+        return _context_window_tokens_from_source(metadata.get("context_length"))
+    if source_id == "ifeval":
+        return _context_window_tokens_from_source(metadata.get("context_window"))
+    return None
+
+
+def _source_metadata_price_per_mtok(source_id: str, metadata: dict[str, Any], *, input_price: bool) -> float | None:
+    if source_id == "chatbot_arena":
+        key = "input_price_per_million" if input_price else "output_price_per_million"
+    elif source_id == "ifeval":
+        key = "input_cost_per_million" if input_price else "output_cost_per_million"
+    else:
+        return None
+    return _safe_float(metadata.get(key))
+
+
+def _source_metadata_license_name(source_id: str, metadata: dict[str, Any]) -> str | None:
+    if source_id == "chatbot_arena":
+        return _clean_text(metadata.get("license"))
+    if source_id == "ifeval":
+        return _clean_text(metadata.get("license") or metadata.get("license_name"))
+    return None
+
+
+def _source_metadata_documentation_url(source_id: str, metadata: dict[str, Any]) -> str | None:
+    if source_id == "chatbot_arena":
+        return _clean_url(metadata.get("model_url") or metadata.get("modelUrl"))
+    return None
+
+
+def _source_metadata_source_url(source_id: str, metadata: dict[str, Any], fallback_url: str) -> str | None:
+    if source_id == "ifeval":
+        return _clean_url(metadata.get("details_url")) or _clean_url(fallback_url)
+    return _clean_url(fallback_url)
+
+
+def _context_window_tokens_from_source(value: Any) -> int | None:
+    direct_value = _safe_int(value)
+    if direct_value is not None:
+        return direct_value if direct_value > 0 else None
+
+    text_value = str(value or "").strip().replace(",", "")
+    if not text_value:
+        return None
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([kKmM]?)\s*(?:tokens?|ctx|context)?", text_value)
+    if not match:
+        return None
+    number = _safe_float(match.group(1))
+    if number is None or number <= 0:
+        return None
+    suffix = match.group(2).lower()
+    if suffix == "m":
+        number *= 1_000_000
+    elif suffix == "k":
+        number *= 1_000
+    return int(number)
+
+
+def _model_field_missing(row: dict[str, Any], field_name: str) -> bool:
+    value = row.get(field_name)
+    return value is None or value == ""
+
+
+def _clean_url(value: Any) -> str | None:
+    url = _clean_text(value)
+    if not url:
+        return None
+    if not re.match(r"^https?://", url, re.IGNORECASE):
+        return None
+    return url
 
 
 def _insert_raw_source_record(
@@ -5081,6 +5459,7 @@ def _model_summary(model: dict[str, Any]) -> dict[str, Any]:
         "approval_updated_at": model.get("approval_updated_at"),
         "active": bool(model.get("active", True)),
         "inference_summary": model.get("inference_summary", {}),
+        "source_freshness": list(model.get("source_freshness", []) or []),
     }
     summary.update(build_license_policy_payload(license_id, license_name))
     summary.update(

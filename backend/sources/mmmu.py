@@ -16,7 +16,7 @@ from .base import (
 
 class MmmuAdapter(BaseSourceAdapter):
     source_id = "mmmu"
-    benchmark_ids = ("mmmu",)
+    benchmark_ids = ("mmmu", "mmmu_test", "mmmu_pro")
     source_url = "https://mmmu-benchmark.github.io/leaderboard_data.json"
 
     async def fetch_raw(self, client: httpx.AsyncClient) -> list[RawSourceRecord]:
@@ -38,14 +38,19 @@ class MmmuAdapter(BaseSourceAdapter):
                 continue
 
             validation = row.get("validation") or {}
-            raw_score = validation.get("overall")
-            if raw_score in (None, "", "-"):
+            test = row.get("test") or {}
+            pro = row.get("pro") or {}
+            raw_score = first_non_empty(validation.get("overall"), test.get("overall"), pro.get("overall"))
+            if not raw_score:
                 continue
+            benchmark_id = "mmmu"
+            if percent_score(validation.get("overall")) is None:
+                benchmark_id = "mmmu_test" if percent_score(test.get("overall")) is not None else "mmmu_pro"
 
             raw_records.append(
                 RawSourceRecord(
                     source_id=self.source_id,
-                    benchmark_id="mmmu",
+                    benchmark_id=benchmark_id,
                     raw_model_name=model_name,
                     raw_value=str(raw_score),
                     source_url=self.source_url,
@@ -54,9 +59,15 @@ class MmmuAdapter(BaseSourceAdapter):
                     payload=row,
                     metadata={
                         "info_type": info.get("type"),
+                        "model_url": info.get("link"),
                         "validation_source": validation.get("source"),
-                        "test_overall": (row.get("test") or {}).get("overall"),
-                        "pro_overall": (row.get("pro") or {}).get("overall"),
+                        "validation_overall": validation.get("overall"),
+                        "test_overall": test.get("overall"),
+                        "test_source": test.get("source"),
+                        "pro_overall": pro.get("overall"),
+                        "pro_source": pro.get("source"),
+                        "pro_vision": pro.get("vision"),
+                        "pro_original": pro.get("original"),
                         "date": info.get("date"),
                         "size": info.get("size"),
                     },
@@ -69,30 +80,51 @@ class MmmuAdapter(BaseSourceAdapter):
         candidates: list[ScoreCandidate] = []
 
         for record in raw_records:
-            value = percent_score(record.raw_value)
-            if value is None:
-                continue
+            metrics = [
+                (
+                    "mmmu",
+                    record.metadata.get("validation_overall", record.raw_value),
+                    "MMMU validation overall score.",
+                    record.metadata.get("validation_source"),
+                ),
+                (
+                    "mmmu_test",
+                    record.metadata.get("test_overall"),
+                    "MMMU test overall score.",
+                    record.metadata.get("test_source"),
+                ),
+                (
+                    "mmmu_pro",
+                    record.metadata.get("pro_overall"),
+                    "MMMU-Pro overall score.",
+                    record.metadata.get("pro_source"),
+                ),
+            ]
 
-            candidates.append(
-                ScoreCandidate(
-                    source_id=self.source_id,
-                    benchmark_id="mmmu",
-                    raw_model_name=record.raw_model_name,
-                    raw_model_key=record.raw_model_key or record.raw_model_name,
-                    value=value,
-                    raw_value=record.raw_value,
-                    source_url=record.source_url,
-                    collected_at=record.collected_at,
-                    source_type="primary",
-                    verified=True,
-                    notes=first_non_empty(
-                        f"MMMU info type: {record.metadata.get('info_type')}",
-                        f"Validation source: {record.metadata.get('validation_source')}",
-                    )
-                    or None,
-                    metadata=dict(record.metadata),
+            for benchmark_id, raw_value, note_prefix, source in metrics:
+                value = percent_score(raw_value)
+                if value is None:
+                    continue
+                notes = first_non_empty(
+                    f"{note_prefix} MMMU info type: {record.metadata.get('info_type')}",
+                    f"Source: {source}",
                 )
-            )
+                candidates.append(
+                    ScoreCandidate(
+                        source_id=self.source_id,
+                        benchmark_id=benchmark_id,
+                        raw_model_name=record.raw_model_name,
+                        raw_model_key=record.raw_model_key or record.raw_model_name,
+                        value=value,
+                        raw_value=str(raw_value),
+                        source_url=record.source_url,
+                        collected_at=record.collected_at,
+                        source_type="primary",
+                        verified=True,
+                        notes=notes or None,
+                        metadata=dict(record.metadata),
+                    )
+                )
 
         return candidates
 
