@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 from sqlalchemy import select
 
 from backend.database import (
@@ -18,9 +19,11 @@ from backend.database import (
 )
 from backend.inference_sync import (
     MissingConfiguration,
+    RetryableSyncSkip,
     SyncOutcome,
     _price_per_mtok,
     _sync_azure_foundry,
+    _sync_azure_foundry_public_pricing,
     _sync_google_vertex_ai,
     sync_inference_catalog,
 )
@@ -113,6 +116,28 @@ class InferenceSyncTests(unittest.TestCase):
         self.assertEqual(records, [])
         self.assertIsNone(status)
 
+    def test_retryable_sync_skip_is_reported_as_skipped(self) -> None:
+        with patch(
+            "backend.inference_sync._sync_destination",
+            side_effect=RetryableSyncSkip(
+                "Azure Retail Prices API rate limited inference sync (HTTP 429); retry later.",
+                skip_type="rate_limited",
+            ),
+        ):
+            summary = sync_inference_catalog(destination_ids=["azure-ai-foundry"], engine=self.engine)
+
+        destination = summary["destinations"]["azure-ai-foundry"]
+        self.assertEqual(summary["records_written"], 0)
+        self.assertEqual(destination["status"], "skipped")
+        self.assertTrue(destination["retryable"])
+        self.assertEqual(destination["skip_type"], "rate_limited")
+        self.assertIn("HTTP 429", destination["reason"])
+
+        with self.engine.begin() as conn:
+            records = fetch_all(conn, select(model_inference_destinations_table))
+
+        self.assertEqual(records, [])
+
     def test_azure_sync_falls_back_to_public_pricing_when_account_config_missing(self) -> None:
         outcome = SyncOutcome(
             destination_id="azure-ai-foundry",
@@ -128,6 +153,28 @@ class InferenceSyncTests(unittest.TestCase):
 
         self.assertIs(result, outcome)
         public_sync.assert_called_once()
+
+    def test_azure_public_pricing_429_is_retryable_skip(self) -> None:
+        request = httpx.Request("GET", "https://prices.azure.com/api/retail/prices")
+        response = httpx.Response(429, headers={"Retry-After": "60"}, request=request)
+        error = httpx.HTTPStatusError("rate limited", request=request, response=response)
+        models = [
+            {
+                "id": "gpt-5",
+                "name": "GPT 5",
+                "provider": "OpenAI",
+                "family_id": "openai::gpt-5",
+                "canonical_model_id": "openai::gpt-5",
+            }
+        ]
+
+        with patch("backend.inference_sync._request_json", side_effect=error):
+            with self.assertRaises(RetryableSyncSkip) as context:
+                _sync_azure_foundry_public_pricing(models, client=None)  # type: ignore[arg-type]
+
+        self.assertEqual(context.exception.skip_type, "rate_limited")
+        self.assertIn("HTTP 429", str(context.exception))
+        self.assertIn("Retry-After: 60", str(context.exception))
 
     def test_price_per_mtok_supports_bare_k_and_m_units(self) -> None:
         self.assertEqual(_price_per_mtok(2.5, "1M"), 2.5)

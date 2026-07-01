@@ -75,6 +75,10 @@ python -m backend model-curation-export
 ```
 
 Manual curation should be written back to the tracked baseline JSON files when it needs to survive database rebuilds.
+Azure AI Foundry public pricing uses the Azure Retail Prices API, which can
+rate-limit with HTTP 429. Inference sync reports that condition as a retryable
+skipped destination so smoke checks can pass for unrelated providers;
+non-rate-limit Azure failures still fail the sync.
 
 ## Recommended Update Cadence
 

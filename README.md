@@ -213,5 +213,8 @@ PYTHON=python ./scripts/test_inference_sync_smoke.sh azure-ai-foundry google-ver
 If `inference-sync` exits nonzero, the smoke script prints the captured stdout,
 stderr, and exit code before failing. If JSON validation fails after a command
 completes, it prints the captured sync payload with the failing reason.
+Azure public retail pricing can rate-limit with HTTP 429; that destination is
+reported as a retryable skipped result and accepted by smoke checks, while
+non-rate-limit sync failures still fail the script.
 
 `aws-bedrock` can run in pricing-only mode without credentials. `azure-ai-foundry` has a public-pricing-only fallback without credentials. `google-vertex-ai` has a published-endpoints-only fallback without credentials.

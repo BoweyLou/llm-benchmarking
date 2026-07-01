@@ -14,13 +14,6 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: `AGENTS.md` becomes a shorter route map; detailed rules move to scoped docs or checker-owned config; rule-like bullets have clear provenance/context.
   - Validation: `make agent-docs-lint`; `make docs-check`.
 
-- [ ] LBM-014: P2 Treat Azure pricing 429 as a retryable smoke-test skip
-  - Source: Codex update-script test 2026-07-01.
-  - Problem: Azure AI Foundry public pricing returned HTTP 429 during `inference-sync`, causing the all-destination smoke script to fail even though AWS Bedrock pricing-only and Google Vertex published-endpoints fallbacks completed.
-  - Scope: `backend/inference_sync.py`, `scripts/test_inference_sync_smoke.sh`, README inference smoke notes.
-  - Acceptance: Azure pricing rate limits are represented as a retryable/rate-limited skipped outcome that smoke tests accept with a clear reason; non-rate-limit sync failures still fail the script; docs explain that public pricing can rate-limit.
-  - Validation: mocked or live Azure 429 run reports a skipped/rate-limited status; `PYTHON=python ./scripts/test_inference_sync_smoke.sh`; `PYTHON=python ./scripts/test_inference_sync_smoke.sh aws-bedrock google-vertex-ai`.
-
 ## Done
 
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
@@ -62,6 +55,14 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: when the inference-sync CLI fails, the smoke script prints the captured JSON or stderr/stdout diagnostic plus the exit code before exiting nonzero; successful runs keep the current concise JSON report.
   - Validation: a failing destination run such as `PYTHON=python ./scripts/test_inference_sync_smoke.sh azure-ai-foundry` prints the destination failure reason; the AWS/Google subset still exits 0 and prints valid JSON.
   - Completed: 2026-07-01. The smoke script now captures stdout/stderr around the CLI, prints diagnostics with the exit code on command failure, and prints the sync JSON payload when validation fails.
+
+- [x] LBM-014: P2 Treat Azure pricing 429 as a retryable smoke-test skip
+  - Source: Codex update-script test 2026-07-01.
+  - Problem: Azure AI Foundry public pricing returned HTTP 429 during `inference-sync`, causing the all-destination smoke script to fail even though AWS Bedrock pricing-only and Google Vertex published-endpoints fallbacks completed.
+  - Scope: `backend/inference_sync.py`, `scripts/test_inference_sync_smoke.sh`, README inference smoke notes.
+  - Acceptance: Azure pricing rate limits are represented as a retryable/rate-limited skipped outcome that smoke tests accept with a clear reason; non-rate-limit sync failures still fail the script; docs explain that public pricing can rate-limit.
+  - Validation: mocked or live Azure 429 run reports a skipped/rate-limited status; `PYTHON=python ./scripts/test_inference_sync_smoke.sh`; `PYTHON=python ./scripts/test_inference_sync_smoke.sh aws-bedrock google-vertex-ai`.
+  - Completed: 2026-07-01. Azure Retail Prices API HTTP 429 now reports a retryable `rate_limited` skipped outcome, smoke tests accept skipped retryable destinations, and docs explain the rate-limit behavior.
 
 - [x] LBM-001: P1 Split startup bootstrap from live metadata refresh
   - Source: Codex repo review 2026-07-01.

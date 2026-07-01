@@ -73,6 +73,14 @@ class MissingConfiguration(RuntimeError):
     """Raised when a cloud sync cannot run without user-supplied credentials."""
 
 
+class RetryableSyncSkip(RuntimeError):
+    """Raised when a destination sync should be retried instead of marked failed."""
+
+    def __init__(self, reason: str, *, skip_type: str = "retryable") -> None:
+        super().__init__(reason)
+        self.skip_type = skip_type
+
+
 @dataclass
 class SyncOutcome:
     destination_id: str
@@ -108,6 +116,14 @@ def sync_inference_catalog(
                 summary["destinations"][destination_id] = {
                     "status": "skipped",
                     "reason": str(exc),
+                }
+                continue
+            except RetryableSyncSkip as exc:
+                summary["destinations"][destination_id] = {
+                    "status": "skipped",
+                    "reason": str(exc),
+                    "retryable": True,
+                    "skip_type": exc.skip_type,
                 }
                 continue
             except Exception as exc:
@@ -977,14 +993,18 @@ def _azure_sku_meter_ids(sku: dict[str, Any]) -> list[str]:
 def _azure_price_index(client: httpx.Client, meter_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     index: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for meter_id in meter_ids:
-        payload = _request_json(
-            client,
-            AZURE_RETAIL_PRICES_URL,
-            params={
-                "api-version": "2023-01-01-preview",
-                "$filter": f"meterId eq '{meter_id}' and priceType eq 'Consumption'",
-            },
-        )
+        try:
+            payload = _request_json(
+                client,
+                AZURE_RETAIL_PRICES_URL,
+                params={
+                    "api-version": "2023-01-01-preview",
+                    "$filter": f"meterId eq '{meter_id}' and priceType eq 'Consumption'",
+                },
+            )
+        except httpx.HTTPStatusError as exc:
+            _raise_retryable_azure_pricing_skip(exc)
+            raise
         items = payload.get("Items", [])
         if not isinstance(items, list):
             continue
@@ -1094,15 +1114,19 @@ def _azure_generic_model_terms(model: dict[str, Any]) -> list[str]:
 
 
 def _azure_public_price_entries(client: httpx.Client, filter_expr: str) -> list[dict[str, Any]]:
-    payload = _request_json(
-        client,
-        AZURE_RETAIL_PRICES_URL,
-        params={
-            "api-version": "2023-01-01-preview",
-            "$filter": filter_expr,
-        },
-    )
-    items = list(_iterate_collection(payload, client))
+    try:
+        payload = _request_json(
+            client,
+            AZURE_RETAIL_PRICES_URL,
+            params={
+                "api-version": "2023-01-01-preview",
+                "$filter": filter_expr,
+            },
+        )
+        items = list(_iterate_collection(payload, client))
+    except httpx.HTTPStatusError as exc:
+        _raise_retryable_azure_pricing_skip(exc)
+        raise
     entries: list[dict[str, Any]] = []
     for item in items:
         unit_price = _to_float(item.get("unitPrice"))
@@ -1126,6 +1150,17 @@ def _azure_public_price_entries(client: httpx.Client, filter_expr: str) -> list[
             }
         )
     return entries
+
+
+def _raise_retryable_azure_pricing_skip(exc: httpx.HTTPStatusError) -> None:
+    response = exc.response
+    if response.status_code != 429:
+        return
+    retry_after = response.headers.get("Retry-After") or response.headers.get("retry-after")
+    reason = "Azure Retail Prices API rate limited inference sync (HTTP 429); retry later."
+    if retry_after:
+        reason = f"{reason} Retry-After: {retry_after}."
+    raise RetryableSyncSkip(reason, skip_type="rate_limited") from exc
 
 
 def _azure_public_provider_name(item: dict[str, Any]) -> str | None:
@@ -1740,4 +1775,4 @@ def _clean_optional_text(value: Any) -> str | None:
     return text or None
 
 
-__all__ = ["MissingConfiguration", "sync_inference_catalog"]
+__all__ = ["MissingConfiguration", "RetryableSyncSkip", "sync_inference_catalog"]
