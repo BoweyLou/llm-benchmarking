@@ -7,13 +7,6 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Open
 
-- [ ] LBM-009: P2 Fill repo goal and area contracts for backend, schemas, scripts, and prompt adapters
-  - Source: Codex repo review 2026-07-01.
-  - Problem: `make goal-check` reports placeholder repo goal text and 153 unknown changed paths because `.agent-workflows/area-contracts.json` only covers `docs/` and `.agent-workflows/`.
-  - Scope: `.agent-workflows/area-contracts.json`, `docs/working-rhythm.md` if needed.
-  - Acceptance: area contracts cover backend source/tests, scripts, schemas, `.codex/prompts`, `.doc-contract-kit`, GitHub workflow files, and root project metadata; repo goal is specific to LLM Benchmarking.
-  - Validation: `make goal-check` reports no unknown paths for the current baseline or documents intentional exceptions.
-
 - [ ] LBM-010: P3 Trim agent instruction debt after kit install
   - Source: Codex repo review 2026-07-01.
   - Problem: `make agent-docs-lint` passes with warnings because `AGENTS.md` exceeds its budget and `.agent-workflows/repo-review.md` has a rule-provenance warning.
@@ -60,6 +53,14 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: schema evolution has one authoritative path, either through a lightweight migration table or a documented migration tool; bootstrap remains able to initialize a fresh SQLite database.
   - Validation: fresh temp-database bootstrap; upgrade from current `data/db.sqlite` copy; targeted backend unittest suite.
   - Completed: 2026-07-01. SQLite bootstrap now records idempotent schema repairs in `schema_migrations`, and docs direct future schema changes through `SCHEMA_MIGRATIONS`.
+
+- [x] LBM-009: P2 Fill repo goal and area contracts for backend, schemas, scripts, and prompt adapters
+  - Source: Codex repo review 2026-07-01.
+  - Problem: `make goal-check` reports placeholder repo goal text and 153 unknown changed paths because `.agent-workflows/area-contracts.json` only covers `docs/` and `.agent-workflows/`.
+  - Scope: `.agent-workflows/area-contracts.json`, `docs/working-rhythm.md` if needed.
+  - Acceptance: area contracts cover backend source/tests, scripts, schemas, `.codex/prompts`, `.doc-contract-kit`, GitHub workflow files, and root project metadata; repo goal is specific to LLM Benchmarking.
+  - Validation: `make goal-check` reports no unknown paths for the current baseline or documents intentional exceptions.
+  - Completed: 2026-07-01. The repo goal now names the LLM benchmarking workspace, and area contracts cover all 185 tracked baseline files with zero unknown paths in a tracked-file goal-check audit.
 
 - [x] LBM-001: P1 Split startup bootstrap from live metadata refresh
   - Source: Codex repo review 2026-07-01.
