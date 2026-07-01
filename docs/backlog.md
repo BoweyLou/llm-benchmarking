@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-029: P2 Add HELM Capabilities published snapshot adapter
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: the ingest process did not use Stanford CRFM HELM's published capabilities snapshot, which provides transparent cross-scenario model evidence.
+  - Scope: `backend/sources/helm_capabilities.py`, adapter registration, benchmark seed rows, raw metadata persistence, docs, and source spot checks.
+  - Acceptance: ingest HELM Capabilities core-scenarios mean and component scores from the official release JSON; preserve release, date, model metadata, metric headers, and run-spec links; keep values in percent form.
+  - Validation: fixture-backed parser/persistence tests; selected temp database update/export; source spot-check suite; docs and kit readiness checks.
+  - Completed: 2026-07-01. The adapter now imports the official `v1.15.0` Capabilities `core_scenarios` Accuracy table into six benchmark IDs.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.

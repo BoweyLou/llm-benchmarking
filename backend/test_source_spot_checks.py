@@ -15,6 +15,7 @@ from backend.seed_data import seed_reference_data
 from backend.sources.artificial_analysis import ArtificialAnalysisAdapter
 from backend.sources.base import RawSourceRecord, SourceFetchResult
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
+from backend.sources.helm_capabilities import HelmCapabilitiesAdapter
 from backend.sources.ifeval import IfevalAdapter
 from backend.sources.swebench import SwebenchAdapter
 
@@ -202,6 +203,110 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
         self.assertEqual(raw_rows[-1]["normalized_model_id"], "gpt-5-4")
         self.assertTrue(all(row["source_type"] == "secondary" for row in raw_rows))
+
+    def test_helm_capabilities_spot_check_persists_mean_and_components(self) -> None:
+        adapter = HelmCapabilitiesAdapter()
+        metrics = {
+            "helm_capabilities_mean": {
+                "header": "Mean score",
+                "label": "Mean accuracy score",
+                "value": 0.65,
+                "description": None,
+                "run_spec_names": [],
+            },
+            "helm_capabilities_mmlu_pro": {
+                "header": "MMLU-Pro - COT correct",
+                "label": "MMLU-Pro COT correct",
+                "value": 0.7,
+                "description": "min=0.7, mean=0.7, max=0.7, sum=0.7 (1)",
+                "run_spec_names": ["mmlu_pro:subset=all,model=anthropic_claude-opus-4-6"],
+            },
+            "helm_capabilities_gpqa": {
+                "header": "GPQA - COT correct",
+                "label": "GPQA COT correct",
+                "value": 0.6,
+                "description": "min=0.6, mean=0.6, max=0.6, sum=0.6 (1)",
+                "run_spec_names": ["gpqa:subset=gpqa_main,model=anthropic_claude-opus-4-6"],
+            },
+            "helm_capabilities_ifeval": {
+                "header": "IFEval - IFEval Strict Acc",
+                "label": "IFEval strict accuracy",
+                "value": 0.82,
+                "description": "min=0.82, mean=0.82, max=0.82, sum=0.82 (1)",
+                "run_spec_names": ["ifeval:model=anthropic_claude-opus-4-6"],
+            },
+            "helm_capabilities_wildbench": {
+                "header": "WildBench - WB Score",
+                "label": "WildBench score",
+                "value": 0.58,
+                "description": "min=0.58, mean=0.58, max=0.58, sum=0.58 (1)",
+                "run_spec_names": ["wildbench:subset=v2,model=anthropic_claude-opus-4-6"],
+            },
+            "helm_capabilities_omni_math": {
+                "header": "Omni-MATH - Acc",
+                "label": "Omni-MATH accuracy",
+                "value": 0.55,
+                "description": "min=0.55, mean=0.55, max=0.55, sum=0.55 (1)",
+                "run_spec_names": ["omni_math:model=anthropic_claude-opus-4-6"],
+            },
+        }
+        raw_record = RawSourceRecord(
+            source_id=adapter.source_id,
+            benchmark_id="helm_capabilities_mean",
+            raw_model_name="Claude Opus 4.6",
+            raw_value=json.dumps(metrics, ensure_ascii=True, sort_keys=True),
+            source_url="https://storage.googleapis.com/crfm-helm-public/capabilities/benchmark_output/releases/v1.15.0/groups/core_scenarios.json",
+            collected_at=FUTURE_COLLECTED_AT,
+            raw_model_key="anthropic/claude-opus-4.6",
+            payload={"row": []},
+            metadata={
+                "project": "capabilities",
+                "release": "v1.15.0",
+                "release_date": "2025-11-24",
+                "group_name": "core_scenarios",
+                "table_title": "Accuracy",
+                "model": {
+                    "name": "anthropic/claude-opus-4.6",
+                    "display_name": "Claude Opus 4.6",
+                    "creator_organization": "Anthropic",
+                    "access": "limited",
+                    "release_date": "2026-02-17",
+                },
+                "metrics": metrics,
+                "source_policy": "official_helm_capabilities_core_scenarios_accuracy",
+            },
+        )
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, [raw_record])
+
+        candidate_values = {candidate.benchmark_id: round(candidate.value, 3) for candidate in candidates}
+        self.assertEqual(
+            candidate_values,
+            {
+                "helm_capabilities_mean": 65.0,
+                "helm_capabilities_mmlu_pro": 70.0,
+                "helm_capabilities_gpqa": 60.0,
+                "helm_capabilities_ifeval": 82.0,
+                "helm_capabilities_wildbench": 58.0,
+                "helm_capabilities_omni_math": 55.0,
+            },
+        )
+
+        mean = self._latest_score("claude-opus-4-6", "helm_capabilities_mean")
+        ifeval = self._latest_score("claude-opus-4-6", "helm_capabilities_ifeval")
+        self.assertAlmostEqual(float(mean["value"]), 65.0)
+        self.assertAlmostEqual(float(ifeval["value"]), 82.0)
+        self.assertEqual(mean["source_type"], "primary")
+        self.assertEqual(mean["verified"], 1)
+        self.assertIn("Official HELM Capabilities v1.15.0 Mean accuracy", str(mean["notes"]))
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 1)
+        self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
+        self.assertEqual(raw_rows[0]["source_type"], "primary")
+        raw_note = json.loads(str(raw_rows[0]["notes"]))
+        self.assertEqual(raw_note["release"], "v1.15.0")
+        self.assertEqual(raw_note["table_title"], "Accuracy")
 
     def test_ifeval_spot_check_preserves_secondary_trust_labels(self) -> None:
         adapter = IfevalAdapter()

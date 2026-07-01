@@ -117,6 +117,7 @@ Benchmark adapters:
 - Chatbot Arena
 - AILuminate
 - GPQA Diamond
+- HELM Capabilities
 - IFEval
 - MMMU
 - SWE-bench Verified
