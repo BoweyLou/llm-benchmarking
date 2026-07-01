@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-021: P2 Expand AILuminate locale, system-class, and risk evidence
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: AILuminate selected one best public grade per model, losing locale, system-class, and public risk ordinal detail that matters for safety/compliance review.
+  - Scope: `backend/sources/ailuminate.py`, benchmark seed rows, companion evidence storage, safety docs/tests.
+  - Acceptance: retain the current public-grade benchmark while preserving per-locale and per-system-class evidence; add risk-category breakdowns only when the source surface is stable enough to test.
+  - Validation: fixture-backed AILuminate normalization/persistence test; selected temp-database update/export; source spot-check suite; docs and kit readiness checks.
+  - Completed: 2026-07-01. The adapter now emits `ailuminate_en_us`, `ailuminate_fr_fr`, `ailuminate_ai_systems`, and `ailuminate_bare_models` companion grades while keeping `ailuminate` stable and preserving public `risk_ordinal` metadata without inventing unsupported category-level risk scores.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.

@@ -124,6 +124,13 @@ Benchmark adapters:
 - FaithJudge
 - Vectara Hallucination
 
+AILuminate stores the existing aggregate safety grade and companion public-grade
+views by locale (`ailuminate_en_us`, `ailuminate_fr_fr`) and system class
+(`ailuminate_ai_systems`, `ailuminate_bare_models`). Raw records retain the
+source locale, benchmark version, system class, detail URL, and public
+`risk_ordinal`; category-level risk breakdowns are not inferred from the coarse
+public grade page.
+
 Metadata and catalog enrichments:
 
 - OpenRouter models and market/ranking signals

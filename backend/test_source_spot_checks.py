@@ -12,6 +12,7 @@ from backend import audit_engine
 from backend import update_engine
 from backend.database import fetch_all, fetch_one, get_connection, get_engine, init_db, scores as scores_table
 from backend.seed_data import seed_reference_data
+from backend.sources.ailuminate import AILuminateAdapter
 from backend.sources.artificial_analysis import ArtificialAnalysisAdapter
 from backend.sources.base import RawSourceRecord, SourceFetchResult
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
@@ -121,6 +122,118 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(len(raw_rows), 1)
         self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
         self.assertEqual(raw_rows[0]["resolution_status"], "resolved")
+
+    def test_ailuminate_spot_check_persists_locale_and_system_class_metrics(self) -> None:
+        adapter = AILuminateAdapter()
+        raw_records = [
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="ailuminate",
+                raw_model_name="Claude Opus 4.6",
+                raw_value="Good",
+                source_url=adapter.source_url,
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="Claude Opus 4.6",
+                payload={
+                    "locale": "en_us",
+                    "system_class": "AI Systems",
+                    "grade_label": "Good",
+                    "risk_ordinal": 3,
+                },
+                metadata={
+                    "page_url": adapter.source_url,
+                    "locale": "en_us",
+                    "benchmark_version": "1.0-en_us-official-ensemble",
+                    "system_class": "AI Systems",
+                    "detail_url": f"{adapter.source_url}/claude-opus-4-6",
+                    "risk_ordinal": 3,
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="ailuminate",
+                raw_model_name="Claude Opus 4.6",
+                raw_value="Very Good",
+                source_url="https://ailuminate.mlcommons.org/benchmarks/general_purpose_ai_chat/1.0-fr_fr-official-ensemble",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="Claude Opus 4.6",
+                payload={
+                    "locale": "fr_fr",
+                    "system_class": "AI Systems",
+                    "grade_label": "Very Good",
+                    "risk_ordinal": 4,
+                },
+                metadata={
+                    "page_url": "https://ailuminate.mlcommons.org/benchmarks/general_purpose_ai_chat/1.0-fr_fr-official-ensemble",
+                    "locale": "fr_fr",
+                    "benchmark_version": "1.0-fr_fr-official-ensemble",
+                    "system_class": "AI Systems",
+                    "detail_url": "https://ailuminate.mlcommons.org/benchmarks/general_purpose_ai_chat/1.0-fr_fr-official-ensemble/claude-opus-4-6",
+                    "risk_ordinal": 4,
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="ailuminate",
+                raw_model_name="Claude Opus 4.6",
+                raw_value="Fair",
+                source_url=adapter.source_url,
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="Claude Opus 4.6",
+                payload={
+                    "locale": "en_us",
+                    "system_class": "Bare Models",
+                    "grade_label": "Fair",
+                    "risk_ordinal": 2,
+                },
+                metadata={
+                    "page_url": adapter.source_url,
+                    "locale": "en_us",
+                    "benchmark_version": "1.0-en_us-official-ensemble",
+                    "system_class": "Bare Models",
+                    "detail_url": f"{adapter.source_url}/claude-opus-4-6-bare",
+                    "risk_ordinal": 2,
+                },
+            ),
+        ]
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, raw_records)
+
+        candidate_values = {candidate.benchmark_id: candidate.value for candidate in candidates}
+        self.assertEqual(
+            candidate_values,
+            {
+                "ailuminate": 75.0,
+                "ailuminate_ai_systems": 75.0,
+                "ailuminate_bare_models": 25.0,
+                "ailuminate_en_us": 50.0,
+                "ailuminate_fr_fr": 75.0,
+            },
+        )
+
+        locale_candidate = next(candidate for candidate in candidates if candidate.benchmark_id == "ailuminate_en_us")
+        self.assertEqual(locale_candidate.metadata["score_scope"], "locale")
+        self.assertEqual(locale_candidate.metadata["locale"], "en_us")
+        self.assertEqual(locale_candidate.metadata["system_class"], "AI Systems")
+        self.assertIn("Risk ordinal: 3", str(locale_candidate.notes))
+
+        system_candidate = next(candidate for candidate in candidates if candidate.benchmark_id == "ailuminate_bare_models")
+        self.assertEqual(system_candidate.metadata["score_scope"], "system_class")
+        self.assertEqual(system_candidate.metadata["system_class"], "Bare Models")
+
+        for benchmark_id, expected_value in candidate_values.items():
+            score = self._latest_score("claude-opus-4-6", benchmark_id)
+            self.assertAlmostEqual(float(score["value"]), expected_value)
+            self.assertEqual(score["source_type"], "primary")
+            self.assertEqual(score["verified"], 1)
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 3)
+        self.assertTrue(all(row["normalized_model_id"] == "claude-opus-4-6" for row in raw_rows))
+        raw_notes = [json.loads(str(row["notes"])) for row in raw_rows]
+        self.assertEqual({note["locale"] for note in raw_notes}, {"en_us", "fr_fr"})
+        self.assertEqual({note["system_class"] for note in raw_notes}, {"AI Systems", "Bare Models"})
+        self.assertEqual({note["risk_ordinal"] for note in raw_notes}, {2, 3, 4})
 
     def test_swebench_spot_check_keeps_best_submission_for_each_model(self) -> None:
         adapter = SwebenchAdapter()
