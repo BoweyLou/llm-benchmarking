@@ -111,6 +111,9 @@ Fresh SQLite databases are initialized from the current schema in [backend/datab
 
 ## Current Data Sources
 
+For a detailed source-by-source data-flow diagram, source inventory, and
+recommended ingest gaps, see [docs/data-ingest-map.md](docs/data-ingest-map.md).
+
 Benchmark adapters:
 
 - Artificial Analysis
