@@ -42,13 +42,6 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: schema evolution has one authoritative path, either through a lightweight migration table or a documented migration tool; bootstrap remains able to initialize a fresh SQLite database.
   - Validation: fresh temp-database bootstrap; upgrade from current `data/db.sqlite` copy; targeted backend unittest suite.
 
-- [ ] LBM-008: P1 Establish a clean initial Git baseline
-  - Source: Codex repo review 2026-07-01.
-  - Problem: the repo now has a `.git` directory but no commits; every project file is untracked, so diff-based kit gates, docs-impact checks, and future reviews cannot distinguish baseline from change.
-  - Scope: repository root, `.gitignore`, generated/runtime artifacts, first commit plan.
-  - Acceptance: tracked source/docs/config files are intentionally staged; ignored runtime artifacts remain ignored; an initial baseline commit exists before feature work starts.
-  - Validation: `git status --short`; `make docs-check`; targeted backend unittest suite; `kit start --no-update --json`.
-
 - [ ] LBM-009: P2 Fill repo goal and area contracts for backend, schemas, scripts, and prompt adapters
   - Source: Codex repo review 2026-07-01.
   - Problem: `make goal-check` reports placeholder repo goal text and 153 unknown changed paths because `.agent-workflows/area-contracts.json` only covers `docs/` and `.agent-workflows/`.
@@ -108,3 +101,11 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: all POST/PATCH/PUT mutation routes require an explicit local admin token or equivalent opt-in guard; read-only routes remain usable without credentials; local-only deployment instructions are documented.
   - Validation: API tests cover authorized and unauthorized mutation attempts; `python -m unittest backend.test_api_auth backend.test_rankings backend.test_catalog_export`; `make docs-check`.
   - Completed: 2026-07-01. Mutating API routes are disabled unless `LLM_BENCHMARKING_ADMIN_TOKEN` is configured, and requests must send the token via header or bearer auth.
+
+- [x] LBM-008: P1 Establish a clean initial Git baseline
+  - Source: Codex repo review 2026-07-01.
+  - Problem: the repo now has a `.git` directory but no commits; every project file is untracked, so diff-based kit gates, docs-impact checks, and future reviews cannot distinguish baseline from change.
+  - Scope: repository root, `.gitignore`, generated/runtime artifacts, first commit plan.
+  - Acceptance: tracked source/docs/config files are intentionally staged; ignored runtime artifacts remain ignored; an initial baseline commit exists before feature work starts.
+  - Validation: `git status --short`; `make docs-check`; `python -m unittest backend.test_api_auth backend.test_catalog_export backend.test_rankings`; `kit start --no-update --json`.
+  - Completed: 2026-07-01. Local baseline commits now track source/docs/config files, generated runtime artifacts remain ignored, and kit sees a clean target-installed repo.
