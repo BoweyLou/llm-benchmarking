@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-022: P2 Expand Artificial Analysis ingestion beyond the model leaderboard
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: the Artificial Analysis adapter only ingested intelligence, speed, and blended cost from the model leaderboard, while AA publishes additional evaluation pages that can fill instruction-following and efficiency gaps.
+  - Scope: new `backend/sources/artificial_analysis_ifbench.py`, benchmark seed rows, parser tests, source-quality documentation.
+  - Acceptance: ingest at least one additional stable AA evaluation page first; record source page, metric, score direction, token/cost data when present, and isolate parser degradation from unrelated AA model-leaderboard updates.
+  - Validation: fixture-backed IFBench parser/persistence test; selected temp-database update/export for the new AA benchmarks; source spot-check suite; docs and kit readiness checks.
+  - Completed: 2026-07-01. Added a separate Artificial Analysis IFBench source adapter that parses the public JSON-LD datasets into `aa_ifbench`, `aa_ifbench_output_tokens`, `aa_ifbench_cost`, and `aa_ifbench_time` while leaving the existing model-leaderboard adapter independent.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.

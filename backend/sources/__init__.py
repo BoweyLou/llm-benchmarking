@@ -2,6 +2,7 @@
 
 from .ailuminate import AILuminateAdapter
 from .artificial_analysis import ArtificialAnalysisAdapter
+from .artificial_analysis_ifbench import ArtificialAnalysisIfbenchAdapter
 from .chatbot_arena import ChatbotArenaAdapter
 from .epoch_gpqa import EpochGpqaAdapter
 from .faithjudge import FaithJudgeAdapter
@@ -15,6 +16,7 @@ from .vectara_hallucination import VectaraHallucinationAdapter
 def get_phase_one_adapters():
     return [
         ArtificialAnalysisAdapter(),
+        ArtificialAnalysisIfbenchAdapter(),
         AILuminateAdapter(),
         ChatbotArenaAdapter(),
         EpochGpqaAdapter(),
@@ -42,6 +44,7 @@ def get_source_adapters(*, include_phase_two: bool = False):
 __all__ = [
     "AILuminateAdapter",
     "ArtificialAnalysisAdapter",
+    "ArtificialAnalysisIfbenchAdapter",
     "ChatbotArenaAdapter",
     "EpochGpqaAdapter",
     "FaithJudgeAdapter",

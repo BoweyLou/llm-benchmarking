@@ -13,6 +13,7 @@ from backend import update_engine
 from backend.database import fetch_all, fetch_one, get_connection, get_engine, init_db, scores as scores_table
 from backend.seed_data import seed_reference_data
 from backend.sources.artificial_analysis import ArtificialAnalysisAdapter
+from backend.sources.artificial_analysis_ifbench import ArtificialAnalysisIfbenchAdapter
 from backend.sources.base import RawSourceRecord, SourceFetchResult
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
 from backend.sources.ifeval import IfevalAdapter
@@ -121,6 +122,95 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(len(raw_rows), 1)
         self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
         self.assertEqual(raw_rows[0]["resolution_status"], "resolved")
+
+    def test_artificial_analysis_ifbench_spot_check_persists_score_efficiency_metrics(self) -> None:
+        adapter = ArtificialAnalysisIfbenchAdapter()
+        raw_records = adapter._build_raw_records(
+            [
+                {
+                    "name": "IFBench Benchmark Leaderboard: Score",
+                    "data": [
+                        {
+                            "label": "Claude Opus 4.6",
+                            "IFBench Benchmark Leaderboard": 0.8125,
+                            "detailsUrl": "/models/claude-opus-4-6",
+                        }
+                    ],
+                },
+                {
+                    "name": "IFBench Benchmark Leaderboard: Output Tokens per Task",
+                    "data": [
+                        {
+                            "label": "Claude Opus 4.6",
+                            "answer": 110.0,
+                            "reasoning": 240.5,
+                            "detailsUrl": "/models/claude-opus-4-6",
+                        }
+                    ],
+                },
+                {
+                    "name": "IFBench Benchmark Leaderboard: Cost per Task",
+                    "data": [
+                        {
+                            "label": "Claude Opus 4.6",
+                            "answer": 0.012,
+                            "reasoning": 0.034,
+                            "cacheWrite": 0.001,
+                            "cacheHit": 0.002,
+                            "input": 0.003,
+                            "detailsUrl": "/models/claude-opus-4-6",
+                        }
+                    ],
+                },
+                {
+                    "name": "IFBench Benchmark Leaderboard: Time per Task",
+                    "data": [
+                        {
+                            "label": "Claude Opus 4.6",
+                            "IFBench Benchmark Leaderboard time per task": 0.75,
+                            "detailsUrl": "/models/claude-opus-4-6",
+                        }
+                    ],
+                },
+            ],
+            fetched_at=FUTURE_COLLECTED_AT,
+        )
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, raw_records)
+
+        candidate_values = {candidate.benchmark_id: candidate.value for candidate in candidates}
+        self.assertEqual(
+            set(candidate_values),
+            {"aa_ifbench", "aa_ifbench_cost", "aa_ifbench_output_tokens", "aa_ifbench_time"},
+        )
+        self.assertAlmostEqual(candidate_values["aa_ifbench"], 81.25)
+        self.assertAlmostEqual(candidate_values["aa_ifbench_cost"], 0.052)
+        self.assertAlmostEqual(candidate_values["aa_ifbench_output_tokens"], 350.5)
+        self.assertAlmostEqual(candidate_values["aa_ifbench_time"], 0.75)
+
+        score_candidate = next(candidate for candidate in candidates if candidate.benchmark_id == "aa_ifbench")
+        self.assertEqual(score_candidate.raw_model_key, "claude-opus-4-6")
+        self.assertEqual(score_candidate.metadata["metric"], "score_percent")
+        self.assertEqual(score_candidate.metadata["details_url"], "https://artificialanalysis.ai/models/claude-opus-4-6")
+
+        cost_candidate = next(candidate for candidate in candidates if candidate.benchmark_id == "aa_ifbench_cost")
+        self.assertEqual(cost_candidate.metadata["metric_group"], "cost")
+        self.assertAlmostEqual(cost_candidate.metadata["metrics"]["cost_per_task_usd"], 0.052)
+
+        for benchmark_id, expected_value in candidate_values.items():
+            score = self._latest_score("claude-opus-4-6", benchmark_id)
+            self.assertAlmostEqual(float(score["value"]), expected_value)
+            self.assertEqual(score["source_type"], "primary")
+            self.assertEqual(score["verified"], 1)
+            self.assertIn("Artificial Analysis IFBench field", str(score["notes"]))
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 1)
+        self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
+        raw_notes = json.loads(str(raw_rows[0]["notes"]))
+        self.assertEqual(raw_notes["evaluation"], "IFBench")
+        self.assertEqual(raw_notes["metrics"]["output_tokens_per_task"], 350.5)
+        self.assertAlmostEqual(raw_notes["metrics"]["score_fraction"], 0.8125)
 
     def test_swebench_spot_check_keeps_best_submission_for_each_model(self) -> None:
         adapter = SwebenchAdapter()

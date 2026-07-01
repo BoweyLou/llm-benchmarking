@@ -124,6 +124,11 @@ Benchmark adapters:
 - FaithJudge
 - Vectara Hallucination
 
+Artificial Analysis ingestion is split into independent source runs: the model
+leaderboard provides `aa_intelligence`, `aa_speed`, and `aa_cost`, while the
+IFBench evaluation page provides `aa_ifbench`, output-token, cost-per-task, and
+time-per-task companion metrics from its public JSON-LD datasets.
+
 Metadata and catalog enrichments:
 
 - OpenRouter models and market/ranking signals
