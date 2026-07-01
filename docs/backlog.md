@@ -7,13 +7,6 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Open
 
-- [ ] LBM-002: P1 Add a local admin guard to mutating API routes
-  - Source: Codex repo review 2026-07-01.
-  - Problem: Provider, approval, curation, manual-score, and update endpoints mutate SQLite state without authentication.
-  - Scope: `backend/main.py`, `backend/models.py`, README/API docs.
-  - Acceptance: all POST/PATCH/PUT mutation routes require an explicit local admin token or equivalent opt-in guard; read-only routes remain usable without credentials; local-only deployment instructions are documented.
-  - Validation: API tests cover authorized and unauthorized mutation attempts; `python -m unittest backend.test_rankings backend.test_catalog_export`; `make docs-check`.
-
 - [ ] LBM-003: P2 Make update execution single-flight and crash-aware
   - Source: Codex repo review 2026-07-01.
   - Problem: `/api/update` starts daemon-thread update work; concurrent requests can queue ambiguous running jobs, and process exit can abandon work mid-run.
@@ -107,3 +100,11 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: API startup only creates/repairs local schema and applies local baselines; external refreshes run through explicit CLI/API update paths; refresh failures are logged or stored visibly.
   - Validation: `python -m py_compile backend/*.py backend/sources/*.py`; `python -m unittest backend.test_catalog_export backend.test_rankings`; `python -m backend bootstrap`; `python -m backend model-card-audit --json`; `make docs-check`.
   - Completed: 2026-07-01. `bootstrap()` is now local-only and README/update guide describe explicit refresh paths.
+
+- [x] LBM-002: P1 Add a local admin guard to mutating API routes
+  - Source: Codex repo review 2026-07-01.
+  - Problem: Provider, approval, curation, manual-score, and update endpoints mutate SQLite state without authentication.
+  - Scope: `backend/main.py`, `backend/models.py`, README/API docs.
+  - Acceptance: all POST/PATCH/PUT mutation routes require an explicit local admin token or equivalent opt-in guard; read-only routes remain usable without credentials; local-only deployment instructions are documented.
+  - Validation: API tests cover authorized and unauthorized mutation attempts; `python -m unittest backend.test_api_auth backend.test_rankings backend.test_catalog_export`; `make docs-check`.
+  - Completed: 2026-07-01. Mutating API routes are disabled unless `LLM_BENCHMARKING_ADMIN_TOKEN` is configured, and requests must send the token via header or bearer auth.

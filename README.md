@@ -72,6 +72,11 @@ python -m backend list-models --format jsonl --output output/model-metadata.json
 
 ```bash
 source .venv/bin/activate
+export LLM_BENCHMARKING_ADMIN_TOKEN="$(python - <<'PY'
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+)"
 uvicorn backend.main:app --reload --port 8000
 ```
 
@@ -82,6 +87,13 @@ Useful local URLs:
 - API docs: `http://127.0.0.1:8000/docs`
 
 The backend bootstraps local schema and repo-backed baselines on startup if needed. Startup does not perform network metadata refreshes; use the explicit CLI or API update paths for that work.
+
+Read-only routes do not require credentials. Write routes are disabled unless
+`LLM_BENCHMARKING_ADMIN_TOKEN` is set in the server environment. Send that value
+with local mutation requests by using either
+`X-LLM-Benchmarking-Admin-Token: <token>` or `Authorization: Bearer <token>`.
+For local operation, bind the server to loopback or another trusted private
+interface rather than exposing the admin token on a public network.
 
 ## Current Data Sources
 
@@ -163,6 +175,9 @@ The core API is in [backend/main.py](backend/main.py). High-level groups:
 - admin edits for provider metadata, approvals, inference-route approvals, manual benchmark scores, and model curation
 - update operations: `/api/update`, `/api/update/status/{log_id}`, `/api/update/history`, source-run detail, raw source records, and audit output
 - market snapshots: `/api/market-snapshots`
+
+All POST/PATCH/PUT mutation routes require the local admin token described in
+the run instructions above. GET routes remain read-only and unauthenticated.
 
 ## Contributor Workflow
 

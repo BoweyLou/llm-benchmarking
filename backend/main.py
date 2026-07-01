@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+import os
+from secrets import compare_digest
+
+from fastapi import Depends, FastAPI, HTTPException, Request
 
 from .catalog_export import build_model_metadata_list
 from .models import (
@@ -61,6 +64,40 @@ from .update_engine import (
     update_use_case_internal_weight,
 )
 
+ADMIN_TOKEN_ENV_VAR = "LLM_BENCHMARKING_ADMIN_TOKEN"
+ADMIN_TOKEN_HEADER = "x-llm-benchmarking-admin-token"
+
+
+def _bearer_token(value: str | None) -> str | None:
+    if not value:
+        return None
+    scheme, _, token = value.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def require_local_admin(request: Request) -> None:
+    expected_token = os.getenv(ADMIN_TOKEN_ENV_VAR, "").strip()
+    if not expected_token:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Admin mutations are disabled. Set {ADMIN_TOKEN_ENV_VAR} to enable local write routes.",
+        )
+
+    provided_token = (
+        request.headers.get(ADMIN_TOKEN_HEADER)
+        or _bearer_token(request.headers.get("authorization"))
+        or ""
+    ).strip()
+    if not provided_token or not compare_digest(provided_token, expected_token):
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid admin token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 app = FastAPI(title="LLM Benchmarking API", version="0.1.0")
 
 
@@ -94,7 +131,7 @@ def api_providers() -> list[dict]:
     return list_providers()
 
 
-@app.patch("/api/providers/{provider_id}", response_model=ProviderOut)
+@app.patch("/api/providers/{provider_id}", response_model=ProviderOut, dependencies=[Depends(require_local_admin)])
 def api_update_provider(provider_id: str, payload: ProviderUpdateIn) -> dict:
     try:
         provider = update_provider_origin(provider_id, payload.model_dump(exclude_unset=True))
@@ -105,7 +142,7 @@ def api_update_provider(provider_id: str, payload: ProviderUpdateIn) -> dict:
     return provider
 
 
-@app.patch("/api/models/{model_id}/approval", response_model=ModelSummaryOut)
+@app.patch("/api/models/{model_id}/approval", response_model=ModelSummaryOut, dependencies=[Depends(require_local_admin)])
 def api_update_model_approval(model_id: str, payload: ModelApprovalUpdateIn) -> dict:
     model = update_model_approval(model_id, payload.approved_for_use, payload.approval_notes)
     if model is None:
@@ -113,7 +150,11 @@ def api_update_model_approval(model_id: str, payload: ModelApprovalUpdateIn) -> 
     return model
 
 
-@app.patch("/api/models/{model_id}/approvals/{use_case_id}", response_model=ModelSummaryOut)
+@app.patch(
+    "/api/models/{model_id}/approvals/{use_case_id}",
+    response_model=ModelSummaryOut,
+    dependencies=[Depends(require_local_admin)],
+)
 def api_update_model_use_case_approval(model_id: str, use_case_id: str, payload: UseCaseApprovalIn) -> dict:
     try:
         model = update_model_use_case_approval(
@@ -131,7 +172,11 @@ def api_update_model_use_case_approval(model_id: str, use_case_id: str, payload:
     return model
 
 
-@app.put("/api/models/{model_id}/approvals/{use_case_id}/inference-route", response_model=ModelSummaryOut)
+@app.put(
+    "/api/models/{model_id}/approvals/{use_case_id}/inference-route",
+    response_model=ModelSummaryOut,
+    dependencies=[Depends(require_local_admin)],
+)
 def api_update_model_use_case_inference_approval(model_id: str, use_case_id: str, payload: InferenceRouteApprovalIn) -> dict:
     try:
         model = update_model_use_case_inference_approval(
@@ -150,7 +195,7 @@ def api_update_model_use_case_inference_approval(model_id: str, use_case_id: str
     return model
 
 
-@app.put("/api/models/{model_id}/curation/identity", response_model=ModelSummaryOut)
+@app.put("/api/models/{model_id}/curation/identity", response_model=ModelSummaryOut, dependencies=[Depends(require_local_admin)])
 def api_curate_model_identity(model_id: str, payload: ModelIdentityCurationIn) -> dict:
     try:
         model = curate_model_identity(
@@ -166,7 +211,7 @@ def api_curate_model_identity(model_id: str, payload: ModelIdentityCurationIn) -
     return model
 
 
-@app.put("/api/models/{model_id}/curation/duplicate", response_model=ModelSummaryOut)
+@app.put("/api/models/{model_id}/curation/duplicate", response_model=ModelSummaryOut, dependencies=[Depends(require_local_admin)])
 def api_merge_model_duplicate(model_id: str, payload: ModelDuplicateCurationIn) -> dict:
     try:
         model = merge_model_duplicate(
@@ -181,7 +226,11 @@ def api_merge_model_duplicate(model_id: str, payload: ModelDuplicateCurationIn) 
     return model
 
 
-@app.post("/api/models/approvals/{use_case_id}/inference-route/bulk", response_model=InferenceRouteApprovalBulkOut)
+@app.post(
+    "/api/models/approvals/{use_case_id}/inference-route/bulk",
+    response_model=InferenceRouteApprovalBulkOut,
+    dependencies=[Depends(require_local_admin)],
+)
 def api_apply_model_use_case_inference_approval_bulk(use_case_id: str, payload: InferenceRouteApprovalBulkIn) -> dict:
     try:
         return apply_model_inference_route_approval_bulk(
@@ -197,7 +246,11 @@ def api_apply_model_use_case_inference_approval_bulk(use_case_id: str, payload: 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.post("/api/model-families/{family_id}/approvals/{use_case_id}/apply-delta", response_model=FamilyApprovalDeltaOut)
+@app.post(
+    "/api/model-families/{family_id}/approvals/{use_case_id}/apply-delta",
+    response_model=FamilyApprovalDeltaOut,
+    dependencies=[Depends(require_local_admin)],
+)
 def api_apply_model_family_approval_delta(family_id: str, use_case_id: str, payload: FamilyApprovalDeltaIn | None = None) -> dict:
     try:
         result = apply_model_family_approval_delta(
@@ -212,7 +265,11 @@ def api_apply_model_family_approval_delta(family_id: str, use_case_id: str, payl
     return result
 
 
-@app.post("/api/model-families/{family_id}/approvals/bulk", response_model=FamilyApprovalBulkOut)
+@app.post(
+    "/api/model-families/{family_id}/approvals/bulk",
+    response_model=FamilyApprovalBulkOut,
+    dependencies=[Depends(require_local_admin)],
+)
 def api_apply_model_family_approval_bulk(family_id: str, payload: FamilyApprovalBulkIn) -> dict:
     try:
         result = apply_model_family_approval_bulk(
@@ -228,7 +285,7 @@ def api_apply_model_family_approval_bulk(family_id: str, payload: FamilyApproval
     return result
 
 
-@app.patch("/api/use-cases/{use_case_id}/internal-weight", response_model=UseCaseOut)
+@app.patch("/api/use-cases/{use_case_id}/internal-weight", response_model=UseCaseOut, dependencies=[Depends(require_local_admin)])
 def api_update_use_case_internal_weight(use_case_id: str, payload: BenchmarkWeightUpdateIn) -> dict:
     use_case = update_use_case_internal_weight(use_case_id, payload.weight)
     if use_case is None:
@@ -236,7 +293,11 @@ def api_update_use_case_internal_weight(use_case_id: str, payload: BenchmarkWeig
     return use_case
 
 
-@app.put("/api/models/{model_id}/benchmarks/{benchmark_id}/manual-score", response_model=ManualScoreResultOut)
+@app.put(
+    "/api/models/{model_id}/benchmarks/{benchmark_id}/manual-score",
+    response_model=ManualScoreResultOut,
+    dependencies=[Depends(require_local_admin)],
+)
 def api_update_manual_score(model_id: str, benchmark_id: str, payload: ManualScoreUpdateIn) -> dict:
     try:
         result = update_manual_benchmark_score(
@@ -256,7 +317,7 @@ def api_update_manual_score(model_id: str, benchmark_id: str, payload: ManualSco
     return result
 
 
-@app.post("/api/update", response_model=UpdateStartOut)
+@app.post("/api/update", response_model=UpdateStartOut, dependencies=[Depends(require_local_admin)])
 def api_update(payload: UpdateStartIn | None = None) -> UpdateStartOut:
     log_id = schedule_update(benchmarks=payload.benchmarks if payload else None, triggered_by="api")
     return UpdateStartOut(log_id=log_id, status="running")
