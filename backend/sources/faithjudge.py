@@ -15,7 +15,13 @@ MODEL_LINK_RE = re.compile(r"\[(?P<name>[^\]]+)\]\((?P<url>[^)]+)\)")
 
 class FaithJudgeAdapter(BaseSourceAdapter):
     source_id = "faithjudge"
-    benchmark_ids = ("rag_task_faithfulness",)
+    benchmark_ids = (
+        "rag_task_faithfulness",
+        "faithjudge_faithbench_summarization",
+        "faithjudge_ragtruth_summarization",
+        "faithjudge_ragtruth_question_answering",
+        "faithjudge_ragtruth_data_to_text",
+    )
     source_url = FAITHJUDGE_PAGE_URL
 
     async def fetch_raw(self, client: httpx.AsyncClient) -> list[RawSourceRecord]:
@@ -28,7 +34,7 @@ class FaithJudgeAdapter(BaseSourceAdapter):
 
         for row in rows:
             model_name = row["model_name"]
-            overall_rate = safe_float(row["overall_hallucination_rate"].replace("%", ""))
+            overall_rate = self._percent_value(row["overall_hallucination_rate"])
             if not model_name or overall_rate is None:
                 continue
 
@@ -48,10 +54,10 @@ class FaithJudgeAdapter(BaseSourceAdapter):
                         "parameters": row["parameters"],
                         "model_url": row["model_url"],
                         "overall_hallucination_rate": overall_rate,
-                        "faithbench_summarization": row["faithbench_summarization"],
-                        "ragtruth_summarization": row["ragtruth_summarization"],
-                        "ragtruth_question_answering": row["ragtruth_question_answering"],
-                        "ragtruth_data_to_text": row["ragtruth_data_to_text"],
+                        "faithbench_summarization": self._percent_value(row["faithbench_summarization"]),
+                        "ragtruth_summarization": self._percent_value(row["ragtruth_summarization"]),
+                        "ragtruth_question_answering": self._percent_value(row["ragtruth_question_answering"]),
+                        "ragtruth_data_to_text": self._percent_value(row["ragtruth_data_to_text"]),
                     },
                 )
             )
@@ -65,26 +71,57 @@ class FaithJudgeAdapter(BaseSourceAdapter):
         candidates: list[ScoreCandidate] = []
 
         for record in sorted(raw_records, key=lambda item: self._rank_value(item.metadata.get("rank"))):
-            value = safe_float(record.raw_value)
-            if value is None:
+            overall_rate = safe_float(record.raw_value)
+            if overall_rate is None:
                 continue
 
-            candidates.append(
-                ScoreCandidate(
-                    source_id=self.source_id,
-                    benchmark_id="rag_task_faithfulness",
-                    raw_model_name=record.raw_model_name,
-                    raw_model_key=record.raw_model_key or record.raw_model_name,
-                    value=value,
-                    raw_value=f"{value:.2f}",
-                    source_url=record.source_url,
-                    collected_at=record.collected_at,
-                    source_type="primary",
-                    verified=True,
-                    notes="FaithJudge overall hallucination rate across FaithBench and RagTruth RAG tasks. Lower is better.",
-                    metadata=dict(record.metadata),
+            metrics = [
+                (
+                    "rag_task_faithfulness",
+                    overall_rate,
+                    "FaithJudge overall hallucination rate across FaithBench and RAGTruth RAG tasks. Lower is better.",
+                ),
+                (
+                    "faithjudge_faithbench_summarization",
+                    safe_float(record.metadata.get("faithbench_summarization")),
+                    "FaithJudge FaithBench summarization hallucination rate. Lower is better.",
+                ),
+                (
+                    "faithjudge_ragtruth_summarization",
+                    safe_float(record.metadata.get("ragtruth_summarization")),
+                    "FaithJudge RAGTruth summarization hallucination rate. Lower is better.",
+                ),
+                (
+                    "faithjudge_ragtruth_question_answering",
+                    safe_float(record.metadata.get("ragtruth_question_answering")),
+                    "FaithJudge RAGTruth question-answering hallucination rate. Lower is better.",
+                ),
+                (
+                    "faithjudge_ragtruth_data_to_text",
+                    safe_float(record.metadata.get("ragtruth_data_to_text")),
+                    "FaithJudge RAGTruth data-to-text hallucination rate. Lower is better.",
+                ),
+            ]
+
+            for benchmark_id, value, notes in metrics:
+                if value is None:
+                    continue
+                candidates.append(
+                    ScoreCandidate(
+                        source_id=self.source_id,
+                        benchmark_id=benchmark_id,
+                        raw_model_name=record.raw_model_name,
+                        raw_model_key=record.raw_model_key or record.raw_model_name,
+                        value=value,
+                        raw_value=f"{value:.2f}",
+                        source_url=record.source_url,
+                        collected_at=record.collected_at,
+                        source_type="primary",
+                        verified=True,
+                        notes=notes,
+                        metadata=dict(record.metadata),
+                    )
                 )
-            )
 
         return candidates
 
@@ -133,3 +170,11 @@ class FaithJudgeAdapter(BaseSourceAdapter):
     def _rank_value(self, value: object) -> int:
         rank = safe_float(value)
         return int(rank) if rank is not None else 10**9
+
+    def _percent_value(self, value: object) -> float | None:
+        if value is None:
+            return None
+        match = re.search(r"[-+]?\d+(?:\.\d+)?", str(value))
+        if match is None:
+            return None
+        return safe_float(match.group(0))

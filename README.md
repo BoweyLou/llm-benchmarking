@@ -124,6 +124,12 @@ Benchmark adapters:
 - FaithJudge
 - Vectara Hallucination
 
+The FaithJudge adapter records the existing aggregate
+`rag_task_faithfulness` hallucination rate plus lower-is-better task-level
+rates for FaithBench summarization and RAGTruth summarization, question
+answering, and data-to-text. These remain RAG faithfulness and hallucination
+signals, not retrieval relevance scores.
+
 Metadata and catalog enrichments:
 
 - OpenRouter models and market/ranking signals

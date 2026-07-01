@@ -10,11 +10,20 @@ from sqlalchemy import select, update
 
 from backend import audit_engine
 from backend import update_engine
-from backend.database import fetch_all, fetch_one, get_connection, get_engine, init_db, scores as scores_table
+from backend.database import (
+    benchmarks as benchmarks_table,
+    fetch_all,
+    fetch_one,
+    get_connection,
+    get_engine,
+    init_db,
+    scores as scores_table,
+)
 from backend.seed_data import seed_reference_data
 from backend.sources.artificial_analysis import ArtificialAnalysisAdapter
 from backend.sources.base import RawSourceRecord, SourceFetchResult
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
+from backend.sources.faithjudge import FaithJudgeAdapter
 from backend.sources.ifeval import IfevalAdapter
 from backend.sources.swebench import SwebenchAdapter
 
@@ -244,6 +253,75 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(raw_rows[0]["normalized_model_id"], "gpt-5-4")
         self.assertEqual(raw_rows[0]["source_type"], "secondary")
         self.assertEqual(raw_rows[0]["verified"], 0)
+
+    def test_faithjudge_spot_check_persists_task_metrics(self) -> None:
+        adapter = FaithJudgeAdapter()
+        raw_record = RawSourceRecord(
+            source_id=adapter.source_id,
+            benchmark_id="rag_task_faithfulness",
+            raw_model_name="Claude Opus 4.6",
+            raw_value="4.25",
+            source_url=adapter.source_url,
+            collected_at=FUTURE_COLLECTED_AT,
+            raw_model_key="Claude Opus 4.6",
+            payload={
+                "table_row": "| 1 | [Claude Opus 4.6](https://example.test/model) | Anthropic | n/a | 4.25% | 2.00% | 3.50% | 6.00% | 5.50% |",
+            },
+            metadata={
+                "rank": "1",
+                "organization": "Anthropic",
+                "parameters": "n/a",
+                "model_url": "https://example.test/model",
+                "overall_hallucination_rate": 4.25,
+                "faithbench_summarization": 2.0,
+                "ragtruth_summarization": 3.5,
+                "ragtruth_question_answering": 6.0,
+                "ragtruth_data_to_text": 5.5,
+            },
+        )
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, [raw_record])
+
+        candidate_values = {candidate.benchmark_id: candidate.value for candidate in candidates}
+        self.assertEqual(
+            candidate_values,
+            {
+                "rag_task_faithfulness": 4.25,
+                "faithjudge_faithbench_summarization": 2.0,
+                "faithjudge_ragtruth_summarization": 3.5,
+                "faithjudge_ragtruth_question_answering": 6.0,
+                "faithjudge_ragtruth_data_to_text": 5.5,
+            },
+        )
+
+        aggregate = self._latest_score("claude-opus-4-6", "rag_task_faithfulness")
+        qa = self._latest_score("claude-opus-4-6", "faithjudge_ragtruth_question_answering")
+        data_to_text = self._latest_score("claude-opus-4-6", "faithjudge_ragtruth_data_to_text")
+        self.assertAlmostEqual(float(aggregate["value"]), 4.25)
+        self.assertAlmostEqual(float(qa["value"]), 6.0)
+        self.assertAlmostEqual(float(data_to_text["value"]), 5.5)
+        self.assertIn("Lower is better", str(qa["notes"]))
+
+        new_ids = [
+            "faithjudge_faithbench_summarization",
+            "faithjudge_ragtruth_summarization",
+            "faithjudge_ragtruth_question_answering",
+            "faithjudge_ragtruth_data_to_text",
+        ]
+        with get_connection(self.engine) as conn:
+            benchmark_rows = fetch_all(
+                conn,
+                select(benchmarks_table.c.id, benchmarks_table.c.higher_is_better).where(
+                    benchmarks_table.c.id.in_(new_ids)
+                ),
+            )
+        direction_by_id = {row["id"]: row["higher_is_better"] for row in benchmark_rows}
+        self.assertEqual(direction_by_id, {benchmark_id: 0 for benchmark_id in new_ids})
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 1)
+        self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
+        self.assertEqual(raw_rows[0]["resolution_status"], "resolved")
 
     def test_chatbot_arena_same_run_duplicate_resolution_keeps_single_best_score(self) -> None:
         adapter = ChatbotArenaAdapter()

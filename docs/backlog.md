@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-018: P2 Add FaithJudge task-level hallucination metrics
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: FaithJudge raw rows already include FaithBench/RAGTruth subtask rates, but the catalog stored only one hallucination aggregate.
+  - Scope: `backend/sources/faithjudge.py`, benchmark seed rows for summarization, QA, and data-to-text subtasks, source-quality docs/tests.
+  - Acceptance: add stable task-level benchmark IDs without removing the aggregate; preserve task labels, rank/source URL metadata, and lower-is-better direction.
+  - Validation: fixture-backed FaithJudge parser tests; selected temp-database update/export; source spot-check suite; docs and kit readiness checks.
+  - Completed: 2026-07-01. The adapter now emits the existing aggregate plus FaithBench summarization and RAGTruth summarization, question-answering, and data-to-text hallucination-rate benchmarks.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.
