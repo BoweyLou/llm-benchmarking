@@ -1,0 +1,110 @@
+# Backlog
+
+Source of truth: repo-local backlog mirror for LLM Benchmarking maintenance.
+Repo mirror purpose: local kit selectors, task-packet handoff, and review follow-up.
+Stale mirror policy: refresh from current review findings before implementation when
+the row is older than 14 days or the backend/API shape has changed.
+
+## Open
+
+- [ ] LBM-001: P1 Split startup bootstrap from live metadata refresh
+  - Source: Codex repo review 2026-07-01.
+  - Problem: FastAPI startup calls `bootstrap()`, which can perform live OpenRouter, model-card, license, and market enrichment while hiding refresh failures.
+  - Scope: `backend/main.py`, `backend/update_engine.py`, `backend/cli.py`, README/docs for runtime behavior.
+  - Acceptance: API startup only creates/repairs local schema and applies local baselines; external refreshes run through explicit CLI/API update paths; refresh failures are logged or stored visibly.
+  - Validation: `python -m py_compile backend/*.py backend/sources/*.py`; targeted backend unittest suite; `python -m backend bootstrap`; `python -m backend model-card-audit --json`; `make docs-check`.
+
+- [ ] LBM-002: P1 Add a local admin guard to mutating API routes
+  - Source: Codex repo review 2026-07-01.
+  - Problem: Provider, approval, curation, manual-score, and update endpoints mutate SQLite state without authentication.
+  - Scope: `backend/main.py`, `backend/models.py`, README/API docs.
+  - Acceptance: all POST/PATCH/PUT mutation routes require an explicit local admin token or equivalent opt-in guard; read-only routes remain usable without credentials; local-only deployment instructions are documented.
+  - Validation: API tests cover authorized and unauthorized mutation attempts; `python -m unittest backend.test_rankings backend.test_catalog_export`; `make docs-check`.
+
+- [ ] LBM-003: P2 Make update execution single-flight and crash-aware
+  - Source: Codex repo review 2026-07-01.
+  - Problem: `/api/update` starts daemon-thread update work; concurrent requests can queue ambiguous running jobs, and process exit can abandon work mid-run.
+  - Scope: `backend/update_engine.py`, `backend/main.py`, update history tests.
+  - Acceptance: only one update can run at a time; duplicate update requests return the active log or a clear conflict; interrupted updates are recoverable and reported with a precise status.
+  - Validation: tests cover concurrent scheduling, active-log response, and interrupted update recovery; targeted backend unittest suite.
+
+- [ ] LBM-004: P2 Normalize Python test entrypoints and package discovery
+  - Source: Codex repo review 2026-07-01.
+  - Problem: targeted `python -m unittest ...` passes, but `python -m unittest discover backend` imports `backend/sources` as top-level `sources`; inference scripts hard-code `python3`, which resolves to an interpreter without deps on this machine.
+  - Scope: `scripts/test_inference_suite.sh`, `scripts/test_inference_sync_smoke.sh`, README contributor workflow, unittest discovery/package layout.
+  - Acceptance: documented test commands and scripts use the active environment interpreter; broad discovery either passes or is replaced by a documented canonical test command that cannot drift.
+  - Validation: `./scripts/test_inference_suite.sh`; `./scripts/test_inference_sync_smoke.sh`; README contributor command copy/paste check.
+
+- [ ] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
+  - Source: Codex repo review 2026-07-01.
+  - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.
+  - Scope: `backend/model_card_audit.py`, `backend/model_licenses.py`, `backend/model_provenance.py`, review/reporting docs.
+  - Acceptance: define thresholds for commercial/production use cases; audit output distinguishes blocker, warning, and backlog-only gaps; remediation rows are easy to generate from the audit.
+  - Validation: `python -m backend model-card-audit --json`; tests for threshold classification; `make docs-check`.
+
+- [ ] LBM-006: P2 Refactor update-engine responsibilities into smaller modules
+  - Source: Codex repo review 2026-07-01.
+  - Problem: `backend/update_engine.py` owns orchestration, ranking reads, OpenRouter enrichment, model-card refresh, license refresh, curation write paths, and serialization in one very large module.
+  - Scope: `backend/update_engine.py` plus new focused backend modules.
+  - Acceptance: extract at least orchestration, OpenRouter metadata, model-card refresh, and ranking/read serialization into bounded modules without changing API output.
+  - Validation: characterization tests before moves; targeted backend unittest suite; `python -m backend list-models --output /tmp/llm-benchmarking-models.json`.
+
+- [ ] LBM-007: P2 Replace duplicated ad hoc schema creation with migration-owned schema changes
+  - Source: Codex repo review 2026-07-01.
+  - Problem: SQLAlchemy table definitions and raw `CREATE TABLE` / `ALTER TABLE` SQL must be manually kept in sync.
+  - Scope: `backend/database.py`, schema docs, bootstrap flow.
+  - Acceptance: schema evolution has one authoritative path, either through a lightweight migration table or a documented migration tool; bootstrap remains able to initialize a fresh SQLite database.
+  - Validation: fresh temp-database bootstrap; upgrade from current `data/db.sqlite` copy; targeted backend unittest suite.
+
+- [ ] LBM-008: P1 Establish a clean initial Git baseline
+  - Source: Codex repo review 2026-07-01.
+  - Problem: the repo now has a `.git` directory but no commits; every project file is untracked, so diff-based kit gates, docs-impact checks, and future reviews cannot distinguish baseline from change.
+  - Scope: repository root, `.gitignore`, generated/runtime artifacts, first commit plan.
+  - Acceptance: tracked source/docs/config files are intentionally staged; ignored runtime artifacts remain ignored; an initial baseline commit exists before feature work starts.
+  - Validation: `git status --short`; `make docs-check`; targeted backend unittest suite; `kit start --no-update --json`.
+
+- [ ] LBM-009: P2 Fill repo goal and area contracts for backend, schemas, scripts, and prompt adapters
+  - Source: Codex repo review 2026-07-01.
+  - Problem: `make goal-check` reports placeholder repo goal text and 153 unknown changed paths because `.agent-workflows/area-contracts.json` only covers `docs/` and `.agent-workflows/`.
+  - Scope: `.agent-workflows/area-contracts.json`, `docs/working-rhythm.md` if needed.
+  - Acceptance: area contracts cover backend source/tests, scripts, schemas, `.codex/prompts`, `.doc-contract-kit`, GitHub workflow files, and root project metadata; repo goal is specific to LLM Benchmarking.
+  - Validation: `make goal-check` reports no unknown paths for the current baseline or documents intentional exceptions.
+
+- [ ] LBM-010: P3 Trim agent instruction debt after kit install
+  - Source: Codex repo review 2026-07-01.
+  - Problem: `make agent-docs-lint` passes with warnings because `AGENTS.md` exceeds its budget and `.agent-workflows/repo-review.md` has a rule-provenance warning.
+  - Scope: `AGENTS.md`, `.agent-workflows/repo-review.md`, scoped docs linked from those files.
+  - Acceptance: `AGENTS.md` becomes a shorter route map; detailed rules move to scoped docs or checker-owned config; rule-like bullets have clear provenance/context.
+  - Validation: `make agent-docs-lint`; `make docs-check`.
+
+- [ ] LBM-011: P1 Make inference scripts use the active project Python
+  - Source: Codex update-script test 2026-07-01.
+  - Problem: `scripts/test_inference_suite.sh` and `scripts/test_inference_sync_smoke.sh` hard-code `python3`; on this machine that resolves to Homebrew Python 3.14 without project dependencies, while `python` resolves to the dependency-bearing project environment.
+  - Scope: `scripts/test_inference_suite.sh`, `scripts/test_inference_sync_smoke.sh`, README contributor workflow.
+  - Acceptance: scripts honor an explicit `PYTHON` override and otherwise use the active environment interpreter; dependency/import failures identify the interpreter path and next setup command; README examples match the script behavior.
+  - Validation: `PYTHON=python ./scripts/test_inference_suite.sh`; `PYTHON=python ./scripts/test_inference_sync_smoke.sh aws-bedrock google-vertex-ai`; README contributor command copy/paste check.
+
+- [ ] LBM-012: P2 Print captured inference-sync smoke output on failure
+  - Source: Codex update-script test 2026-07-01.
+  - Problem: `scripts/test_inference_sync_smoke.sh` redirects CLI output to a temp JSON file, but `set -e` exits before printing the captured payload when the CLI returns nonzero.
+  - Scope: `scripts/test_inference_sync_smoke.sh`.
+  - Acceptance: when the inference-sync CLI fails, the smoke script prints the captured JSON or stderr/stdout diagnostic plus the exit code before exiting nonzero; successful runs keep the current concise JSON report.
+  - Validation: a failing destination run such as `PYTHON=python ./scripts/test_inference_sync_smoke.sh azure-ai-foundry` prints the destination failure reason; the AWS/Google subset still exits 0 and prints valid JSON.
+
+- [ ] LBM-013: P1 Harden OpenRouter ranking refresh when `rankingData` is absent
+  - Source: Codex update-script test 2026-07-01.
+  - Problem: `python -m backend update` and selected benchmark updates add scores but exit failed because the OpenRouter rankings page no longer exposes `rankingData`; the market refresh failure is coupled to otherwise successful benchmark ingestion.
+  - Scope: `backend/update_engine.py`, OpenRouter market/ranking parser tests, update-history/audit reporting.
+  - Acceptance: missing or changed OpenRouter ranking-page data is recorded as a visible degraded/skipped source result without failing unrelated benchmark updates; parser coverage includes the current page shape or a graceful fallback when the expected variable is absent.
+  - Validation: temp-database `python -m backend update`; temp-database `python -m backend update --benchmarks terminal_bench swebench_verified`; `python -m backend list-models --output /tmp/llm-benchmarking-models.json`; targeted parser tests for missing `rankingData`.
+
+- [ ] LBM-014: P2 Treat Azure pricing 429 as a retryable smoke-test skip
+  - Source: Codex update-script test 2026-07-01.
+  - Problem: Azure AI Foundry public pricing returned HTTP 429 during `inference-sync`, causing the all-destination smoke script to fail even though AWS Bedrock pricing-only and Google Vertex published-endpoints fallbacks completed.
+  - Scope: `backend/inference_sync.py`, `scripts/test_inference_sync_smoke.sh`, README inference smoke notes.
+  - Acceptance: Azure pricing rate limits are represented as a retryable/rate-limited skipped outcome that smoke tests accept with a clear reason; non-rate-limit sync failures still fail the script; docs explain that public pricing can rate-limit.
+  - Validation: mocked or live Azure 429 run reports a skipped/rate-limited status; `PYTHON=python ./scripts/test_inference_sync_smoke.sh`; `PYTHON=python ./scripts/test_inference_sync_smoke.sh aws-bedrock google-vertex-ai`.
+
+## Done
+
+No completed backlog items yet.
