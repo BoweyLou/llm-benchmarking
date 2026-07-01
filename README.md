@@ -17,6 +17,7 @@ That command prints a JSON array. Each model item includes the serialized metada
 - SQLAlchemy Core schema in [backend/database.py](backend/database.py)
 - Source adapters in [backend/sources](backend/sources)
 - Backend CLI in [backend/cli.py](backend/cli.py)
+- Update support modules split orchestration, OpenRouter metadata parsing, Hugging Face model-card extraction, and ranking response construction out of [backend/update_engine.py](backend/update_engine.py).
 
 ## Quick Start
 

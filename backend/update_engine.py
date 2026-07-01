@@ -8,10 +8,8 @@ import re
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
-from urllib.parse import urlparse
 
 import httpx
-from bs4 import BeautifulSoup
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -37,6 +35,7 @@ from .database import (
     use_case_benchmark_weights as use_case_benchmark_weights_table,
     utc_now_iso,
 )
+from . import model_card_refresh, openrouter_metadata, ranking_views, update_orchestration
 from .audit_engine import get_audit_run, get_audit_summary, run_audit
 from .inference_catalog import (
     attach_inference_catalog,
@@ -89,10 +88,8 @@ OPENROUTER_RANKINGS_URL = "https://openrouter.ai/rankings"
 OPENROUTER_PROGRAMMING_COLLECTION_URL = "https://openrouter.ai/collections/programming"
 OPENROUTER_MARKET_SOURCE_NAME = "openrouter"
 HUGGINGFACE_MODEL_API_URL_TEMPLATE = "https://huggingface.co/api/models/{repo_id}"
-HUGGINGFACE_MODEL_CARD_URL_TEMPLATE = "https://huggingface.co/{repo_id}"
 HUGGINGFACE_RAW_README_URL_TEMPLATE = "https://huggingface.co/{repo_id}/raw/main/README.md"
 MODEL_CARD_REFRESH_STALE_DAYS = 30
-MODEL_CARD_SUMMARY_MAX_LENGTH = 360
 INTERNAL_VIEW_NOTE = (
     "Optional internal assessment overlay entered in Admin. Missing internal scores do not block ranking eligibility."
 )
@@ -150,14 +147,6 @@ _OPENROUTER_TRAILING_ALIAS_RE = re.compile(
 )
 _OPENROUTER_TRAILING_VERSION_RE = re.compile(
     r"(?:[\s:_-]+v\d+(?:\.\d+)?(?::\d+)?)$",
-    re.IGNORECASE,
-)
-_MARKDOWN_HTML_LINK_RE = re.compile(r"<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", re.IGNORECASE | re.S)
-_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
-_MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.M)
-_README_FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n?", re.S)
-_TRAINING_CUTOFF_RE = re.compile(
-    r"\b(?:knowledge|training)(?:\s+data)?\s+cutoff\b[^:\n]*[:\-]?\s*([^\n.]{3,120})",
     re.IGNORECASE,
 )
 _NEXT_FLIGHT_PUSH_RE = re.compile(r"<script>self\.__next_f\.push\((\[.*?\])\)</script>", re.S)
@@ -329,27 +318,15 @@ def _decode_json_string_list(value: Any) -> list[str]:
 
 
 def _humanize_source_name(source_name: str) -> str:
-    if not source_name:
-        return "Unknown source"
-    if source_name in SOURCE_STEP_LABEL_OVERRIDES:
-        return SOURCE_STEP_LABEL_OVERRIDES[source_name]
-    return " ".join(part.upper() if len(part) <= 3 else part.capitalize() for part in source_name.split("_"))
+    return update_orchestration.humanize_source_name(source_name, SOURCE_STEP_LABEL_OVERRIDES)
 
 
 def _build_update_plan(adapters: list[BaseSourceAdapter]) -> list[dict[str, Any]]:
-    steps: list[dict[str, Any]] = []
-    for adapter in adapters:
-        steps.append(
-            {
-                "key": f"source:{adapter.source_id}",
-                "label": f"Ingest {_humanize_source_name(adapter.source_id)}",
-                "kind": "source",
-                "source_name": adapter.source_id,
-                "benchmark_id": ",".join(adapter.benchmark_ids),
-            }
-        )
-    steps.extend(dict(step) for step in UPDATE_POST_PHASES)
-    return steps
+    return update_orchestration.build_update_plan(
+        adapters,
+        post_phases=UPDATE_POST_PHASES,
+        label_overrides=SOURCE_STEP_LABEL_OVERRIDES,
+    )
 
 
 def _set_update_progress(log_id: int, step: dict[str, Any], step_index: int, total_steps: int) -> None:
@@ -2170,108 +2147,14 @@ def get_rankings(use_case_id: str) -> dict[str, Any] | None:
 
     benchmarks = {row["id"]: row for row in list_benchmarks()}
     models = _build_canonical_models(list_models(), benchmarks)
-    weights = use_case["weights"]
-    required_benchmarks = list(use_case.get("required_benchmarks", []))
-    use_case_min_coverage = float(use_case.get("min_coverage", MIN_RANKING_COVERAGE))
-    ranges = _benchmark_ranges(models, weights)
-    total_configured_weight = sum(weights.values())
-    total_coverage_weight = sum(
-        weight
-        for benchmark_id, weight in weights.items()
-        if benchmark_id not in INTERNAL_VIEW_COVERAGE_EXEMPT_BENCHMARK_IDS
+    return ranking_views.build_rankings_response(
+        use_case=use_case,
+        models=models,
+        benchmarks=benchmarks,
+        model_summary=_model_summary,
+        min_ranking_coverage=MIN_RANKING_COVERAGE,
+        coverage_exempt_benchmark_ids=INTERNAL_VIEW_COVERAGE_EXEMPT_BENCHMARK_IDS,
     )
-
-    rankings: list[dict[str, Any]] = []
-    for model in models:
-        weighted_sum = 0.0
-        available_coverage_weight = 0.0
-        breakdown: list[dict[str, Any]] = []
-        missing_benchmarks: list[str] = []
-        critical_missing_benchmarks: list[str] = []
-
-        for benchmark_id, weight in weights.items():
-            score = model["scores"].get(benchmark_id)
-            benchmark = benchmarks.get(benchmark_id)
-            score_range = ranges.get(benchmark_id)
-
-            if score is None or benchmark is None or score_range is None:
-                missing_benchmarks.append(benchmark_id)
-                if benchmark_id in required_benchmarks:
-                    critical_missing_benchmarks.append(benchmark_id)
-                continue
-
-            raw_value = float(score["value"])
-            normalised = _normalise_score(
-                raw_value,
-                score_range[0],
-                score_range[1],
-                bool(benchmark["higher_is_better"]),
-            )
-            weighted_sum += normalised * weight
-            if benchmark_id not in INTERNAL_VIEW_COVERAGE_EXEMPT_BENCHMARK_IDS:
-                available_coverage_weight += weight
-            breakdown.append(
-                {
-                    "benchmark_id": benchmark_id,
-                    "raw_value": raw_value,
-                    "normalised": normalised,
-                    "weight": weight,
-                    "metric": benchmark["metric"],
-                    "source_type": score.get("source_type", "primary"),
-                    "verified": bool(score.get("verified", False)),
-                    "notes": score.get("notes"),
-                    "variant_model_id": score.get("variant_model_id"),
-                    "variant_model_name": score.get("variant_model_name"),
-                }
-            )
-
-        if total_configured_weight <= 0:
-            continue
-
-        coverage = 1.0 if total_coverage_weight <= 0 else available_coverage_weight / total_coverage_weight
-        if coverage < use_case_min_coverage:
-            continue
-        if critical_missing_benchmarks:
-            continue
-
-        rankings.append(
-            {
-                "score": weighted_sum / total_configured_weight,
-                "coverage": coverage,
-                "model": _model_summary(model),
-                "breakdown": breakdown,
-                "missing_benchmarks": missing_benchmarks,
-                "critical_missing_benchmarks": critical_missing_benchmarks,
-            }
-        )
-
-    rankings.sort(
-        key=lambda item: (
-            -float(item["score"]),
-            -float(item["coverage"]),
-            item["model"]["name"].lower(),
-            item["model"]["id"],
-        )
-    )
-
-    for index, ranking in enumerate(rankings, start=1):
-        ranking["rank"] = index
-
-    return {
-        "use_case": {
-            "id": use_case["id"],
-            "label": use_case["label"],
-            "icon": use_case["icon"],
-            "description": use_case["description"],
-            "segment": use_case.get("segment", "core"),
-            "status": use_case.get("status", "ready"),
-            "min_coverage": use_case_min_coverage,
-            "required_benchmarks": required_benchmarks,
-            "benchmark_notes": dict(use_case.get("benchmark_notes", {})),
-            "weights": dict(use_case["weights"]),
-        },
-        "rankings": rankings,
-    }
 
 
 def _run_update_job(
@@ -2475,7 +2358,7 @@ def _finalize_update_log(
 
 
 def _has_fatal_update_errors(errors: Iterable[dict[str, Any]]) -> bool:
-    return any(not bool(error.get("nonfatal")) for error in errors)
+    return update_orchestration.has_fatal_update_errors(errors)
 
 
 def _create_update_log(triggered_by: str, step_plan: list[dict[str, Any]] | None = None) -> int:
@@ -3500,115 +3383,45 @@ def _refresh_openrouter_market_signals() -> None:
 
 
 def _fetch_openrouter_models() -> list[dict[str, Any]]:
-    with httpx.Client(headers=HTTP_HEADERS, follow_redirects=True, timeout=30.0) as client:
-        response = client.get(OPENROUTER_MODELS_URL)
-        response.raise_for_status()
-        payload = response.json()
-
-    items = payload.get("data")
-    if not isinstance(items, list):
-        raise ValueError("OpenRouter models response did not include a 'data' list.")
-    return [item for item in items if isinstance(item, dict)]
+    return openrouter_metadata.fetch_openrouter_models(
+        url=OPENROUTER_MODELS_URL,
+        headers=HTTP_HEADERS,
+    )
 
 
 def _fetch_openrouter_global_rankings() -> list[dict[str, Any]]:
     try:
         payloads = _fetch_openrouter_flight_payloads(OPENROUTER_RANKINGS_URL)
+        return openrouter_metadata.extract_global_rankings(payloads)
     except ValueError as exc:
         raise OptionalSourceUnavailable(str(exc)) from exc
-    ranking_payload = _find_openrouter_payload(
-        payloads,
-        lambda item: isinstance(item.get("rankingData"), list) and item["rankingData"],
-    )
-    if ranking_payload is None:
-        raise OptionalSourceUnavailable("OpenRouter rankings page did not expose rankingData.")
-    ranking_data = ranking_payload.get("rankingData")
-    if not isinstance(ranking_data, list):
-        raise OptionalSourceUnavailable("OpenRouter rankings page returned invalid rankingData.")
-    return [item for item in ranking_data if isinstance(item, dict)]
 
 
 def _fetch_openrouter_programming_rankings() -> list[dict[str, Any]]:
     try:
         payloads = _fetch_openrouter_flight_payloads(OPENROUTER_PROGRAMMING_COLLECTION_URL)
+        return openrouter_metadata.extract_programming_rankings(payloads)
     except ValueError as exc:
         raise OptionalSourceUnavailable(str(exc)) from exc
-    categories_payload = _find_openrouter_payload(
-        payloads,
-        lambda item: isinstance(item.get("categories"), dict) and item["categories"],
-    )
-    if categories_payload is None:
-        raise OptionalSourceUnavailable("OpenRouter programming collection did not expose categories.")
-
-    categories = categories_payload.get("categories")
-    if not isinstance(categories, dict):
-        raise OptionalSourceUnavailable("OpenRouter programming collection returned invalid categories.")
-
-    entries: list[dict[str, Any]] = []
-    for model_slug, model_categories in categories.items():
-        if not isinstance(model_categories, list):
-            continue
-        programming_entry = next(
-            (
-                entry
-                for entry in model_categories
-                if isinstance(entry, dict) and str(entry.get("category") or "") == "programming"
-            ),
-            None,
-        )
-        if programming_entry is None:
-            continue
-        enriched_entry = dict(programming_entry)
-        enriched_entry["model_slug"] = str(model_slug)
-        entries.append(enriched_entry)
-    return entries
 
 
 def _fetch_openrouter_flight_payloads(url: str) -> list[dict[str, Any]]:
-    with httpx.Client(headers=HTTP_HEADERS, follow_redirects=True, timeout=30.0) as client:
-        response = client.get(url)
-        response.raise_for_status()
-        html = response.text
-
-    payloads: list[dict[str, Any]] = []
-    for match in _NEXT_FLIGHT_PUSH_RE.finditer(html):
-        try:
-            push_args = json.loads(match.group(1))
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(push_args, list) or len(push_args) < 2 or not isinstance(push_args[1], str):
-            continue
-        chunk = push_args[1]
-        if ":" not in chunk:
-            continue
-        _, serialized = chunk.split(":", 1)
-        try:
-            parsed = json.loads(serialized)
-        except json.JSONDecodeError:
-            continue
-        payloads.extend(_iter_openrouter_payload_dicts(parsed))
-
-    if not payloads:
-        raise ValueError(f"OpenRouter page {url} did not expose any JSON payloads.")
-    return payloads
+    return openrouter_metadata.fetch_openrouter_flight_payloads(
+        url=url,
+        headers=HTTP_HEADERS,
+        next_flight_push_re=_NEXT_FLIGHT_PUSH_RE,
+    )
 
 
 def _iter_openrouter_payload_dicts(value: Any) -> Iterable[dict[str, Any]]:
-    if isinstance(value, dict):
-        yield value
-        for child in value.values():
-            yield from _iter_openrouter_payload_dicts(child)
-        return
-    if isinstance(value, list):
-        for child in value:
-            yield from _iter_openrouter_payload_dicts(child)
+    yield from openrouter_metadata.iter_openrouter_payload_dicts(value)
 
 
 def _find_openrouter_payload(
     payloads: Iterable[dict[str, Any]],
     predicate,
 ) -> dict[str, Any] | None:
-    return next((payload for payload in payloads if predicate(payload)), None)
+    return openrouter_metadata.find_openrouter_payload(payloads, predicate)
 
 
 def _build_openrouter_global_signals(
@@ -4281,93 +4094,12 @@ def _build_huggingface_model_card_values(
     repo_id: str,
     verified_at: str,
 ) -> dict[str, Any]:
-    card_data = info.get("cardData") if isinstance(info.get("cardData"), dict) else {}
-    frontmatter_license = _extract_readme_frontmatter_value(readme_text, "license")
-    readme_license_id, readme_license_name, readme_license_url = _extract_license_metadata_from_readme(readme_text)
-    readme_body = _strip_readme_frontmatter(readme_text)
-    documentation_url, repo_url, paper_url = _extract_huggingface_external_urls(readme_body)
-    paper_url = paper_url or _extract_arxiv_paper_url(info.get("tags"))
-    base_models = _extract_huggingface_base_models(card_data, info.get("tags"))
-    supported_languages = _normalize_string_list(card_data.get("language"))
-    capabilities = _derive_huggingface_capabilities(info, card_data)
-    intended_use = _extract_markdown_section_summary(
-        readme_body,
-        heading_keywords=(
-            "intended use",
-            "recommended use",
-            "use cases",
-            "uses",
-            "how to use",
-            "usage",
-        ),
-    ) or _extract_markdown_intro_summary(readme_body)
-    limitations = _extract_markdown_section_summary(
-        readme_body,
-        heading_keywords=(
-            "limitations",
-            "limitation",
-            "risks",
-            "risk",
-            "bias",
-            "biases",
-            "safety",
-            "out of scope",
-            "out-of-scope",
-        ),
+    return model_card_refresh.build_huggingface_model_card_values(
+        info,
+        readme_text,
+        repo_id=repo_id,
+        verified_at=verified_at,
     )
-    training_data_summary = _extract_markdown_section_summary(
-        readme_body,
-        heading_keywords=(
-            "training data",
-            "training dataset",
-            "datasets",
-            "data",
-        ),
-    )
-    training_cutoff = _extract_training_cutoff(readme_body)
-    license_id = (
-        _clean_text(card_data.get("license"))
-        or _clean_text(info.get("license"))
-        or frontmatter_license
-        or readme_license_id
-        or _extract_huggingface_license_tag(info.get("tags"))
-    )
-    license_name = _clean_text(card_data.get("license_name")) or readme_license_name or license_id
-    license_url = _clean_text(card_data.get("license_link")) or readme_license_url
-
-    values: dict[str, Any] = {
-        "huggingface_repo_id": repo_id,
-        "model_card_url": HUGGINGFACE_MODEL_CARD_URL_TEMPLATE.format(repo_id=repo_id),
-        "model_card_source": "huggingface",
-        "model_card_verified_at": verified_at,
-    }
-    if documentation_url:
-        values["documentation_url"] = documentation_url
-    if repo_url:
-        values["repo_url"] = repo_url
-    if paper_url:
-        values["paper_url"] = paper_url
-    if license_id:
-        values["license_id"] = license_id
-    if license_name:
-        values["license_name"] = license_name
-    if license_url:
-        values["license_url"] = license_url
-    if base_models:
-        values["base_models_json"] = json.dumps(base_models, ensure_ascii=True)
-    if supported_languages:
-        values["supported_languages_json"] = json.dumps(supported_languages, ensure_ascii=True)
-    if capabilities:
-        values["capabilities_json"] = json.dumps(capabilities, ensure_ascii=True)
-    if intended_use:
-        values["intended_use_short"] = intended_use
-    if limitations:
-        values["limitations_short"] = limitations
-    if training_data_summary:
-        values["training_data_summary"] = training_data_summary
-    if training_cutoff:
-        values["training_cutoff"] = training_cutoff
-    return values
 
 
 def _refresh_model_license_metadata() -> dict[str, int]:
@@ -4380,266 +4112,8 @@ def _refresh_model_license_metadata() -> dict[str, int]:
     }
 
 
-def _extract_huggingface_external_urls(readme_text: str) -> tuple[str | None, str | None, str | None]:
-    documentation_url: str | None = None
-    repo_url: str | None = None
-    paper_url: str | None = None
-
-    for label, url in _extract_markdown_links(readme_text):
-        normalized_label = label.lower()
-        parsed = urlparse(url)
-        hostname = (parsed.hostname or "").lower()
-        if documentation_url is None and (
-            "doc" in normalized_label
-            or "guide" in normalized_label
-            or "api" in normalized_label
-            or "/docs" in parsed.path
-        ):
-            documentation_url = url
-            continue
-        if repo_url is None and (
-            "github" in normalized_label
-            or "gitlab" in normalized_label
-            or "repo" in normalized_label
-            or hostname in {"github.com", "gitlab.com"}
-        ):
-            repo_url = url
-            continue
-        if paper_url is None and (
-            "paper" in normalized_label
-            or "arxiv" in normalized_label
-            or hostname in {"arxiv.org", "doi.org"}
-        ):
-            paper_url = url
-    return documentation_url, repo_url, paper_url
-
-
-def _extract_huggingface_license_tag(tags: Any) -> str | None:
-    for tag in tags if isinstance(tags, list) else []:
-        text = str(tag or "").strip()
-        if not text.lower().startswith("license:"):
-            continue
-        value = text.split(":", 1)[1].strip()
-        if value:
-            return value
-    return None
-
-
-def _extract_readme_frontmatter_value(readme_text: str, key: str) -> str | None:
-    text = str(readme_text or "")
-    match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", text, re.S)
-    if not match:
-        return None
-    pattern = re.compile(rf"(?m)^{re.escape(key)}\s*:\s*(.+?)\s*$", re.IGNORECASE)
-    value_match = pattern.search(match.group(1))
-    if not value_match:
-        return None
-    return _clean_text(value_match.group(1))
-
-
-def _extract_license_metadata_from_readme(readme_text: str) -> tuple[str | None, str | None, str | None]:
-    text = str(readme_text or "")
-    model_license_link = re.search(
-        r"https?://huggingface\.co/[^\"'\s)]+/blob/main/LICENSE-MODEL\b",
-        text,
-        re.IGNORECASE,
-    )
-    if model_license_link:
-        return "model-agreement", "Model Agreement", model_license_link.group(0)
-
-    for label, url in _extract_markdown_links(text):
-        normalized_label = label.lower()
-        normalized_url = url.lower()
-        if "license-model" in normalized_url or "model license" in normalized_label:
-            return "model-agreement", "Model Agreement", url
-        if "license" in normalized_label or "/license" in normalized_url:
-            return None, "License file", url
-    return None, None, None
-
-
-def _extract_markdown_links(text: str) -> list[tuple[str, str]]:
-    links: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for pattern in (_MARKDOWN_HTML_LINK_RE, _MARKDOWN_LINK_RE):
-        for match in pattern.findall(text or ""):
-            url, label = match if pattern is _MARKDOWN_HTML_LINK_RE else (match[1], match[0])
-            cleaned_url = _clean_text(url)
-            cleaned_label = _strip_markup_to_text(label)
-            if not cleaned_url or cleaned_url in seen:
-                continue
-            seen.add(cleaned_url)
-            links.append((cleaned_label or cleaned_url, cleaned_url))
-    return links
-
-
-def _extract_arxiv_paper_url(tags: Any) -> str | None:
-    for tag in tags if isinstance(tags, list) else []:
-        text = str(tag or "").strip()
-        if not text.lower().startswith("arxiv:"):
-            continue
-        arxiv_id = text.split(":", 1)[1].strip()
-        if arxiv_id:
-            return f"https://arxiv.org/abs/{arxiv_id}"
-    return None
-
-
-def _extract_huggingface_base_models(card_data: dict[str, Any], tags: Any) -> list[str]:
-    base_models = _normalize_string_list(card_data.get("base_model"))
-    if base_models:
-        return base_models
-
-    values: list[str] = []
-    for tag in tags if isinstance(tags, list) else []:
-        text = str(tag or "").strip()
-        if not text.lower().startswith("base_model:"):
-            continue
-        candidate = text.split(":", 1)[1].strip()
-        if candidate.startswith("finetune:"):
-            candidate = candidate.split(":", 1)[1].strip()
-        if candidate:
-            values.append(candidate)
-    return _merge_string_lists(values)
-
-
-def _derive_huggingface_capabilities(info: dict[str, Any], card_data: dict[str, Any]) -> list[str]:
-    values: list[str] = []
-    for candidate in (
-        card_data.get("pipeline_tag"),
-        info.get("pipeline_tag"),
-    ):
-        text = _clean_text(candidate)
-        if text:
-            values.append(text)
-
-    useful_tags = {
-        "chat",
-        "conversational",
-        "reasoning",
-        "image-text-to-text",
-        "visual-question-answering",
-        "text-generation",
-        "text2text-generation",
-        "text-to-image",
-        "text-to-video",
-        "automatic-speech-recognition",
-        "text-to-speech",
-        "audio-text-to-text",
-    }
-    for tag in info.get("tags") if isinstance(info.get("tags"), list) else []:
-        text = str(tag or "").strip()
-        if text.lower() in useful_tags:
-            values.append(text)
-    return _merge_string_lists(values)
-
-
-def _extract_markdown_section_summary(readme_text: str, *, heading_keywords: tuple[str, ...]) -> str | None:
-    for heading, content in _iter_markdown_sections(readme_text):
-        normalized_heading = heading.lower()
-        if not any(keyword in normalized_heading for keyword in heading_keywords):
-            continue
-        summary = _shorten_summary(_strip_markup_to_text(content))
-        if summary:
-            return summary
-    return None
-
-
-def _extract_markdown_intro_summary(readme_text: str) -> str | None:
-    text = _clean_text(readme_text)
-    if not text:
-        return None
-    body = _MARKDOWN_HEADING_RE.split(readme_text, maxsplit=1)[0]
-    summary = _shorten_summary(_strip_markup_to_text(body))
-    return summary
-
-
-def _extract_training_cutoff(readme_text: str) -> str | None:
-    match = _TRAINING_CUTOFF_RE.search(readme_text or "")
-    if not match:
-        return None
-    return _shorten_summary(_strip_markup_to_text(match.group(1)), limit=120)
-
-
-def _strip_readme_frontmatter(text: str) -> str:
-    cleaned = str(text or "")
-    return _README_FRONTMATTER_RE.sub("", cleaned, count=1)
-
-
-def _iter_markdown_sections(text: str) -> Iterable[tuple[str, str]]:
-    cleaned = str(text or "")
-    matches = list(_MARKDOWN_HEADING_RE.finditer(cleaned))
-    if not matches:
-        if cleaned.strip():
-            yield "", cleaned
-        return
-
-    for index, match in enumerate(matches):
-        start = match.end()
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(cleaned)
-        heading = _strip_markup_to_text(match.group(2))
-        content = cleaned[start:end].strip()
-        if content:
-            yield heading, content
-
-
-def _strip_markup_to_text(text: Any) -> str:
-    raw = str(text or "")
-    stripped = raw.strip()
-    if not stripped:
-        return ""
-    if re.fullmatch(r"https?://\S+", stripped, re.IGNORECASE):
-        return stripped
-    # Avoid sending plain text that merely resembles a path or filename through BeautifulSoup.
-    if "<" not in stripped and ">" not in stripped and "&" not in stripped:
-        html_stripped = stripped
-    else:
-        soup = BeautifulSoup(raw, "html.parser")
-        html_stripped = soup.get_text(" ", strip=True)
-    markdown_stripped = re.sub(r"`([^`]+)`", r"\1", html_stripped)
-    markdown_stripped = re.sub(r"\*\*([^*]+)\*\*", r"\1", markdown_stripped)
-    markdown_stripped = re.sub(r"\*([^*]+)\*", r"\1", markdown_stripped)
-    markdown_stripped = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1", markdown_stripped)
-    markdown_stripped = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", r"\1", markdown_stripped)
-    markdown_stripped = re.sub(r"^>\s*", "", markdown_stripped, flags=re.M)
-    markdown_stripped = re.sub(r"\s+", " ", markdown_stripped)
-    return markdown_stripped.strip()
-
-
-def _shorten_summary(text: Any, *, limit: int = MODEL_CARD_SUMMARY_MAX_LENGTH) -> str | None:
-    cleaned = _clean_text(text)
-    if not cleaned:
-        return None
-    if len(cleaned) <= limit:
-        return cleaned
-    trimmed = cleaned[:limit].rsplit(" ", 1)[0].rstrip(" ,;:.")
-    return f"{trimmed}..."
-
-
-def _normalize_string_list(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        values = [value]
-    elif isinstance(value, list):
-        values = [str(item) for item in value]
-    else:
-        values = [str(value)]
-    return _merge_string_lists(values)
-
-
 def _merge_string_lists(*lists: list[str] | None) -> list[str]:
-    merged: list[str] = []
-    seen: set[str] = set()
-    for values in lists:
-        for item in values or []:
-            cleaned = _clean_text(item)
-            if not cleaned:
-                continue
-            normalized = cleaned.lower()
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-            merged.append(cleaned)
-    return merged
+    return model_card_refresh.merge_string_lists(*lists)
 
 
 def _parse_iso_datetime(value: Any) -> datetime | None:
@@ -5323,17 +4797,7 @@ def _benchmark_ranges(
     models: list[dict[str, Any]],
     weights: dict[str, float],
 ) -> dict[str, tuple[float, float]]:
-    ranges: dict[str, tuple[float, float]] = {}
-    for benchmark_id in weights:
-        values = [
-            float(score["value"])
-            for model in models
-            for score in [model["scores"].get(benchmark_id)]
-            if score is not None and score.get("value") is not None
-        ]
-        if values:
-            ranges[benchmark_id] = (min(values), max(values))
-    return ranges
+    return ranking_views.benchmark_ranges(models, weights)
 
 
 def _benchmark_stats(latest_scores: dict[tuple[str, str], dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -5359,12 +4823,7 @@ def _benchmark_stats(latest_scores: dict[tuple[str, str], dict[str, Any]]) -> di
 
 
 def _normalise_score(raw_value: float, minimum: float, maximum: float, higher_is_better: bool) -> float:
-    if maximum == minimum:
-        return 75.0
-
-    scaled = (raw_value - minimum) / (maximum - minimum) * 100.0
-    score = scaled if higher_is_better else 100.0 - scaled
-    return max(0.0, min(100.0, score))
+    return ranking_views.normalise_score(raw_value, minimum, maximum, higher_is_better)
 
 
 def _model_summary(model: dict[str, Any]) -> dict[str, Any]:

@@ -7,13 +7,6 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Open
 
-- [ ] LBM-006: P2 Refactor update-engine responsibilities into smaller modules
-  - Source: Codex repo review 2026-07-01.
-  - Problem: `backend/update_engine.py` owns orchestration, ranking reads, OpenRouter enrichment, model-card refresh, license refresh, curation write paths, and serialization in one very large module.
-  - Scope: `backend/update_engine.py` plus new focused backend modules.
-  - Acceptance: extract at least orchestration, OpenRouter metadata, model-card refresh, and ranking/read serialization into bounded modules without changing API output.
-  - Validation: characterization tests before moves; targeted backend unittest suite; `python -m backend list-models --output /tmp/llm-benchmarking-models.json`.
-
 - [ ] LBM-007: P2 Replace duplicated ad hoc schema creation with migration-owned schema changes
   - Source: Codex repo review 2026-07-01.
   - Problem: SQLAlchemy table definitions and raw `CREATE TABLE` / `ALTER TABLE` SQL must be manually kept in sync.
@@ -58,6 +51,14 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: define thresholds for commercial/production use cases; audit output distinguishes blocker, warning, and backlog-only gaps; remediation rows are easy to generate from the audit.
   - Validation: `python -m backend model-card-audit --json`; tests for threshold classification; `make docs-check`.
   - Completed: 2026-07-01. The audit now emits a `commercial_production` quality gate with blocker, warning, and backlog-only remediation rows, and docs define the threshold meanings.
+
+- [x] LBM-006: P2 Refactor update-engine responsibilities into smaller modules
+  - Source: Codex repo review 2026-07-01.
+  - Problem: `backend/update_engine.py` owns orchestration, ranking reads, OpenRouter enrichment, model-card refresh, license refresh, curation write paths, and serialization in one very large module.
+  - Scope: `backend/update_engine.py` plus new focused backend modules.
+  - Acceptance: extract at least orchestration, OpenRouter metadata, model-card refresh, and ranking/read serialization into bounded modules without changing API output.
+  - Validation: characterization tests before moves; targeted backend unittest suite; `python -m backend list-models --output /tmp/llm-benchmarking-models.json`.
+  - Completed: 2026-07-01. Update orchestration, OpenRouter page parsing, Hugging Face model-card extraction, and ranking response construction now live in focused helper modules while `update_engine.py` keeps the public API surface.
 
 - [x] LBM-001: P1 Split startup bootstrap from live metadata refresh
   - Source: Codex repo review 2026-07-01.
