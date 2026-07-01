@@ -106,6 +106,10 @@ VALID_RECOMMENDATION_STATUSES = {
     RECOMMENDATION_STATUS_NOT_RECOMMENDED,
     RECOMMENDATION_STATUS_DISCOURAGED,
 }
+SOURCE_METADATA_PROMOTION_LABELS = {
+    "chatbot_arena": "Chatbot Arena",
+    "ifeval": "IFEval",
+}
 
 
 class OptionalSourceUnavailable(RuntimeError):
@@ -2494,6 +2498,7 @@ def _persist_source_result(
         resolved_candidates[candidate_key] = (model_id, candidate)
 
     for model_id, candidate in resolved_candidates.values():
+        _promote_score_candidate_metadata(model_id, candidate)
         _, outcome = _persist_score_candidate(candidate, resolved_model_id=model_id)
         if outcome == "added":
             scores_added += 1
@@ -2535,6 +2540,180 @@ def _persist_source_result(
         )
 
     return scores_added, scores_updated
+
+
+def _promote_score_candidate_metadata(model_id: str, candidate: ScoreCandidate) -> bool:
+    source_id = str(candidate.source_id or "").strip()
+    if source_id not in SOURCE_METADATA_PROMOTION_LABELS:
+        return False
+
+    trust_level = _source_metadata_trust_level(
+        source_id,
+        candidate.metadata,
+        source_type=candidate.source_type,
+        verified=candidate.verified,
+    )
+    if trust_level is None:
+        return False
+
+    with ENGINE.begin() as conn:
+        row = fetch_one(conn, select(models_table).where(models_table.c.id == model_id))
+        if row is None:
+            return False
+
+        values: dict[str, Any] = {}
+        provider_name = _source_metadata_provider(source_id, candidate.metadata)
+        if provider_name and trust_level != "self_reported":
+            current_provider = str(row.get("provider") or "").strip()
+            current_provider_unknown = not current_provider or current_provider.lower() == "unknown"
+            current_provider_id = str(row.get("provider_id") or "").strip()
+            if current_provider_unknown or (
+                not current_provider_id and normalize_text(current_provider) == normalize_text(provider_name)
+            ):
+                values["provider"] = provider_name
+                values["provider_id"] = _ensure_provider_row(provider_name, conn=conn)
+
+        context_tokens = _source_metadata_context_tokens(source_id, candidate.metadata)
+        if context_tokens is not None and row.get("context_window_tokens") is None:
+            values["context_window_tokens"] = context_tokens
+            if _model_field_missing(row, "context_window"):
+                values["context_window"] = _format_context_window_tokens(context_tokens)
+
+        input_price = _source_metadata_price_per_mtok(source_id, candidate.metadata, input_price=True)
+        if input_price is not None and row.get("price_input_per_mtok") is None:
+            values["price_input_per_mtok"] = input_price
+
+        output_price = _source_metadata_price_per_mtok(source_id, candidate.metadata, input_price=False)
+        if output_price is not None and row.get("price_output_per_mtok") is None:
+            values["price_output_per_mtok"] = output_price
+
+        license_name = _source_metadata_license_name(source_id, candidate.metadata)
+        if license_name and trust_level != "self_reported" and _model_field_missing(row, "license_id") and _model_field_missing(row, "license_name"):
+            values["license_name"] = license_name
+
+        documentation_url = _source_metadata_documentation_url(source_id, candidate.metadata)
+        if documentation_url and _model_field_missing(row, "documentation_url"):
+            values["documentation_url"] = documentation_url
+
+        if values and _model_field_missing(row, "metadata_source_name"):
+            values["metadata_source_name"] = SOURCE_METADATA_PROMOTION_LABELS[source_id]
+            values["metadata_source_url"] = _source_metadata_source_url(source_id, candidate.metadata, candidate.source_url)
+            values["metadata_verified_at"] = candidate.collected_at
+
+        if not values:
+            return False
+
+        conn.execute(
+            update(models_table)
+            .where(models_table.c.id == model_id)
+            .values(**values)
+        )
+        return True
+
+
+def _source_metadata_trust_level(
+    source_id: str,
+    metadata: dict[str, Any],
+    *,
+    source_type: str,
+    verified: bool,
+) -> str | None:
+    if source_id == "chatbot_arena":
+        return "verified"
+
+    if source_id != "ifeval":
+        return None
+
+    self_reported = bool(metadata.get("self_reported"))
+    if verified and not self_reported:
+        return "verified"
+    if self_reported and _clean_text(metadata.get("self_reported_source")):
+        return "self_reported"
+    if source_type == "primary" and verified:
+        return "verified"
+    return None
+
+
+def _source_metadata_provider(source_id: str, metadata: dict[str, Any]) -> str | None:
+    if source_id == "chatbot_arena":
+        return _clean_text(metadata.get("organization") or metadata.get("modelOrganization"))
+    if source_id == "ifeval":
+        return _clean_text(metadata.get("organization_name"))
+    return None
+
+
+def _source_metadata_context_tokens(source_id: str, metadata: dict[str, Any]) -> int | None:
+    if source_id == "chatbot_arena":
+        return _context_window_tokens_from_source(metadata.get("context_length"))
+    if source_id == "ifeval":
+        return _context_window_tokens_from_source(metadata.get("context_window"))
+    return None
+
+
+def _source_metadata_price_per_mtok(source_id: str, metadata: dict[str, Any], *, input_price: bool) -> float | None:
+    if source_id == "chatbot_arena":
+        key = "input_price_per_million" if input_price else "output_price_per_million"
+    elif source_id == "ifeval":
+        key = "input_cost_per_million" if input_price else "output_cost_per_million"
+    else:
+        return None
+    return _safe_float(metadata.get(key))
+
+
+def _source_metadata_license_name(source_id: str, metadata: dict[str, Any]) -> str | None:
+    if source_id == "chatbot_arena":
+        return _clean_text(metadata.get("license"))
+    if source_id == "ifeval":
+        return _clean_text(metadata.get("license") or metadata.get("license_name"))
+    return None
+
+
+def _source_metadata_documentation_url(source_id: str, metadata: dict[str, Any]) -> str | None:
+    if source_id == "chatbot_arena":
+        return _clean_url(metadata.get("model_url") or metadata.get("modelUrl"))
+    return None
+
+
+def _source_metadata_source_url(source_id: str, metadata: dict[str, Any], fallback_url: str) -> str | None:
+    if source_id == "ifeval":
+        return _clean_url(metadata.get("details_url")) or _clean_url(fallback_url)
+    return _clean_url(fallback_url)
+
+
+def _context_window_tokens_from_source(value: Any) -> int | None:
+    direct_value = _safe_int(value)
+    if direct_value is not None:
+        return direct_value if direct_value > 0 else None
+
+    text_value = str(value or "").strip().replace(",", "")
+    if not text_value:
+        return None
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([kKmM]?)\s*(?:tokens?|ctx|context)?", text_value)
+    if not match:
+        return None
+    number = _safe_float(match.group(1))
+    if number is None or number <= 0:
+        return None
+    suffix = match.group(2).lower()
+    if suffix == "m":
+        number *= 1_000_000
+    elif suffix == "k":
+        number *= 1_000
+    return int(number)
+
+
+def _model_field_missing(row: dict[str, Any], field_name: str) -> bool:
+    value = row.get(field_name)
+    return value is None or value == ""
+
+
+def _clean_url(value: Any) -> str | None:
+    url = _clean_text(value)
+    if not url:
+        return None
+    if not re.match(r"^https?://", url, re.IGNORECASE):
+        return None
+    return url
 
 
 def _insert_raw_source_record(

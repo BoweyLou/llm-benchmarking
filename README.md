@@ -111,6 +111,14 @@ Fresh SQLite databases are initialized from the current schema in [backend/datab
 
 ## Current Data Sources
 
+For a detailed source-by-source data-flow diagram, source inventory, and
+recommended ingest gaps, see [docs/data-ingest-map.md](docs/data-ingest-map.md).
+
+Source metadata precedence is fill-only. Chatbot Arena and verified IFEval
+metadata can backfill missing provider, license, context-window, pricing, and
+documentation URL fields, but they do not overwrite existing OpenRouter,
+Hugging Face, baseline, or curated metadata.
+
 Benchmark adapters:
 
 - Artificial Analysis
