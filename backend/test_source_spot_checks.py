@@ -16,6 +16,7 @@ from backend.sources.artificial_analysis import ArtificialAnalysisAdapter
 from backend.sources.base import RawSourceRecord, SourceFetchResult
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
 from backend.sources.ifeval import IfevalAdapter
+from backend.sources.livecodebench import LiveCodeBenchAdapter
 from backend.sources.swebench import SwebenchAdapter
 
 FUTURE_COLLECTED_AT = "2099-01-01T00:00:00Z"
@@ -244,6 +245,130 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(raw_rows[0]["normalized_model_id"], "gpt-5-4")
         self.assertEqual(raw_rows[0]["source_type"], "secondary")
         self.assertEqual(raw_rows[0]["verified"], 0)
+
+    def test_livecodebench_spot_check_aggregates_default_window(self) -> None:
+        adapter = LiveCodeBenchAdapter()
+        payload = {
+            "date_marks": [
+                1682899200000,
+                1685577600000,
+                1688169600000,
+                1690848000000,
+                1693526400000,
+                1696118400000,
+                1698796800000,
+                1701388800000,
+                1704067200000,
+                1706745600000,
+                1709251200000,
+                1711929600000,
+                1714521600000,
+                1717200000000,
+                1719792000000,
+                1722470400000,
+                1725148800000,
+            ],
+            "models": [
+                {
+                    "model_name": "claude-opus-4.6",
+                    "model_repr": "Claude Opus 4.6",
+                    "model_style": "AnthropicAPI",
+                    "release_date": 1719705600000,
+                    "link": "https://example.test/claude",
+                },
+                {
+                    "model_name": "gpt-5.4",
+                    "model_repr": "GPT-5.4 (xhigh)",
+                    "model_style": "OpenAIAPI",
+                    "release_date": 1725148800000,
+                    "link": "https://example.test/gpt",
+                },
+                {
+                    "model_name": "missing-release",
+                    "model_repr": "Missing Release",
+                    "model_style": "Unknown",
+                    "link": "https://example.test/missing",
+                },
+            ],
+            "performances": [
+                {
+                    "question_id": "before-window",
+                    "model": "Claude Opus 4.6",
+                    "date": 1719792000000,
+                    "difficulty": "easy",
+                    "pass@1": 0.0,
+                    "platform": "codeforces",
+                },
+                {
+                    "question_id": "easy-1",
+                    "model": "Claude Opus 4.6",
+                    "date": 1722470400000,
+                    "difficulty": "easy",
+                    "pass@1": 50.0,
+                    "platform": "codeforces",
+                },
+                {
+                    "question_id": "medium-1",
+                    "model": "Claude Opus 4.6",
+                    "date": 1722470400000,
+                    "difficulty": "medium",
+                    "pass@1": 100.0,
+                    "platform": "leetcode",
+                },
+                {
+                    "question_id": "hard-1",
+                    "model": "Claude Opus 4.6",
+                    "date": 1725148800000,
+                    "difficulty": "hard",
+                    "pass@1": 70.0,
+                    "platform": "codeforces",
+                },
+                {
+                    "question_id": "gpt-1",
+                    "model": "GPT-5.4 (xhigh)",
+                    "date": 1725148800000,
+                    "difficulty": "easy",
+                    "pass@1": 90.0,
+                    "platform": "codeforces",
+                },
+            ],
+        }
+        raw_records = adapter._records_from_payload(
+            payload,
+            fetched_at=FUTURE_COLLECTED_AT,
+            artifact_metadata={"artifact_sha256": "fixture-sha"},
+        )
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, raw_records)
+
+        candidate_values = {candidate.raw_model_name: candidate.value for candidate in candidates}
+        self.assertEqual(len(candidates), 2)
+        self.assertAlmostEqual(candidate_values["Claude Opus 4.6"], 73.3)
+        self.assertAlmostEqual(candidate_values["GPT-5.4 (xhigh)"], 90.0)
+
+        claude_candidate = next(candidate for candidate in candidates if candidate.raw_model_name == "Claude Opus 4.6")
+        self.assertEqual(claude_candidate.metadata["problem_count"], 3)
+        self.assertEqual(claude_candidate.metadata["window_start_date"], "2024-08-01")
+        self.assertEqual(claude_candidate.metadata["difficulty_counts"], {"easy": 1, "hard": 1, "medium": 1})
+        self.assertEqual(claude_candidate.metadata["difficulty_scores"], {"easy": 50.0, "hard": 70.0, "medium": 100.0})
+        self.assertEqual(claude_candidate.metadata["platform_counts"], {"codeforces": 2, "leetcode": 1})
+        self.assertFalse(claude_candidate.metadata["contaminated_by_window"])
+        self.assertEqual(claude_candidate.metadata["artifact_sha256"], "fixture-sha")
+
+        gpt_candidate = next(candidate for candidate in candidates if candidate.raw_model_name == "GPT-5.4 (xhigh)")
+        self.assertTrue(gpt_candidate.metadata["contaminated_by_window"])
+        self.assertIn("potentially contaminated", str(gpt_candidate.notes))
+
+        claude = self._latest_score("claude-opus-4-6", "livecodebench_codegen")
+        gpt = self._latest_score("gpt-5-4", "livecodebench_codegen")
+        self.assertAlmostEqual(float(claude["value"]), 73.3)
+        self.assertAlmostEqual(float(gpt["value"]), 90.0)
+        self.assertEqual(claude["source_type"], "primary")
+        self.assertEqual(claude["verified"], 1)
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 2)
+        self.assertTrue(all(row["resolution_status"] == "resolved" for row in raw_rows))
 
     def test_chatbot_arena_same_run_duplicate_resolution_keeps_single_best_score(self) -> None:
         adapter = ChatbotArenaAdapter()

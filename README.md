@@ -118,11 +118,18 @@ Benchmark adapters:
 - AILuminate
 - GPQA Diamond
 - IFEval
+- LiveCodeBench
 - MMMU
 - SWE-bench Verified
 - Terminal-Bench
 - FaithJudge
 - Vectara Hallucination
+
+The LiveCodeBench adapter imports the official code-generation leaderboard
+JSON, mirrors the site default date window, and records one
+`livecodebench_codegen` pass@1 score per model. Window, difficulty, platform,
+release-date, and contamination metadata are retained with each raw record for
+review before the benchmark is added to ranking weights.
 
 Metadata and catalog enrichments:
 

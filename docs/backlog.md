@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-027: P1 Add a LiveCodeBench source adapter
+  - Source: Data ingest source-map review 2026-07-01.
+  - Problem: the catalog lacked a dedicated code-generation benchmark with release-window controls even though LiveCodeBench publishes public per-problem pass@1 data and model metadata.
+  - Scope: `backend/sources/livecodebench.py`, source registration, benchmark seed data, source spot checks, README/source-map docs.
+  - Acceptance: ingest one `livecodebench_codegen` score per model from the official generation leaderboard; mirror the public default date window; preserve window, difficulty, platform, release-date, and contamination metadata.
+  - Validation: fixture-backed parser/persistence test; selected temp-database update/export; backend unittest suite; inference suite; docs and kit readiness checks.
+  - Completed: 2026-07-01. The adapter imports the official `performances_generation.json`, derives page-equivalent pass@1 aggregates, flags release-window contamination, and preserves aggregate evidence with raw records.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.
