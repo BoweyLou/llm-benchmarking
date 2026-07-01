@@ -17,6 +17,7 @@ from backend.database import (
     get_connection,
     get_engine,
     init_db,
+    models as models_table,
     scores as scores_table,
 )
 from backend.seed_data import seed_reference_data
@@ -33,6 +34,7 @@ from backend.sources.ifeval import IfevalAdapter
 from backend.sources.livebench import LiveBenchAdapter
 from backend.sources.livecodebench import LiveCodeBenchAdapter
 from backend.sources.mmmu import MmmuAdapter
+from backend.sources.mteb import MtebAdapter
 from backend.sources.ragtruth import RagtruthAdapter
 from backend.sources.swebench import SwebenchAdapter
 from backend.sources.taubench import TaubenchAdapter
@@ -92,6 +94,75 @@ class SourceSpotCheckTests(unittest.TestCase):
                 )
             self.assertIsNotNone(row, f"Missing latest score for model={model_id} benchmark={benchmark_id}")
             return dict(row)
+
+    def test_mteb_spot_check_persists_embedding_and_reranker_scores(self) -> None:
+        adapter = MtebAdapter()
+        raw_records = [
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="mteb_retrieval",
+                raw_model_name="BAAI/bge-large-en-v1.5",
+                raw_value="38.061",
+                source_url="https://raw.githubusercontent.com/embeddings-benchmark/results/main/results/BAAI__bge-large-en-v1.5/rev/NFCorpus.json",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="BAAI/bge-large-en-v1.5",
+                payload={"task_name": "NFCorpus", "scores": {"test": [{"main_score": 0.38061}]}},
+                metadata={
+                    "model_provider": "BAAI",
+                    "model_roles": ["embedding"],
+                    "task_category": "retrieval",
+                    "task_name": "NFCorpus",
+                    "languages": ["eng-Latn"],
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="mteb_reranking",
+                raw_model_name="BAAI/bge-large-en-v1.5",
+                raw_value="32.4653",
+                source_url="https://raw.githubusercontent.com/embeddings-benchmark/results/main/results/BAAI__bge-large-en-v1.5/rev/VoyageMMarcoReranking.json",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="BAAI/bge-large-en-v1.5",
+                payload={"task_name": "VoyageMMarcoReranking", "scores": {"test": [{"main_score": 0.324653}]}},
+                metadata={
+                    "model_provider": "BAAI",
+                    "model_roles": ["reranker"],
+                    "task_category": "reranking",
+                    "task_name": "VoyageMMarcoReranking",
+                    "languages": ["jpn-Jpan"],
+                },
+            ),
+        ]
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, raw_records)
+
+        candidate_values = {candidate.benchmark_id: candidate.value for candidate in candidates}
+        self.assertEqual(set(candidate_values), {"mteb_retrieval", "mteb_reranking", "mteb_retrieval_reranking"})
+        self.assertAlmostEqual(candidate_values["mteb_retrieval"], 38.061)
+        self.assertAlmostEqual(candidate_values["mteb_reranking"], 32.4653)
+        self.assertAlmostEqual(candidate_values["mteb_retrieval_reranking"], 35.2631)
+
+        with get_connection(self.engine) as conn:
+            model_row = fetch_one(
+                conn,
+                select(models_table).where(models_table.c.name == "BAAI/bge-large-en-v1.5"),
+            )
+        self.assertIsNotNone(model_row)
+        model_id = str(model_row["id"])
+        self.assertEqual(json.loads(str(model_row["model_roles_json"])), ["embedding", "reranker"])
+
+        retrieval = self._latest_score(model_id, "mteb_retrieval")
+        reranking = self._latest_score(model_id, "mteb_reranking")
+        blended = self._latest_score(model_id, "mteb_retrieval_reranking")
+
+        self.assertAlmostEqual(float(retrieval["value"]), 38.061)
+        self.assertAlmostEqual(float(reranking["value"]), 32.4653)
+        self.assertAlmostEqual(float(blended["value"]), 35.2631)
+        self.assertIn("Official MTEB retrieval", str(retrieval["notes"]))
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 2)
+        self.assertTrue(all(row["resolution_status"] == "resolved" for row in raw_rows))
 
     def test_artificial_analysis_spot_check_persists_multimetric_scores(self) -> None:
             adapter = ArtificialAnalysisAdapter()

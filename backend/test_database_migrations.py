@@ -20,6 +20,7 @@ class DatabaseMigrationTests(unittest.TestCase):
 
         self.assertEqual(migration_ids, [migration_id for migration_id, _migration in SCHEMA_MIGRATIONS])
         self.assertIn("provider_id", model_columns)
+        self.assertIn("model_roles_json", model_columns)
         self.assertIn("openrouter_global_rank", model_columns)
         self.assertIsNotNone(latest_scores_view)
 
@@ -43,6 +44,7 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertEqual(migration_ids, [migration_id for migration_id, _migration in SCHEMA_MIGRATIONS])
         self.assertIn("origin_countries_json", provider_columns)
         self.assertIn("provider_id", model_columns)
+        self.assertIn("model_roles_json", model_columns)
         self.assertIn("catalog_status", model_columns)
         self.assertIn("base_models_json", model_columns)
         self.assertIn("openrouter_programming_request_count", model_columns)

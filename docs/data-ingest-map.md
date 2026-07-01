@@ -2,8 +2,9 @@
 
 This map documents the current ingest pipeline, source inventory, and completed
 source-review outcomes for the benchmark catalog. It reflects the integrated
-2026-07-01 data-ingest work: backlog items `LBM-016` through `LBM-031` are now
-implemented, while `LBM-032` remains gated on model-role separation.
+2026-07-01 data-ingest work: backlog items `LBM-016` through `LBM-032` are now
+implemented, including model-role separation for generator, embedding, and
+reranker model rankings.
 
 ## Current Flow
 
@@ -28,6 +29,7 @@ flowchart LR
         LiveBench["LiveBench"]
         LCB["LiveCodeBench"]
         MMMU["MMMU leaderboard JSON"]
+        MTEB["MTEB results repository"]
         RAGTruth["RAGTruth published corpus results"]
         SWE["SWE-bench leaderboards JSON"]
         Tau["tau-bench submissions"]
@@ -84,6 +86,7 @@ flowchart LR
     LiveBench --> Adapters
     LCB --> Adapters
     MMMU --> Adapters
+    MTEB --> Adapters
     RAGTruth --> Adapters
     SWE --> Adapters
     Tau --> Adapters
@@ -149,6 +152,7 @@ flowchart LR
 | LiveBench | `LiveBenchAdapter` | Official static leaderboard overall and category scores with release and task-score metadata. | Task-level LiveBench scores remain raw metadata until category ingestion is stable in production. |
 | LiveCodeBench | `LiveCodeBenchAdapter` | Code-generation Pass@1 for the default window plus difficulty, platform, release-window, and contamination metadata. | Contamination flags should be inspected before using the score as a sole coding signal. |
 | MMMU | `MmmuAdapter` | Validation overall plus stable test and MMMU-Pro companion metrics; human/random baselines are skipped. | Use validation overall as the continuity anchor; companion rows add coverage. |
+| MTEB | `MtebAdapter` | Retrieval, reranking, and blended retrieval/reranking averages from official per-task result files, with task, revision, language, and role metadata. | Used only for embedding/reranker model-role rankings; generator use cases remain separated. |
 | RAGTruth | `RagtruthAdapter` | Overall and task-level hallucination rates for published held-out corpus evidence. | Historical corpus evidence; lower is better. |
 | SWE-bench | `SwebenchAdapter` | Verified best single-model submission plus Lite, Full, Multilingual, and Multimodal companion split scores; submitter/scaffold metadata is preserved. | Harness and scaffold effects still require review when interpreting scores. |
 | tau-bench | `TaubenchAdapter` | Standard text and voice domain Pass^1 scores with domain, mode, retrieval, and submission metadata. | Custom or aggregate systems are skipped for model score rows. |
@@ -190,14 +194,16 @@ flowchart LR
 - `LBM-029`: `HelmCapabilitiesAdapter`
 - `LBM-030`: `TaubenchAdapter`
 - `LBM-031`: `RagtruthAdapter`
+- `LBM-032`: `MtebAdapter` with embedding/reranker model-role separation
 
-### Still Gated
+### Model-role Boundary
 
-`LBM-032` remains open. MTEB is valuable for embedding, retrieval, reranking,
-classification, clustering, semantic textual similarity, and multimodal
-embedding tasks, but the current catalog is still a generator-model ranking
-surface. Add MTEB only after the schema and exports distinguish generator,
-embedding, reranker, and multimodal embedding model roles.
+MTEB retrieval and reranking scores are intentionally isolated from generator
+model rankings. The `models.model_roles_json` schema field and serialized
+`model_roles` API/export field distinguish `generator`, `embedding`,
+`reranker`, and future `multimodal_embedding` roles. Generator use cases default
+to `["generator"]`; the new `retrieval_embeddings` and `retrieval_reranking`
+use cases rank only embedding or reranker models.
 
 ## Source Evidence Checked
 
@@ -223,3 +229,6 @@ embedding, reranker, and multimodal embedding model roles.
   <https://github.com/ParticleMedia/RAGTruth>
 - MTEB documents an embedding/retrieval evaluation toolbox and leaderboard:
   <https://github.com/embeddings-benchmark/mteb/>
+- MTEB publishes official leaderboard result data in the
+  `embeddings-benchmark/results` repository:
+  <https://github.com/embeddings-benchmark/results>

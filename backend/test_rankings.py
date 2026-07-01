@@ -83,6 +83,7 @@ class RankingTests(unittest.TestCase):
         canonical_model_name: str | None = None,
         discovered_at: str | None = None,
         discovered_update_log_id: int | None = None,
+        model_roles: list[str] | None = None,
     ) -> None:
         with self.engine.begin() as conn:
             conn.execute(
@@ -93,6 +94,7 @@ class RankingTests(unittest.TestCase):
                         "name": name,
                         "provider": provider,
                         "type": "proprietary",
+                        "model_roles_json": json.dumps(model_roles or ["generator"], ensure_ascii=True),
                         "release_date": None,
                         "context_window": None,
                         "family_id": family_id,
@@ -221,6 +223,40 @@ class RankingTests(unittest.TestCase):
         ranked_names = [row["model"]["name"] for row in rankings["rankings"]]
         self.assertIn("Complete Model", ranked_names)
         self.assertNotIn("Intel Only", ranked_names)
+
+    def test_model_role_rankings_do_not_mix_generator_and_embedding_models(self) -> None:
+        self.add_model("generator-a", "Generator A", model_roles=["generator"])
+        self.add_model("embedding-a", "Embedding A", model_roles=["embedding"])
+        self.add_model("reranker-a", "Reranker A", model_roles=["reranker"])
+
+        for model_id, score in (("generator-a", 75.0), ("embedding-a", 99.0)):
+            self.add_score(model_id, "gpqa_diamond", score)
+            self.add_score(model_id, "aa_intelligence", score)
+            self.add_score(model_id, "chatbot_arena", score)
+
+        self.add_score("embedding-a", "mteb_retrieval", 62.0)
+        self.add_score("embedding-a", "mteb_retrieval_reranking", 58.0)
+        self.add_score("reranker-a", "mteb_reranking", 64.0)
+        self.add_score("reranker-a", "mteb_retrieval_reranking", 58.0)
+        self.add_score("generator-a", "mteb_retrieval", 100.0)
+
+        reasoning = update_engine.get_rankings("general_reasoning")
+        retrieval = update_engine.get_rankings("retrieval_embeddings")
+        reranking = update_engine.get_rankings("retrieval_reranking")
+
+        self.assertIsNotNone(reasoning)
+        self.assertIsNotNone(retrieval)
+        self.assertIsNotNone(reranking)
+
+        self.assertEqual(reasoning["use_case"]["model_roles"], ["generator"])
+        self.assertEqual(retrieval["use_case"]["model_roles"], ["embedding"])
+        self.assertEqual(reranking["use_case"]["model_roles"], ["reranker"])
+
+        self.assertEqual([row["model"]["name"] for row in reasoning["rankings"]], ["Generator A"])
+        self.assertEqual([row["model"]["name"] for row in retrieval["rankings"]], ["Embedding A"])
+        self.assertEqual([row["model"]["name"] for row in reranking["rankings"]], ["Reranker A"])
+        self.assertEqual(retrieval["rankings"][0]["model"]["model_roles"], ["embedding"])
+        self.assertEqual(reranking["rankings"][0]["model"]["model_roles"], ["reranker"])
 
     def test_coding_prefers_stronger_swebench_when_other_edges_are_smaller(self) -> None:
         self.add_model("flash", "Flash")

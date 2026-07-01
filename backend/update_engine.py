@@ -110,6 +110,8 @@ SOURCE_METADATA_PROMOTION_LABELS = {
     "chatbot_arena": "Chatbot Arena",
     "ifeval": "IFEval",
 }
+MODEL_ROLE_GENERATOR = "generator"
+VALID_MODEL_ROLES = {"generator", "embedding", "reranker", "multimodal_embedding"}
 
 
 class OptionalSourceUnavailable(RuntimeError):
@@ -123,6 +125,7 @@ SOURCE_STEP_LABEL_OVERRIDES = {
     "faithjudge": "FaithJudge",
     "ifeval": "IFEval",
     "mmmu": "MMMU",
+    "mteb": "MTEB",
     "swebench": "SWE-bench Verified",
     "terminal_bench": "Terminal-Bench",
     "vectara_hallucination": "Vectara Hallucination",
@@ -322,6 +325,24 @@ def _decode_json_string_list(value: Any) -> list[str]:
     ]
 
 
+def _normalise_model_roles(value: Any, *, default: Iterable[str] = (MODEL_ROLE_GENERATOR,)) -> list[str]:
+    roles = [
+        role
+        for role in _decode_json_string_list(value if not isinstance(value, str) else value)
+        if role in VALID_MODEL_ROLES
+    ]
+    if roles:
+        return sorted(dict.fromkeys(roles))
+    return sorted(dict.fromkeys(role for role in default if role in VALID_MODEL_ROLES))
+
+
+def _model_roles_from_metadata(metadata: dict[str, Any]) -> list[str]:
+    raw_roles = metadata.get("model_roles")
+    if raw_roles is None and metadata.get("model_role") is not None:
+        raw_roles = [metadata.get("model_role")]
+    return _normalise_model_roles(raw_roles, default=())
+
+
 def _humanize_source_name(source_name: str) -> str:
     return update_orchestration.humanize_source_name(source_name, SOURCE_STEP_LABEL_OVERRIDES)
 
@@ -397,6 +418,7 @@ def _resolve_use_case_definition(
         "description": use_case["description"],
         "segment": use_case.get("segment", "core"),
         "status": use_case.get("status", "ready"),
+        "model_roles": _normalise_model_roles(use_case.get("model_roles"), default=(MODEL_ROLE_GENERATOR,)),
         "production_commercial": bool(
             use_case.get("production_commercial", use_case.get("segment", "core") == "enterprise")
         ),
@@ -2680,6 +2702,7 @@ def _persist_source_result(
             candidate.raw_model_key,
             discovered_update_log_id=discovered_update_log_id,
         )
+        _merge_model_roles(model_id, candidate.metadata)
         identity = _record_identity(candidate.raw_model_name, candidate.raw_model_key)
         model_ids_by_identity[identity] = model_id
         source_meta_by_identity[identity] = (candidate.source_type, candidate.verified)
@@ -2715,6 +2738,7 @@ def _persist_source_result(
                 raw_record.raw_model_key,
                 discovered_update_log_id=discovered_update_log_id,
             )
+            _merge_model_roles(normalized_model_id, raw_record.metadata)
             model_ids_by_identity[identity] = normalized_model_id
         resolution_status = _resolution_status_for_raw_record(
             raw_record,
@@ -3028,6 +3052,32 @@ def _persist_score_candidate(
     return model_id, "updated" if latest is not None else "added"
 
 
+def _merge_model_roles(model_id: str, metadata: dict[str, Any]) -> bool:
+    roles = _model_roles_from_metadata(metadata)
+    if not roles:
+        return False
+
+    with ENGINE.begin() as conn:
+        row = fetch_one(
+            conn,
+            select(models_table.c.model_roles_json).where(models_table.c.id == model_id),
+        )
+        if row is None:
+            return False
+
+        current_roles = _normalise_model_roles(row.get("model_roles_json"), default=())
+        merged_roles = sorted(dict.fromkeys([*current_roles, *roles]))
+        if merged_roles == current_roles:
+            return False
+
+        conn.execute(
+            update(models_table)
+            .where(models_table.c.id == model_id)
+            .values(model_roles_json=json.dumps(merged_roles, ensure_ascii=True))
+        )
+        return True
+
+
 def _load_identity_override_indexes(
     conn,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
@@ -3174,6 +3224,10 @@ def _ensure_model(
             provider_id=provider_id,
             provider=provider,
             type="proprietary" if provider != "Unknown" else "open_weights",
+            model_roles_json=json.dumps(
+                _model_roles_from_metadata(metadata) or [MODEL_ROLE_GENERATOR],
+                ensure_ascii=True,
+            ),
             catalog_status=CATALOG_STATUS_TRACKED,
             release_date=None,
             context_window=None,
@@ -4930,6 +4984,16 @@ def _canonical_model_enrichment(group: list[dict[str, Any]], canonical: dict[str
                 payload[field_name] = row_value
                 break
 
+    merged_roles = sorted(
+        dict.fromkeys(
+            role
+            for row in group
+            for role in _normalise_model_roles(row.get("model_roles_json"), default=())
+        )
+    )
+    if merged_roles:
+        payload["model_roles_json"] = json.dumps(merged_roles, ensure_ascii=True)
+
     suggested_name = _suggest_display_name(preferred_name_value)
     candidate_name = payload.get("name", canonical_name)
     if suggested_name and _readable_name_score(suggested_name) > _readable_name_score(candidate_name):
@@ -5095,6 +5159,7 @@ def _serialize_model(
         provider_id_from_name(provider_name) if provider_name and provider_name != "Unknown" else None
     )
     payload["catalog_status"] = str(payload.get("catalog_status") or CATALOG_STATUS_TRACKED)
+    payload["model_roles"] = _normalise_model_roles(payload.pop("model_roles_json", None))
     payload["provider_origin_countries"] = provider_metadata.get("origin_countries", []) if provider_metadata is not None else []
     payload["provider_country_code"] = provider_metadata.get("country_code") if provider_metadata is not None else None
     payload["provider_country_name"] = provider_metadata.get("country_name") if provider_metadata is not None else None
@@ -5404,6 +5469,9 @@ def _model_summary(model: dict[str, Any]) -> dict[str, Any]:
         "provider_origin_source_url": model.get("provider_origin_source_url"),
         "provider_origin_verified_at": model.get("provider_origin_verified_at"),
         "type": model.get("type", "proprietary"),
+        "model_roles": _normalise_model_roles(
+            model.get("model_roles_json") if "model_roles_json" in model else model.get("model_roles"),
+        ),
         "catalog_status": model.get("catalog_status", CATALOG_STATUS_TRACKED),
         "release_date": model.get("release_date"),
         "context_window": model.get("context_window"),

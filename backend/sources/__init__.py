@@ -13,6 +13,7 @@ from .ifeval import IfevalAdapter
 from .livebench import LiveBenchAdapter
 from .livecodebench import LiveCodeBenchAdapter
 from .mmmu import MmmuAdapter
+from .mteb import MtebAdapter
 from .ragtruth import RagtruthAdapter
 from .swebench import SwebenchAdapter
 from .taubench import TaubenchAdapter
@@ -35,6 +36,7 @@ def get_phase_one_adapters():
         LiveBenchAdapter(),
         LiveCodeBenchAdapter(),
         MmmuAdapter(),
+        MtebAdapter(),
         RagtruthAdapter(),
         SwebenchAdapter(),
         TaubenchAdapter(),
@@ -69,6 +71,7 @@ __all__ = [
     "LiveBenchAdapter",
     "LiveCodeBenchAdapter",
     "MmmuAdapter",
+    "MtebAdapter",
     "RagtruthAdapter",
     "TerminalBenchAdapter",
     "TaubenchAdapter",

@@ -44,6 +44,7 @@ class CatalogExportTests(unittest.TestCase):
                 "id": "model-a",
                 "name": "Model A",
                 "provider": "Provider",
+                "model_roles": ["embedding"],
                 "scores": {"benchmark": {"value": 95.0, "verified": True}},
                 "inference_destinations": [{"id": "aws-bedrock", "regions": ["us-east-1"]}],
             }
@@ -53,6 +54,7 @@ class CatalogExportTests(unittest.TestCase):
 
         rows = list(csv.DictReader(io.StringIO(rendered)))
         self.assertEqual(rows[0]["id"], "model-a")
+        self.assertEqual(json.loads(rows[0]["model_roles"]), ["embedding"])
         self.assertEqual(json.loads(rows[0]["scores"]), models[0]["scores"])
         self.assertEqual(json.loads(rows[0]["inference_destinations"]), models[0]["inference_destinations"])
 

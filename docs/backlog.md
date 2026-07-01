@@ -7,14 +7,17 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Open
 
-- [ ] LBM-032: P3 Add MTEB retrieval/reranking support after model taxonomy can distinguish generator vs embedding models
+No open items.
+
+## Done
+
+- [x] LBM-032: P3 Add MTEB retrieval/reranking support after model taxonomy can distinguish generator vs embedding models
   - Source: Data ingest source map 2026-07-01, conditional new source adapter.
   - Problem: MTEB is relevant for embedding and reranking model selection, especially RAG retrieval sorting and document operations, but the current catalog is primarily generator-model oriented.
   - Scope: model taxonomy changes for embedding/reranking model kinds, `backend/sources/mteb.py`, retrieval/reranking benchmark seed rows, export/ranking docs/tests.
   - Acceptance: do not ingest MTEB into the current generator ranking model until schema and taxonomy explicitly represent non-generator models; once supported, import task/category scores with language/task metadata.
   - Validation: taxonomy tests; fixture-backed MTEB import tests; export tests showing generator and embedding/reranking models are not mixed incorrectly; `make docs-check`.
-
-## Done
+  - Completed: 2026-07-01. MTEB now imports retrieval, reranking, and blended retrieval/reranking averages from official result files, while `model_roles` keeps embedding/reranker rankings separate from generator-model rankings.
 
 - [x] LBM-016: P1 Promote adapter-fetched metadata into model metadata with source precedence
   - Source: Data ingest source map 2026-07-01, existing-source win.

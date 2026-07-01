@@ -121,6 +121,7 @@ models = Table(
     Column("provider_id", String, ForeignKey("providers.id")),
     Column("provider", String, nullable=False),
     Column("type", String, nullable=False, server_default=text("'proprietary'")),
+    Column("model_roles_json", Text, nullable=False, server_default=text("'[\"generator\"]'")),
     Column("catalog_status", String, nullable=False, server_default=text("'tracked'")),
     Column("release_date", String),
     Column("context_window", String),
@@ -420,6 +421,7 @@ def _create_schema_sql() -> list[str]:
             provider_id TEXT REFERENCES providers(id),
             provider TEXT NOT NULL,
             type TEXT NOT NULL DEFAULT 'proprietary',
+            model_roles_json TEXT NOT NULL DEFAULT '["generator"]',
             catalog_status TEXT NOT NULL DEFAULT 'tracked',
             release_date TEXT,
             context_window TEXT,
@@ -796,6 +798,7 @@ def _migration_20260701_schema_repairs(conn: Connection) -> None:
     }
     expected_model_columns = {
         "provider_id": "ALTER TABLE models ADD COLUMN provider_id TEXT",
+        "model_roles_json": "ALTER TABLE models ADD COLUMN model_roles_json TEXT NOT NULL DEFAULT '[\"generator\"]'",
         "catalog_status": "ALTER TABLE models ADD COLUMN catalog_status TEXT NOT NULL DEFAULT 'tracked'",
         "context_window_tokens": "ALTER TABLE models ADD COLUMN context_window_tokens INTEGER",
         "max_output_tokens": "ALTER TABLE models ADD COLUMN max_output_tokens INTEGER",
@@ -1024,8 +1027,18 @@ def _migration_20260701_schema_repairs(conn: Connection) -> None:
             conn.exec_driver_sql(statement)
 
 
+def _migration_20260701_model_roles(conn: Connection) -> None:
+    model_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(models)").fetchall()
+    }
+    if "model_roles_json" not in model_columns:
+        conn.exec_driver_sql("ALTER TABLE models ADD COLUMN model_roles_json TEXT NOT NULL DEFAULT '[\"generator\"]'")
+
+
 SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
+    ("20260701_002_model_roles", _migration_20260701_model_roles),
 )
 
 

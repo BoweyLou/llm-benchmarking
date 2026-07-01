@@ -17,8 +17,14 @@ def build_rankings_response(
 ) -> dict[str, Any]:
     weights = use_case["weights"]
     required_benchmarks = list(use_case.get("required_benchmarks", []))
+    allowed_model_roles = _model_roles_from_value(use_case.get("model_roles"), default=("generator",))
     use_case_min_coverage = float(use_case.get("min_coverage", min_ranking_coverage))
-    ranges = benchmark_ranges(models, weights)
+    eligible_models = [
+        model
+        for model in models
+        if _model_matches_allowed_roles(model, allowed_model_roles)
+    ]
+    ranges = benchmark_ranges(eligible_models, weights)
     total_configured_weight = sum(weights.values())
     coverage_exempt_ids = set(coverage_exempt_benchmark_ids)
     total_coverage_weight = sum(
@@ -28,7 +34,7 @@ def build_rankings_response(
     )
 
     rankings: list[dict[str, Any]] = []
-    for model in models:
+    for model in eligible_models:
         ranking = build_model_ranking(
             model=model,
             benchmarks=benchmarks,
@@ -64,6 +70,7 @@ def build_rankings_response(
             "description": use_case["description"],
             "segment": use_case.get("segment", "core"),
             "status": use_case.get("status", "ready"),
+            "model_roles": sorted(allowed_model_roles),
             "min_coverage": use_case_min_coverage,
             "required_benchmarks": required_benchmarks,
             "benchmark_notes": dict(use_case.get("benchmark_notes", {})),
@@ -71,6 +78,29 @@ def build_rankings_response(
         },
         "rankings": rankings,
     }
+
+
+def _model_matches_allowed_roles(model: dict[str, Any], allowed_roles: set[str]) -> bool:
+    if not allowed_roles:
+        return True
+    model_roles = _model_roles_from_value(model.get("model_roles"), default=("generator",))
+    return bool(model_roles & allowed_roles)
+
+
+def _model_roles_from_value(value: Any, *, default: Iterable[str]) -> set[str]:
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, Iterable):
+        values = value
+    else:
+        values = default
+
+    roles = {
+        str(item).strip()
+        for item in values
+        if str(item).strip()
+    }
+    return roles or {str(item).strip() for item in default if str(item).strip()}
 
 
 def build_model_ranking(

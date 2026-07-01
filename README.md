@@ -8,7 +8,7 @@ The primary output is now a simple model metadata list:
 python -m backend list-models
 ```
 
-That command prints a JSON array. Each model item includes the serialized metadata used by the old dashboard, including scores, source details, provider origin, license policy, provenance policy, use-case approvals, inference destinations, OpenRouter market metadata, model-card fields, and family/duplicate curation fields.
+That command prints a JSON array. Each model item includes the serialized metadata used by the old dashboard, including scores, source details, model roles, provider origin, license policy, provenance policy, use-case approvals, inference destinations, OpenRouter market metadata, model-card fields, and family/duplicate curation fields.
 It also writes a CSV sidecar to `output/model-list.csv` by default for spreadsheet review.
 
 ## Stack
@@ -109,6 +109,11 @@ interface rather than exposing the admin token on a public network.
 
 Fresh SQLite databases are initialized from the current schema in [backend/database.py](backend/database.py). Upgrade and repair work is tracked in the `schema_migrations` table, and new schema changes should be added to the `SCHEMA_MIGRATIONS` list instead of standalone bootstrap-time `ALTER TABLE` blocks.
 
+Models carry explicit `model_roles` in exports and API responses. Existing
+generator models default to `["generator"]`; embedding and reranker models use
+separate roles so MTEB retrieval/reranking scores do not enter generator-model
+rankings.
+
 ## Current Data Sources
 
 For a detailed source-by-source data-flow diagram, source inventory, and
@@ -128,6 +133,7 @@ Benchmark adapters:
 - LiveBench
 - LiveCodeBench
 - MMMU
+- MTEB retrieval/reranking
 - RAGTruth
 - SWE-bench Verified, Lite, Full, Multilingual, and Multimodal
 - tau-bench

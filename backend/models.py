@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 SourceType = Literal["primary", "secondary", "manual"]
+ModelRole = Literal["generator", "embedding", "reranker", "multimodal_embedding"]
 RawSourceResolutionStatus = Literal["resolved", "skipped_aggregate", "unresolved"]
 UpdateStatus = Literal["running", "completed", "failed"]
 TriggeredBy = Literal["manual", "api", "scheduled", "bootstrap", "cli"]
@@ -248,6 +249,7 @@ class ModelOut(APIModel):
     provider_origin_source_url: str | None = None
     provider_origin_verified_at: datetime | None = None
     type: str = "proprietary"
+    model_roles: list[ModelRole] = Field(default_factory=lambda: ["generator"])
     catalog_status: str = "tracked"
     release_date: str | None = None
     context_window: str | None = None
@@ -334,6 +336,7 @@ class ModelSummaryOut(APIModel):
     provider_origin_source_url: str | None = None
     provider_origin_verified_at: datetime | None = None
     type: str = "proprietary"
+    model_roles: list[ModelRole] = Field(default_factory=lambda: ["generator"])
     catalog_status: str = "tracked"
     release_date: str | None = None
     context_window: str | None = None
@@ -424,6 +427,7 @@ class UseCaseOut(APIModel):
     description: str
     segment: str = "core"
     status: Literal["ready", "preview"] = "ready"
+    model_roles: list[ModelRole] = Field(default_factory=lambda: ["generator"])
     production_commercial: bool = False
     min_coverage: float = 0.5
     required_benchmarks: list[str] = Field(default_factory=list)
@@ -639,6 +643,7 @@ __all__ = [
     "ManualScoreResultOut",
     "ManualScoreUpdateIn",
     "MarketSnapshotOut",
+    "ModelRole",
     "ModelApprovalUpdateIn",
     "ModelOut",
     "ModelSummaryOut",
