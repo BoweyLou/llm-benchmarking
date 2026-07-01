@@ -20,6 +20,8 @@ from .update_engine import (
     run_update_now,
 )
 
+DEFAULT_CSV_OUTPUT_PATH = Path("output/model-list.csv")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="LLM Benchmarking backend utilities.")
@@ -34,15 +36,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     list_models_parser.add_argument(
         "--format",
-        choices=("json", "jsonl"),
+        choices=("json", "jsonl", "csv"),
         default="json",
-        help="Output format. JSON prints one list; JSONL prints one model per line.",
+        help="Output format. JSON prints one list; JSONL prints one model per line; CSV flattens nested fields.",
     )
     list_models_parser.add_argument(
         "--output",
         "-o",
         type=Path,
         help="Optional file path. Omit to write to stdout.",
+    )
+    list_models_parser.add_argument(
+        "--csv-output",
+        type=Path,
+        default=DEFAULT_CSV_OUTPUT_PATH,
+        help=f"Also write a CSV sidecar at this path unless --format csv or --no-csv is used. Defaults to {DEFAULT_CSV_OUTPUT_PATH}.",
+    )
+    list_models_parser.add_argument(
+        "--no-csv",
+        action="store_true",
+        help="Do not write the default CSV sidecar.",
     )
     list_models_parser.set_defaults(func=cmd_list_models)
 
@@ -149,9 +162,16 @@ def cmd_list_models(args: argparse.Namespace) -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered, encoding="utf-8")
         print(f"Exported {len(models)} models to {args.output}")
-        return 0
+    else:
+        print(rendered, end="")
 
-    print(rendered, end="")
+    if not args.no_csv and args.format != "csv":
+        csv_output = Path(args.csv_output)
+        csv_output.parent.mkdir(parents=True, exist_ok=True)
+        csv_output.write_text(render_model_metadata_list(models, output_format="csv"), encoding="utf-8")
+        if args.output:
+            print(f"Exported CSV sidecar to {csv_output}")
+
     return 0
 
 

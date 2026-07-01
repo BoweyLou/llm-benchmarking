@@ -87,6 +87,7 @@ OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 OPENROUTER_RANKINGS_URL = "https://openrouter.ai/rankings"
 OPENROUTER_PROGRAMMING_COLLECTION_URL = "https://openrouter.ai/collections/programming"
 OPENROUTER_MARKET_SOURCE_NAME = "openrouter"
+OPENROUTER_NEW_RELEASE_LOOKBACK_DAYS = 60
 HUGGINGFACE_MODEL_API_URL_TEMPLATE = "https://huggingface.co/api/models/{repo_id}"
 HUGGINGFACE_RAW_README_URL_TEMPLATE = "https://huggingface.co/{repo_id}/raw/main/README.md"
 MODEL_CARD_REFRESH_STALE_DAYS = 30
@@ -3072,8 +3073,11 @@ def _canonicalize_model_catalog() -> None:
                 models_table.c.name,
                 models_table.c.provider,
                 models_table.c.type,
+                models_table.c.catalog_status,
                 models_table.c.release_date,
                 models_table.c.context_window,
+                models_table.c.openrouter_model_id,
+                models_table.c.openrouter_canonical_slug,
                 models_table.c.active,
             ).where(models_table.c.active == 1),
         )
@@ -3100,9 +3104,16 @@ def _canonicalize_model_catalog() -> None:
             if len(group) < 2 or _has_provider_conflict(group):
                 continue
 
-            canonical = _choose_canonical_model(group, score_counts)
+            merge_group = [
+                row for row in group
+                if not _is_openrouter_exact_identity_row(row)
+            ]
+            if len(merge_group) < 2:
+                continue
+
+            canonical = _choose_canonical_model(merge_group, score_counts)
             canonical_id = str(canonical["id"])
-            enrichment = _canonical_model_enrichment(group, canonical)
+            enrichment = _canonical_model_enrichment(merge_group, canonical)
             if enrichment:
                 conn.execute(
                     update(models_table)
@@ -3110,7 +3121,7 @@ def _canonicalize_model_catalog() -> None:
                     .values(**enrichment)
                 )
 
-            for duplicate in group:
+            for duplicate in merge_group:
                 duplicate_id = str(duplicate["id"])
                 if duplicate_id == canonical_id:
                     continue
@@ -3234,6 +3245,8 @@ def _refresh_openrouter_model_metadata() -> None:
                 models_table.c.canonical_model_id,
                 models_table.c.canonical_model_name,
                 models_table.c.variant_label,
+                models_table.c.openrouter_model_id,
+                models_table.c.openrouter_canonical_slug,
             ).where(models_table.c.active == 1),
         )
 
@@ -3251,15 +3264,32 @@ def _refresh_openrouter_model_metadata() -> None:
         if normalize_text(str(row.get("canonical_model_name") or row.get("name") or ""))
     }
     resolution_indexes = _build_name_resolution_indexes(model_rows)
+    model_rows_by_id = {str(row["id"]): row for row in model_rows}
+    model_rows_by_canonical_id = {
+        str(row["canonical_model_id"]): row
+        for row in model_rows
+        if str(row.get("canonical_model_id") or "").strip()
+    }
     existing_canonical_model_ids = {
         str(row["canonical_model_id"])
         for row in model_rows
         if str(row.get("canonical_model_id") or "").strip()
     }
+    represented_openrouter_keys = {
+        key
+        for row in model_rows
+        for key in (
+            str(row.get("openrouter_model_id") or "").strip(),
+            str(row.get("openrouter_canonical_slug") or "").strip(),
+        )
+        if key
+    }
 
     items = _fetch_openrouter_models()
+    verified_at = utc_now_iso()
     best_item_by_model_id: dict[str, dict[str, Any]] = {}
     unmatched_best_items: dict[str, dict[str, Any]] = {}
+    exact_release_items: dict[str, dict[str, Any]] = {}
 
     for item in items:
         model_id = _resolve_openrouter_model_id(
@@ -3268,7 +3298,28 @@ def _refresh_openrouter_model_metadata() -> None:
             canonical_id_lookup=canonical_id_lookup,
             canonical_name_lookup=canonical_name_lookup,
         )
+        import_as_exact_release = _should_import_openrouter_exact_release(
+            item,
+            represented_openrouter_keys=represented_openrouter_keys,
+            existing_canonical_model_ids=existing_canonical_model_ids,
+            model_rows_by_canonical_id=model_rows_by_canonical_id,
+            resolved_model_row=model_rows_by_id.get(model_id) if model_id else None,
+            resolved_model_id=model_id,
+            require_release_alias=True,
+            verified_at=verified_at,
+        )
+        if import_as_exact_release:
+            exact_key = _openrouter_exact_release_import_key(item)
+            if exact_key:
+                current_exact = exact_release_items.get(exact_key)
+                if current_exact is None or _openrouter_item_rank(item) > _openrouter_item_rank(current_exact):
+                    exact_release_items[exact_key] = item
+            if model_id:
+                continue
+
         if not model_id:
+            if import_as_exact_release:
+                continue
             unresolved_key = str(item.get("canonical_slug") or item.get("id") or "").strip()
             if unresolved_key:
                 current_unmatched = unmatched_best_items.get(unresolved_key)
@@ -3279,7 +3330,38 @@ def _refresh_openrouter_model_metadata() -> None:
         if current is None or _openrouter_item_rank(item) > _openrouter_item_rank(current):
             best_item_by_model_id[model_id] = item
 
-    verified_at = utc_now_iso()
+    represented_after_updates = set(represented_openrouter_keys)
+    for item in best_item_by_model_id.values():
+        represented_after_updates.update(_openrouter_identity_keys(item))
+    for item in exact_release_items.values():
+        represented_after_updates.update(_openrouter_identity_keys(item))
+
+    for item in items:
+        model_id = _resolve_openrouter_model_id(
+            item,
+            resolution_indexes=resolution_indexes,
+            canonical_id_lookup=canonical_id_lookup,
+            canonical_name_lookup=canonical_name_lookup,
+        )
+        if not _should_import_openrouter_exact_release(
+            item,
+            represented_openrouter_keys=represented_after_updates,
+            existing_canonical_model_ids=existing_canonical_model_ids,
+            model_rows_by_canonical_id=model_rows_by_canonical_id,
+            resolved_model_row=model_rows_by_id.get(model_id) if model_id else None,
+            resolved_model_id=model_id,
+            require_release_alias=False,
+            verified_at=verified_at,
+        ):
+            continue
+        exact_key = _openrouter_exact_release_import_key(item)
+        if not exact_key:
+            continue
+        current_exact = exact_release_items.get(exact_key)
+        if current_exact is None or _openrouter_item_rank(item) > _openrouter_item_rank(current_exact):
+            exact_release_items[exact_key] = item
+        represented_after_updates.update(_openrouter_identity_keys(item))
+
     with ENGINE.begin() as conn:
         for model_id, item in best_item_by_model_id.items():
             values = _openrouter_model_values(item, verified_at=verified_at)
@@ -3295,6 +3377,13 @@ def _refresh_openrouter_model_metadata() -> None:
             unmatched_items=list(unmatched_best_items.values()),
             existing_canonical_model_ids=existing_canonical_model_ids,
             verified_at=verified_at,
+        )
+        _import_openrouter_provisional_models(
+            conn,
+            unmatched_items=list(exact_release_items.values()),
+            existing_canonical_model_ids=existing_canonical_model_ids,
+            verified_at=verified_at,
+            allow_existing_canonical_model_ids=True,
         )
 
 
@@ -3859,6 +3948,66 @@ def _openrouter_provider_name(item: dict[str, Any]) -> str:
     return provider_map.get(provider_slug, provider_slug or "Unknown")
 
 
+def _should_import_openrouter_exact_release(
+    item: dict[str, Any],
+    *,
+    represented_openrouter_keys: set[str],
+    existing_canonical_model_ids: set[str],
+    model_rows_by_canonical_id: dict[str, dict[str, Any]],
+    resolved_model_row: dict[str, Any] | None,
+    resolved_model_id: str | None,
+    require_release_alias: bool,
+    verified_at: str,
+) -> bool:
+    identity_keys = _openrouter_identity_keys(item)
+    if not identity_keys or identity_keys.intersection(represented_openrouter_keys):
+        return False
+    if resolved_model_id and resolved_model_row is not None:
+        return not require_release_alias or _openrouter_row_looks_like_release_alias(resolved_model_row)
+
+    model_id = str(item.get("id") or "").strip()
+    canonical_slug = str(item.get("canonical_slug") or "").strip()
+    display_name = _suggest_display_name(_openrouter_display_name(item)) or _openrouter_display_name(item) or model_id
+    identity = infer_model_identity(
+        display_name,
+        _openrouter_provider_name(item),
+        canonical_slug or model_id or None,
+    )
+    if identity.canonical_model_id not in existing_canonical_model_ids:
+        if not require_release_alias and _openrouter_item_is_recent_release(item, verified_at=verified_at):
+            return True
+        return False
+    if not require_release_alias:
+        return True
+    return _openrouter_row_looks_like_release_alias(model_rows_by_canonical_id.get(identity.canonical_model_id, {}))
+
+
+def _openrouter_row_looks_like_release_alias(row: dict[str, Any]) -> bool:
+    values = (
+        str(row.get("id") or ""),
+        str(row.get("name") or ""),
+    )
+    alias_token_pattern = re.compile(r"(?<![a-z0-9])(preview|latest)(?![a-z0-9])", re.IGNORECASE)
+    if any(alias_token_pattern.search(value) for value in values):
+        return True
+    return any(value.startswith("~") for value in values)
+
+
+def _openrouter_identity_keys(item: dict[str, Any]) -> set[str]:
+    return {
+        key
+        for key in (
+            str(item.get("id") or "").strip(),
+            str(item.get("canonical_slug") or "").strip(),
+        )
+        if key
+    }
+
+
+def _openrouter_exact_release_import_key(item: dict[str, Any]) -> str:
+    return str(item.get("canonical_slug") or item.get("id") or "").strip()
+
+
 def _openrouter_item_rank(item: dict[str, Any]) -> tuple[Any, ...]:
     model_id = str(item.get("id") or "")
     canonical_slug = str(item.get("canonical_slug") or "")
@@ -3873,11 +4022,36 @@ def _openrouter_item_rank(item: dict[str, Any]) -> tuple[Any, ...]:
     return (
         int(model_id == canonical_slug and model_id != ""),
         int(":free" not in model_id),
+        int(not _openrouter_item_looks_like_release_alias(item)),
         price_fields,
         int(max_completion_tokens > 0),
         context_length,
         model_id,
     )
+
+
+def _openrouter_item_looks_like_release_alias(item: dict[str, Any]) -> bool:
+    values = (
+        str(item.get("name") or ""),
+        str(item.get("id") or ""),
+        str(item.get("canonical_slug") or ""),
+    )
+    alias_token_pattern = re.compile(r"(?<![a-z0-9])(preview|latest)(?![a-z0-9])", re.IGNORECASE)
+    if any(alias_token_pattern.search(value) for value in values):
+        return True
+    return any(value.startswith("~") for value in values)
+
+
+def _openrouter_item_is_recent_release(item: dict[str, Any], *, verified_at: str) -> bool:
+    created_at = _openrouter_created_at(item.get("created"))
+    if not created_at:
+        return False
+    try:
+        created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        verified_dt = datetime.fromisoformat(verified_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return created_dt >= verified_dt - timedelta(days=OPENROUTER_NEW_RELEASE_LOOKBACK_DAYS)
 
 
 def _openrouter_model_values(item: dict[str, Any], *, verified_at: str) -> dict[str, Any]:
@@ -4132,6 +4306,7 @@ def _import_openrouter_provisional_models(
     unmatched_items: list[dict[str, Any]],
     existing_canonical_model_ids: set[str],
     verified_at: str,
+    allow_existing_canonical_model_ids: bool = False,
 ) -> None:
     reserved_ids = {
         str(row[0])
@@ -4144,7 +4319,7 @@ def _import_openrouter_provisional_models(
         provider = _openrouter_provider_name(item)
         display_name = _suggest_display_name(_openrouter_display_name(item)) or _openrouter_display_name(item) or model_id
         identity = infer_model_identity(display_name, provider, canonical_slug or model_id or None)
-        if identity.canonical_model_id in existing_canonical_model_ids:
+        if not allow_existing_canonical_model_ids and identity.canonical_model_id in existing_canonical_model_ids:
             continue
 
         provider_id = _ensure_provider_row(provider, conn=conn)
@@ -4253,6 +4428,15 @@ def _preferred_model_signature(model_row: dict[str, Any]) -> str | None:
     if not signatures:
         return None
     return sorted(set(signatures), key=lambda item: (len(item.split()), len(item), item))[0]
+
+
+def _is_openrouter_exact_identity_row(model_row: dict[str, Any]) -> bool:
+    if str(model_row.get("catalog_status") or "") != CATALOG_STATUS_PROVISIONAL:
+        return False
+    return bool(
+        str(model_row.get("openrouter_model_id") or "").strip()
+        or str(model_row.get("openrouter_canonical_slug") or "").strip()
+    )
 
 
 def _has_provider_conflict(group: list[dict[str, Any]]) -> bool:

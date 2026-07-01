@@ -11,6 +11,8 @@ from sqlalchemy import select, update
 
 from backend import update_engine
 from backend.database import (
+    fetch_all,
+    get_connection,
     get_engine,
     inference_sync_status as inference_sync_status_table,
     init_db,
@@ -1077,6 +1079,141 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(imported["openrouter_added_at"], "2025-10-31T22:38:52Z")
         self.assertEqual(imported["context_window_tokens"], 1000000)
 
+    def test_refresh_openrouter_model_metadata_imports_unrepresented_exact_release_as_provisional(self) -> None:
+        identity = update_engine.infer_model_identity("Nova Premier", "Amazon", "amazon/nova-premier-v1")
+        self.add_model(
+            "nova-premier-preview",
+            "Nova Premier Preview",
+            provider="Amazon",
+            canonical_model_id=identity.canonical_model_id,
+            canonical_model_name=identity.canonical_model_name,
+        )
+
+        openrouter_items = [
+            {
+                "id": "amazon/nova-premier-v1",
+                "canonical_slug": "amazon/nova-premier-v1",
+                "name": "Amazon: Nova Premier",
+                "created": 1761950332,
+                "top_provider": {
+                    "context_length": 1000000,
+                    "max_completion_tokens": 32768,
+                },
+                "pricing": {
+                    "prompt": "0.000004",
+                    "completion": "0.000016",
+                },
+            }
+        ]
+
+        with patch.object(update_engine, "_fetch_openrouter_models", return_value=openrouter_items):
+            update_engine._refresh_openrouter_model_metadata()
+
+        models = update_engine.list_models()
+        imported = next(model for model in models if model["openrouter_model_id"] == "amazon/nova-premier-v1")
+        existing = next(model for model in models if model["id"] == "nova-premier-preview")
+
+        self.assertNotEqual(imported["id"], existing["id"])
+        self.assertEqual(imported["catalog_status"], "provisional")
+        self.assertEqual(imported["name"], "Nova Premier")
+        self.assertIsNone(existing["openrouter_model_id"])
+
+    def test_refresh_openrouter_model_metadata_imports_non_best_exact_variant_as_provisional(self) -> None:
+        self.add_model("nova-pro", "Nova Pro", provider="Amazon")
+
+        openrouter_items = [
+            {
+                "id": "amazon/nova-pro-v1",
+                "canonical_slug": "amazon/nova-pro-v1",
+                "name": "Amazon: Nova Pro",
+                "created": 1761950332,
+                "top_provider": {
+                    "context_length": 1000000,
+                    "max_completion_tokens": 32768,
+                },
+                "pricing": {
+                    "prompt": "0.000004",
+                    "completion": "0.000016",
+                },
+            },
+            {
+                "id": "amazon/nova-pro-v2",
+                "canonical_slug": "amazon/nova-pro-v2",
+                "name": "Amazon: Nova Pro",
+                "created": 1775592472,
+                "top_provider": {
+                    "context_length": 2000000,
+                    "max_completion_tokens": 32768,
+                },
+                "pricing": {
+                    "prompt": "0.000004",
+                    "completion": "0.000016",
+                },
+            },
+        ]
+
+        with patch.object(update_engine, "_fetch_openrouter_models", return_value=openrouter_items):
+            update_engine._refresh_openrouter_model_metadata()
+
+        models = update_engine.list_models()
+        existing = next(model for model in models if model["id"] == "nova-pro")
+        imported = next(model for model in models if model["openrouter_model_id"] == "amazon/nova-pro-v1")
+
+        self.assertEqual(existing["openrouter_model_id"], "amazon/nova-pro-v2")
+        self.assertNotEqual(imported["id"], existing["id"])
+        self.assertEqual(imported["catalog_status"], "provisional")
+
+    def test_refresh_openrouter_model_metadata_prefers_final_entry_over_preview(self) -> None:
+        self.add_model("gemini-3-pro-image", "Gemini 3 Pro Image", provider="Google")
+        with self.engine.begin() as conn:
+            conn.execute(
+                update(models_table)
+                .where(models_table.c.id == "gemini-3-pro-image")
+                .values(
+                    openrouter_model_id="google/gemini-3-pro-image-preview",
+                    openrouter_canonical_slug="google/gemini-3-pro-image-preview-20251120",
+                )
+            )
+
+        openrouter_items = [
+            {
+                "id": "google/gemini-3-pro-image-preview",
+                "canonical_slug": "google/gemini-3-pro-image-preview-20251120",
+                "name": "Google: Nano Banana Pro (Gemini 3 Pro Image Preview)",
+                "created": 1763653797,
+                "top_provider": {
+                    "context_length": 1000000,
+                    "max_completion_tokens": 32768,
+                },
+                "pricing": {
+                    "prompt": "0.000004",
+                    "completion": "0.000016",
+                },
+            },
+            {
+                "id": "google/gemini-3-pro-image",
+                "canonical_slug": "google/gemini-3-pro-image-20260528",
+                "name": "Google: Nano Banana Pro (Gemini 3 Pro Image)",
+                "created": 1781754054,
+                "top_provider": {
+                    "context_length": 1000000,
+                    "max_completion_tokens": 32768,
+                },
+                "pricing": {
+                    "prompt": "0.000004",
+                    "completion": "0.000016",
+                },
+            },
+        ]
+
+        with patch.object(update_engine, "_fetch_openrouter_models", return_value=openrouter_items):
+            update_engine._refresh_openrouter_model_metadata()
+
+        models = update_engine.list_models()
+        existing = next(model for model in models if model["id"] == "gemini-3-pro-image")
+
+        self.assertEqual(existing["openrouter_model_id"], "google/gemini-3-pro-image")
+
     def test_build_huggingface_model_card_values_extracts_metadata(self) -> None:
         info = {
             "cardData": {
@@ -1359,6 +1496,46 @@ January 2026
         self.assertEqual(inference_approval_rows[0]["model_id"], "duplicate-nova-pro-canonical-row")
         self.assertEqual(inference_rows[0]["model_id"], "duplicate-nova-pro-canonical-row")
         self.assertEqual(snapshot_rows[0]["model_id"], "duplicate-nova-pro-canonical-row")
+
+    def test_canonicalize_model_catalog_preserves_openrouter_exact_identity_rows(self) -> None:
+        self.add_model(
+            "gemini-3-1-flash-lite",
+            "Gemini 3.1 Flash-Lite Preview",
+            provider="Google",
+        )
+        self.add_model(
+            "google-gemini-3-1-flash-lite-20260507",
+            "Gemini 3.1 Flash Lite",
+            provider="Google",
+        )
+        with self.engine.begin() as conn:
+            conn.execute(
+                update(models_table)
+                .where(models_table.c.id == "google-gemini-3-1-flash-lite-20260507")
+                .values(
+                    catalog_status="provisional",
+                    openrouter_model_id="google/gemini-3.1-flash-lite",
+                    openrouter_canonical_slug="google/gemini-3.1-flash-lite-20260507",
+                )
+            )
+
+        update_engine._canonicalize_model_catalog()
+
+        with get_connection(self.engine) as conn:
+            rows = fetch_all(
+                conn,
+                select(models_table.c.id, models_table.c.active).where(
+                    models_table.c.id.in_(
+                        [
+                            "gemini-3-1-flash-lite",
+                            "google-gemini-3-1-flash-lite-20260507",
+                        ]
+                    )
+                ),
+            )
+
+        self.assertEqual({row["id"] for row in rows}, {"gemini-3-1-flash-lite", "google-gemini-3-1-flash-lite-20260507"})
+        self.assertTrue(all(row["active"] == 1 for row in rows))
 
     def test_canonicalize_model_catalog_deduplicates_market_snapshot_collisions(self) -> None:
         with self.engine.begin() as conn:

@@ -9,6 +9,7 @@ python -m backend list-models
 ```
 
 That command prints a JSON array. Each model item includes the serialized metadata used by the old dashboard, including scores, source details, provider origin, license policy, provenance policy, use-case approvals, inference destinations, OpenRouter market metadata, model-card fields, and family/duplicate curation fields.
+It also writes a CSV sidecar to `output/model-list.csv` by default for spreadsheet review.
 
 ## Stack
 
@@ -41,7 +42,7 @@ What those commands do:
 - `python -m backend update`
   Runs the benchmark ingestion/update pipeline, refreshes external OpenRouter/model-card/market metadata, and writes update history plus audit results.
 - `python -m backend list-models`
-  Prints or exports the complete active model metadata list.
+  Prints or exports the complete active model metadata list and writes a default CSV sidecar.
 
 If you want the older one-shot bootstrap-and-ingest flow, it still exists:
 
@@ -57,6 +58,8 @@ Print a pretty JSON list to stdout:
 python -m backend list-models
 ```
 
+By default this also writes `output/model-list.csv`. Use `--csv-output <path>` to choose another CSV path, or `--no-csv` to suppress the sidecar when a script needs stdout only.
+
 Write the list to a file:
 
 ```bash
@@ -67,6 +70,12 @@ Write one complete model object per line:
 
 ```bash
 python -m backend list-models --format jsonl --output output/model-metadata.jsonl
+```
+
+Write only CSV:
+
+```bash
+python -m backend list-models --format csv --output output/model-metadata.csv
 ```
 
 ## Run Locally
@@ -118,6 +127,7 @@ Benchmark adapters:
 Metadata and catalog enrichments:
 
 - OpenRouter models and market/ranking signals
+  Recent OpenRouter models from the last 60 days are imported as provisional rows when no exact OpenRouter ID or canonical slug is already represented.
 - Hugging Face model-card metadata
 - Hyperscaler inference catalogs for AWS Bedrock, Azure AI Foundry, and Google Vertex AI
 
@@ -152,6 +162,7 @@ python -m backend update
 python -m backend update --benchmarks terminal_bench swebench_verified
 python -m backend list-models
 python -m backend list-models --format jsonl --output output/model-metadata.jsonl
+python -m backend list-models --format csv --output output/model-metadata.csv
 python -m backend inference-sync
 python -m backend inference-sync --destinations aws-bedrock azure-ai-foundry
 python -m backend model-card-sync
@@ -168,6 +179,7 @@ Notes:
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.
 - `model-license-sync` fills missing licenses using safe open-weight family propagation, a `Proprietary` fallback for missing proprietary licenses, and tracked exact/family overrides from [backend/model_license_baseline.json](backend/model_license_baseline.json).
+- `list-models` writes `output/model-list.csv` by default in addition to the requested stdout/file format; pass `--no-csv` when you do not want the sidecar.
 - `provider-origin-export` and `model-curation-export` push live curation back into the tracked baseline JSON files.
 
 ## API Surface
