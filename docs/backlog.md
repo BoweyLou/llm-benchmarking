@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-028: P2 Add BigCodeBench source adapter for coding Pass@1 coverage
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: coding coverage missed BigCodeBench's official Full and Hard leaderboards, including instruct and complete variants.
+  - Scope: `backend/sources/bigcodebench.py`, adapter registration, benchmark seed rows, raw metadata persistence, docs, and source spot checks.
+  - Acceptance: ingest the official BigCodeBench JSON artifacts with separate Full/Hard and instruct/complete benchmark IDs; preserve model link, open-data, size, date, prompted, MoE, and prefill metadata; keep scores as coding Pass@1 evidence.
+  - Validation: fixture-backed parser/persistence tests; selected temp database update/export; source spot-check suite; docs and kit readiness checks.
+  - Completed: 2026-07-01. The adapter now imports `results.json` and `results-hard.json` as Full/Hard average, instruct, and complete Pass@1 scores.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.

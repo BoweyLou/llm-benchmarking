@@ -118,6 +118,7 @@ Benchmark adapters:
 - AILuminate
 - GPQA Diamond
 - IFEval
+- BigCodeBench Full and Hard
 - MMMU
 - SWE-bench Verified
 - Terminal-Bench

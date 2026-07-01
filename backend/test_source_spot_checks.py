@@ -14,6 +14,7 @@ from backend.database import fetch_all, fetch_one, get_connection, get_engine, i
 from backend.seed_data import seed_reference_data
 from backend.sources.artificial_analysis import ArtificialAnalysisAdapter
 from backend.sources.base import RawSourceRecord, SourceFetchResult
+from backend.sources.bigcodebench import BigCodeBenchAdapter
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
 from backend.sources.ifeval import IfevalAdapter
 from backend.sources.swebench import SwebenchAdapter
@@ -121,6 +122,90 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(len(raw_rows), 1)
         self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
         self.assertEqual(raw_rows[0]["resolution_status"], "resolved")
+
+    def test_bigcodebench_spot_check_persists_full_and_hard_scores(self) -> None:
+        adapter = BigCodeBenchAdapter()
+        raw_records = [
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="bigcodebench_full",
+                raw_model_name="Claude Opus 4.6",
+                raw_value=json.dumps({"instruct": 61.0, "complete": 57.0}, ensure_ascii=True, sort_keys=True),
+                source_url="https://bigcode-bench.github.io/results.json",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="Claude Opus 4.6",
+                payload={"pass@1": {"instruct": 61.0, "complete": 57.0}},
+                metadata={
+                    "dataset": "Full",
+                    "result_url": "https://bigcode-bench.github.io/results.json",
+                    "model_link": "https://example.test/claude-opus-4-6",
+                    "open_data": "No",
+                    "prompted": True,
+                    "moe": False,
+                    "size_b": None,
+                    "active_parameters_b": None,
+                    "leaderboard_date": "2026-03-01",
+                    "prefill": True,
+                    "pass_at_1": {"instruct": 61.0, "complete": 57.0},
+                    "source_policy": "official_leaderboard_pass_at_1_greedy",
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="bigcodebench_hard",
+                raw_model_name="Claude Opus 4.6",
+                raw_value=json.dumps({"instruct": 31.0, "complete": 27.0}, ensure_ascii=True, sort_keys=True),
+                source_url="https://bigcode-bench.github.io/results-hard.json",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="Claude Opus 4.6",
+                payload={"pass@1": {"instruct": 31.0, "complete": 27.0}},
+                metadata={
+                    "dataset": "Hard",
+                    "result_url": "https://bigcode-bench.github.io/results-hard.json",
+                    "model_link": "https://example.test/claude-opus-4-6",
+                    "open_data": "No",
+                    "prompted": True,
+                    "moe": False,
+                    "size_b": None,
+                    "active_parameters_b": None,
+                    "leaderboard_date": "2026-03-01",
+                    "prefill": True,
+                    "pass_at_1": {"instruct": 31.0, "complete": 27.0},
+                    "source_policy": "official_leaderboard_pass_at_1_greedy",
+                },
+            ),
+        ]
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, raw_records)
+
+        candidate_values = {candidate.benchmark_id: candidate.value for candidate in candidates}
+        self.assertEqual(
+            candidate_values,
+            {
+                "bigcodebench_full": 59.0,
+                "bigcodebench_full_instruct": 61.0,
+                "bigcodebench_full_complete": 57.0,
+                "bigcodebench_hard": 29.0,
+                "bigcodebench_hard_instruct": 31.0,
+                "bigcodebench_hard_complete": 27.0,
+            },
+        )
+
+        full = self._latest_score("claude-opus-4-6", "bigcodebench_full")
+        hard = self._latest_score("claude-opus-4-6", "bigcodebench_hard")
+        self.assertAlmostEqual(float(full["value"]), 59.0)
+        self.assertAlmostEqual(float(hard["value"]), 29.0)
+        self.assertEqual(full["source_type"], "primary")
+        self.assertEqual(full["verified"], 1)
+        self.assertIn("Official BigCodeBench Full Average", str(full["notes"]))
+        self.assertIn("Official BigCodeBench Hard Average", str(hard["notes"]))
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 2)
+        self.assertTrue(all(row["normalized_model_id"] == "claude-opus-4-6" for row in raw_rows))
+        self.assertTrue(all(row["source_type"] == "primary" for row in raw_rows))
+        raw_notes = [json.loads(str(row["notes"])) for row in raw_rows]
+        self.assertEqual({note["dataset"] for note in raw_notes}, {"Full", "Hard"})
 
     def test_swebench_spot_check_keeps_best_submission_for_each_model(self) -> None:
         adapter = SwebenchAdapter()
