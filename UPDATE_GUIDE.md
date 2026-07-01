@@ -15,6 +15,10 @@ OpenRouter, Hugging Face, cloud pricing APIs, or other external metadata
 services. Run an explicit update or metadata sync command when the list needs a
 network refresh.
 
+Schema repairs are recorded in SQLite `schema_migrations`. Future schema changes
+should add an idempotent entry to `SCHEMA_MIGRATIONS` in `backend/database.py`
+so existing database upgrades are auditable.
+
 To refresh only selected benchmark adapters:
 
 ```bash

@@ -96,6 +96,10 @@ with local mutation requests by using either
 For local operation, bind the server to loopback or another trusted private
 interface rather than exposing the admin token on a public network.
 
+## Schema Migrations
+
+Fresh SQLite databases are initialized from the current schema in [backend/database.py](backend/database.py). Upgrade and repair work is tracked in the `schema_migrations` table, and new schema changes should be added to the `SCHEMA_MIGRATIONS` list instead of standalone bootstrap-time `ALTER TABLE` blocks.
+
 ## Current Data Sources
 
 Benchmark adapters:

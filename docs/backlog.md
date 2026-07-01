@@ -7,13 +7,6 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Open
 
-- [ ] LBM-007: P2 Replace duplicated ad hoc schema creation with migration-owned schema changes
-  - Source: Codex repo review 2026-07-01.
-  - Problem: SQLAlchemy table definitions and raw `CREATE TABLE` / `ALTER TABLE` SQL must be manually kept in sync.
-  - Scope: `backend/database.py`, schema docs, bootstrap flow.
-  - Acceptance: schema evolution has one authoritative path, either through a lightweight migration table or a documented migration tool; bootstrap remains able to initialize a fresh SQLite database.
-  - Validation: fresh temp-database bootstrap; upgrade from current `data/db.sqlite` copy; targeted backend unittest suite.
-
 - [ ] LBM-009: P2 Fill repo goal and area contracts for backend, schemas, scripts, and prompt adapters
   - Source: Codex repo review 2026-07-01.
   - Problem: `make goal-check` reports placeholder repo goal text and 153 unknown changed paths because `.agent-workflows/area-contracts.json` only covers `docs/` and `.agent-workflows/`.
@@ -59,6 +52,14 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: extract at least orchestration, OpenRouter metadata, model-card refresh, and ranking/read serialization into bounded modules without changing API output.
   - Validation: characterization tests before moves; targeted backend unittest suite; `python -m backend list-models --output /tmp/llm-benchmarking-models.json`.
   - Completed: 2026-07-01. Update orchestration, OpenRouter page parsing, Hugging Face model-card extraction, and ranking response construction now live in focused helper modules while `update_engine.py` keeps the public API surface.
+
+- [x] LBM-007: P2 Replace duplicated ad hoc schema creation with migration-owned schema changes
+  - Source: Codex repo review 2026-07-01.
+  - Problem: SQLAlchemy table definitions and raw `CREATE TABLE` / `ALTER TABLE` SQL must be manually kept in sync.
+  - Scope: `backend/database.py`, schema docs, bootstrap flow.
+  - Acceptance: schema evolution has one authoritative path, either through a lightweight migration table or a documented migration tool; bootstrap remains able to initialize a fresh SQLite database.
+  - Validation: fresh temp-database bootstrap; upgrade from current `data/db.sqlite` copy; targeted backend unittest suite.
+  - Completed: 2026-07-01. SQLite bootstrap now records idempotent schema repairs in `schema_migrations`, and docs direct future schema changes through `SCHEMA_MIGRATIONS`.
 
 - [x] LBM-001: P1 Split startup bootstrap from live metadata refresh
   - Source: Codex repo review 2026-07-01.

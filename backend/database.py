@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import os
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from sqlalchemy import Column, Float, ForeignKey, Integer, MetaData, String, Table, Text, create_engine, event, text
 from sqlalchemy.engine import Connection, Engine, RowMapping
@@ -16,6 +16,13 @@ DEFAULT_DB_PATH = ROOT_DIR / "data" / "db.sqlite"
 DEFAULT_DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DEFAULT_DB_PATH}")
 
 metadata = MetaData()
+
+schema_migrations = Table(
+    "schema_migrations",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("applied_at", String, nullable=False),
+)
 
 benchmarks = Table(
     "benchmarks",
@@ -325,6 +332,7 @@ audit_findings = Table(
 )
 
 TABLES: tuple[Table, ...] = (
+    schema_migrations,
     benchmarks,
     providers,
     model_use_case_approvals,
@@ -370,6 +378,12 @@ def get_engine(database_url: str | None = None) -> Engine:
 
 def _create_schema_sql() -> list[str]:
     return [
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            id TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        """,
         """
         CREATE TABLE IF NOT EXISTS benchmarks (
             id TEXT PRIMARY KEY,
@@ -720,6 +734,41 @@ def _ensure_schema_migrations(conn: Connection) -> None:
     if conn.engine.url.get_backend_name() != "sqlite":
         return
 
+    _ensure_schema_migrations_table(conn)
+    applied_migration_ids = _load_applied_schema_migration_ids(conn)
+    for migration_id, migration in SCHEMA_MIGRATIONS:
+        if migration_id in applied_migration_ids:
+            continue
+        migration(conn)
+        _record_schema_migration(conn, migration_id)
+
+
+def _ensure_schema_migrations_table(conn: Connection) -> None:
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            id TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+def _load_applied_schema_migration_ids(conn: Connection) -> set[str]:
+    rows = conn.exec_driver_sql("SELECT id FROM schema_migrations").fetchall()
+    return {str(row[0]) for row in rows}
+
+
+def _record_schema_migration(conn: Connection, migration_id: str) -> None:
+    conn.execute(
+        schema_migrations.insert().values(
+            id=migration_id,
+            applied_at=utc_now_iso(),
+        )
+    )
+
+
+def _migration_20260701_schema_repairs(conn: Connection) -> None:
     raw_source_record_columns = {
         str(row[1])
         for row in conn.exec_driver_sql("PRAGMA table_info(raw_source_records)").fetchall()
@@ -975,6 +1024,11 @@ def _ensure_schema_migrations(conn: Connection) -> None:
             conn.exec_driver_sql(statement)
 
 
+SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
+    ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
+)
+
+
 @contextmanager
 def get_connection(engine: Engine | None = None) -> Iterator[Connection]:
     engine = engine or get_engine()
@@ -1007,6 +1061,7 @@ __all__ = [
     "DEFAULT_DATABASE_URL",
     "DEFAULT_DB_PATH",
     "LATEST_SCORES_VIEW_SQL",
+    "SCHEMA_MIGRATIONS",
     "TABLES",
     "audit_findings",
     "audit_runs",
@@ -1028,6 +1083,7 @@ __all__ = [
     "providers",
     "raw_source_records",
     "row_to_dict",
+    "schema_migrations",
     "scores",
     "source_runs",
     "update_log",
