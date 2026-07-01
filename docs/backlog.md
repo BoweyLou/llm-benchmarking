@@ -7,13 +7,6 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Open
 
-- [ ] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
-  - Source: Codex repo review 2026-07-01.
-  - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.
-  - Scope: `backend/model_card_audit.py`, `backend/model_licenses.py`, `backend/model_provenance.py`, review/reporting docs.
-  - Acceptance: define thresholds for commercial/production use cases; audit output distinguishes blocker, warning, and backlog-only gaps; remediation rows are easy to generate from the audit.
-  - Validation: `python -m backend model-card-audit --json`; tests for threshold classification; `make docs-check`.
-
 - [ ] LBM-006: P2 Refactor update-engine responsibilities into smaller modules
   - Source: Codex repo review 2026-07-01.
   - Problem: `backend/update_engine.py` owns orchestration, ranking reads, OpenRouter enrichment, model-card refresh, license refresh, curation write paths, and serialization in one very large module.
@@ -57,6 +50,14 @@ the row is older than 14 days or the backend/API shape has changed.
   - Validation: mocked or live Azure 429 run reports a skipped/rate-limited status; `PYTHON=python ./scripts/test_inference_sync_smoke.sh`; `PYTHON=python ./scripts/test_inference_sync_smoke.sh aws-bedrock google-vertex-ai`.
 
 ## Done
+
+- [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
+  - Source: Codex repo review 2026-07-01.
+  - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.
+  - Scope: `backend/model_card_audit.py`, `backend/model_licenses.py`, `backend/model_provenance.py`, review/reporting docs.
+  - Acceptance: define thresholds for commercial/production use cases; audit output distinguishes blocker, warning, and backlog-only gaps; remediation rows are easy to generate from the audit.
+  - Validation: `python -m backend model-card-audit --json`; tests for threshold classification; `make docs-check`.
+  - Completed: 2026-07-01. The audit now emits a `commercial_production` quality gate with blocker, warning, and backlog-only remediation rows, and docs define the threshold meanings.
 
 - [x] LBM-001: P1 Split startup bootstrap from live metadata refresh
   - Source: Codex repo review 2026-07-01.

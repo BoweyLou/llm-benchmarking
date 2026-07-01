@@ -144,6 +144,13 @@ SUSPICIOUS_EXAMPLE_WHERE = (
     "training_data_summary LIKE '%```%'"
 )
 
+QUALITY_GATE_PROFILE = "commercial_production"
+QUALITY_GATE_POLICY = (
+    "Commercial and production use requires known license terms for each active model "
+    "and complete provenance for derivative models. Other model-card gaps are warnings "
+    "or backlog-only enrichment work."
+)
+
 
 def build_model_card_audit_summary(target: Connection | Engine) -> dict[str, Any]:
     if isinstance(target, Engine):
@@ -164,11 +171,210 @@ def build_model_card_audit_summary(target: Connection | Engine) -> dict[str, Any
         },
         "suspicious_examples": _load_suspicious_examples(target),
     }
+    summary["quality_gate"] = build_model_card_quality_gate(summary)
     return summary
+
+
+def build_model_card_quality_gate(summary: dict[str, Any]) -> dict[str, Any]:
+    gap_counts = dict(summary.get("gap_counts") or {})
+    derivative_provenance = dict(summary.get("derivative_provenance") or {})
+    suspicious_value_counts = dict(summary.get("suspicious_value_counts") or {})
+
+    rows: list[dict[str, Any]] = []
+
+    def add_row(
+        *,
+        row_id: str,
+        severity: str,
+        title: str,
+        metric: str,
+        count: Any,
+        threshold: int,
+        remediation: str,
+        scope: str,
+    ) -> None:
+        numeric_count = _safe_int(count)
+        if numeric_count <= threshold:
+            return
+        rows.append(
+            {
+                "id": row_id,
+                "severity": severity,
+                "scope": scope,
+                "title": title,
+                "metric": metric,
+                "count": numeric_count,
+                "threshold": threshold,
+                "threshold_label": f"<= {threshold}",
+                "over_threshold_by": numeric_count - threshold,
+                "remediation": remediation,
+            }
+        )
+
+    add_row(
+        row_id="commercial_license_missing",
+        severity="blocker",
+        scope="commercial_use",
+        title="Active models need explicit license metadata before commercial use.",
+        metric="gap_counts.models_without_license",
+        count=gap_counts.get("models_without_license"),
+        threshold=0,
+        remediation=(
+            "Run model-card/license sync where possible, then add durable overrides to "
+            "backend/model_license_baseline.json for unresolved models."
+        ),
+    )
+    add_row(
+        row_id="commercial_license_generic_marker",
+        severity="blocker",
+        scope="commercial_use",
+        title="Generic license markers are not enough for commercial review.",
+        metric="gap_counts.models_with_generic_license_marker",
+        count=gap_counts.get("models_with_generic_license_marker"),
+        threshold=0,
+        remediation=(
+            "Replace `other` or `unknown` license ids with the specific license name and URL "
+            "in the model license baseline."
+        ),
+    )
+    add_row(
+        row_id="production_derivative_provenance_incomplete",
+        severity="blocker",
+        scope="production_use",
+        title="Derivative models need provider, model-card, and training-data provenance.",
+        metric="derivative_provenance.production_blocked",
+        count=derivative_provenance.get("production_blocked"),
+        threshold=0,
+        remediation=(
+            "Backfill provider identity, model-card URL, and training_data_summary before "
+            "approving affected derivative models for production."
+        ),
+    )
+    add_row(
+        row_id="license_url_missing",
+        severity="warning",
+        scope="commercial_review",
+        title="License metadata should include a reviewable source URL.",
+        metric="gap_counts.models_with_license_but_no_license_url",
+        count=gap_counts.get("models_with_license_but_no_license_url"),
+        threshold=0,
+        remediation="Add license_url values from model cards or vendor license pages.",
+    )
+    add_row(
+        row_id="metadata_source_missing",
+        severity="warning",
+        scope="production_review",
+        title="Models should have either source metadata or a model-card URL.",
+        metric="gap_counts.models_without_any_model_metadata",
+        count=gap_counts.get("models_without_any_model_metadata"),
+        threshold=0,
+        remediation="Backfill metadata_source_name or model_card_url so reviewers can trace the row.",
+    )
+    add_row(
+        row_id="huggingface_model_card_missing",
+        severity="warning",
+        scope="production_review",
+        title="Hugging Face-backed models should retain model-card URLs.",
+        metric="gap_counts.huggingface_repo_without_model_card_url",
+        count=gap_counts.get("huggingface_repo_without_model_card_url"),
+        threshold=0,
+        remediation="Re-run model-card sync or add model_card_url for linked Hugging Face repos.",
+    )
+    add_row(
+        row_id="suspicious_extraction_values",
+        severity="warning",
+        scope="metadata_quality",
+        title="Suspicious extracted values need review before relying on the audit.",
+        metric="suspicious_value_counts.*",
+        count=sum(_safe_int(value) for value in suspicious_value_counts.values()),
+        threshold=0,
+        remediation=(
+            "Inspect suspicious_examples and fix parser output or manual metadata for affected rows."
+        ),
+    )
+    add_row(
+        row_id="rich_text_sections_missing",
+        severity="backlog",
+        scope="metadata_enrichment",
+        title="Model cards should expose intended-use, limitation, or training summaries.",
+        metric="gap_counts.model_card_without_rich_text_sections",
+        count=gap_counts.get("model_card_without_rich_text_sections"),
+        threshold=0,
+        remediation=(
+            "Improve model-card extraction or add reviewed summaries for models with sparse cards."
+        ),
+    )
+    add_row(
+        row_id="external_links_missing",
+        severity="backlog",
+        scope="metadata_enrichment",
+        title="Model cards should include at least one docs, repo, or paper link.",
+        metric="gap_counts.model_card_without_external_links",
+        count=gap_counts.get("model_card_without_external_links"),
+        threshold=0,
+        remediation="Backfill documentation_url, repo_url, or paper_url when vendor sources exist.",
+    )
+    add_row(
+        row_id="base_model_or_language_missing",
+        severity="backlog",
+        scope="metadata_enrichment",
+        title="Model cards should include base-model lineage or supported languages.",
+        metric="gap_counts.model_card_without_base_models_or_languages",
+        count=gap_counts.get("model_card_without_base_models_or_languages"),
+        threshold=0,
+        remediation="Backfill base_models_json or supported_languages_json from model-card metadata.",
+    )
+
+    blockers = _quality_gate_rows_by_severity(rows, "blocker")
+    warnings = _quality_gate_rows_by_severity(rows, "warning")
+    backlog = _quality_gate_rows_by_severity(rows, "backlog")
+    status = "blocked" if blockers else "warning" if warnings else "passed"
+
+    return {
+        "profile": QUALITY_GATE_PROFILE,
+        "policy": QUALITY_GATE_POLICY,
+        "status": status,
+        "blocker_count": len(blockers),
+        "warning_count": len(warnings),
+        "backlog_count": len(backlog),
+        "blocker_model_count": sum(row["count"] for row in blockers),
+        "warning_model_count": sum(row["count"] for row in warnings),
+        "backlog_model_count": sum(row["count"] for row in backlog),
+        "blockers": blockers,
+        "warnings": warnings,
+        "backlog": backlog,
+        "remediation_rows": rows,
+    }
 
 
 def format_model_card_audit_summary(summary: dict[str, Any]) -> str:
     lines = [f"Active models: {int(summary.get('active_model_count') or 0)}", ""]
+
+    quality_gate = summary.get("quality_gate") or build_model_card_quality_gate(summary)
+    lines.append("Quality gate:")
+    lines.append(f"- profile: {quality_gate.get('profile') or QUALITY_GATE_PROFILE}")
+    lines.append(f"- status: {quality_gate.get('status') or 'unknown'}")
+    lines.append(
+        "- issue rows: "
+        f"blockers={int(quality_gate.get('blocker_count') or 0)} "
+        f"warnings={int(quality_gate.get('warning_count') or 0)} "
+        f"backlog={int(quality_gate.get('backlog_count') or 0)}"
+    )
+    for heading, key in (
+        ("Blockers", "blockers"),
+        ("Warnings", "warnings"),
+        ("Backlog-only gaps", "backlog"),
+    ):
+        rows = list(quality_gate.get(key) or [])
+        if not rows:
+            continue
+        lines.append(f"{heading}:")
+        for row in rows:
+            lines.append(
+                f"- {row['id']}: {row['count']} > {row['threshold']} "
+                f"({row['metric']}) - {row['remediation']}"
+            )
+    lines.append("")
 
     lines.append("Field coverage:")
     for field in summary.get("field_coverage", []):
@@ -332,6 +538,17 @@ def _count_where(conn: Connection, clause: str) -> int:
     return int(row["total"]) if row is not None else 0
 
 
+def _quality_gate_rows_by_severity(rows: list[dict[str, Any]], severity: str) -> list[dict[str, Any]]:
+    return [row for row in rows if row["severity"] == severity]
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _format_count_map(label: str, values: dict[str, int]) -> list[str]:
     ordered = sorted(values.items(), key=lambda item: (-item[1], item[0]))
     if not ordered:
@@ -341,5 +558,6 @@ def _format_count_map(label: str, values: dict[str, int]) -> list[str]:
 
 __all__ = [
     "build_model_card_audit_summary",
+    "build_model_card_quality_gate",
     "format_model_card_audit_summary",
 ]

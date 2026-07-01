@@ -161,7 +161,7 @@ Notes:
 
 - `inference-sync` supports destination subsets.
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
-- `model-card-audit` reports current model-card field coverage plus obvious extraction-quality issues.
+- `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.
 - `model-license-sync` fills missing licenses using safe open-weight family propagation, a `Proprietary` fallback for missing proprietary licenses, and tracked exact/family overrides from [backend/model_license_baseline.json](backend/model_license_baseline.json).
 - `provider-origin-export` and `model-curation-export` push live curation back into the tracked baseline JSON files.
 

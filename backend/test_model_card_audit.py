@@ -5,7 +5,11 @@ import unittest
 from sqlalchemy import insert
 
 from backend.database import get_engine, init_db, models as models_table
-from backend.model_card_audit import build_model_card_audit_summary, format_model_card_audit_summary
+from backend.model_card_audit import (
+    build_model_card_audit_summary,
+    build_model_card_quality_gate,
+    format_model_card_audit_summary,
+)
 
 
 class ModelCardAuditTests(unittest.TestCase):
@@ -152,12 +156,93 @@ class ModelCardAuditTests(unittest.TestCase):
         self.assertEqual(len(summary["suspicious_examples"]), 1)
         self.assertEqual(summary["suspicious_examples"][0]["name"], "Suspicious Model")
 
+        quality_gate = summary["quality_gate"]
+        self.assertEqual(quality_gate["profile"], "commercial_production")
+        self.assertEqual(quality_gate["status"], "blocked")
+        blocker_ids = {row["id"] for row in quality_gate["blockers"]}
+        warning_ids = {row["id"] for row in quality_gate["warnings"]}
+        backlog_ids = {row["id"] for row in quality_gate["backlog"]}
+        self.assertIn("commercial_license_missing", blocker_ids)
+        self.assertIn("metadata_source_missing", warning_ids)
+        self.assertIn("huggingface_model_card_missing", warning_ids)
+        self.assertIn("suspicious_extraction_values", warning_ids)
+        self.assertIn("base_model_or_language_missing", backlog_ids)
+        self.assertEqual(
+            len(quality_gate["remediation_rows"]),
+            quality_gate["blocker_count"] + quality_gate["warning_count"] + quality_gate["backlog_count"],
+        )
+
+    def test_build_model_card_quality_gate_classifies_warning_without_blockers(self) -> None:
+        quality_gate = build_model_card_quality_gate(
+            {
+                "gap_counts": {
+                    "models_without_license": 0,
+                    "models_with_generic_license_marker": 0,
+                    "models_with_license_but_no_license_url": 2,
+                    "models_without_any_model_metadata": 0,
+                    "huggingface_repo_without_model_card_url": 0,
+                    "model_card_without_rich_text_sections": 0,
+                    "model_card_without_external_links": 0,
+                    "model_card_without_base_models_or_languages": 0,
+                },
+                "derivative_provenance": {"production_blocked": 0},
+                "suspicious_value_counts": {},
+            }
+        )
+
+        self.assertEqual(quality_gate["status"], "warning")
+        self.assertEqual(quality_gate["blocker_count"], 0)
+        self.assertEqual(quality_gate["warning_count"], 1)
+        self.assertEqual(quality_gate["warnings"][0]["id"], "license_url_missing")
+        self.assertEqual(quality_gate["warnings"][0]["severity"], "warning")
+        self.assertEqual(quality_gate["warnings"][0]["threshold"], 0)
+
+    def test_build_model_card_quality_gate_classifies_production_blockers(self) -> None:
+        quality_gate = build_model_card_quality_gate(
+            {
+                "gap_counts": {
+                    "models_without_license": 0,
+                    "models_with_generic_license_marker": 0,
+                    "models_with_license_but_no_license_url": 0,
+                    "models_without_any_model_metadata": 0,
+                    "huggingface_repo_without_model_card_url": 0,
+                    "model_card_without_rich_text_sections": 0,
+                    "model_card_without_external_links": 0,
+                    "model_card_without_base_models_or_languages": 0,
+                },
+                "derivative_provenance": {"production_blocked": 3},
+                "suspicious_value_counts": {},
+            }
+        )
+
+        self.assertEqual(quality_gate["status"], "blocked")
+        self.assertEqual(quality_gate["blocker_count"], 1)
+        self.assertEqual(quality_gate["blockers"][0]["id"], "production_derivative_provenance_incomplete")
+        self.assertEqual(quality_gate["blockers"][0]["scope"], "production_use")
+
+    def test_build_model_card_quality_gate_passes_when_thresholds_are_met(self) -> None:
+        quality_gate = build_model_card_quality_gate(
+            {
+                "gap_counts": {},
+                "derivative_provenance": {},
+                "suspicious_value_counts": {},
+            }
+        )
+
+        self.assertEqual(quality_gate["status"], "passed")
+        self.assertEqual(quality_gate["remediation_rows"], [])
+
     def test_format_model_card_audit_summary_includes_key_sections(self) -> None:
         summary = build_model_card_audit_summary(self.engine)
 
         output = format_model_card_audit_summary(summary)
 
         self.assertIn("Active models: 4", output)
+        self.assertIn("Quality gate:", output)
+        self.assertIn("status: blocked", output)
+        self.assertIn("Blockers:", output)
+        self.assertIn("Warnings:", output)
+        self.assertIn("Backlog-only gaps:", output)
         self.assertIn("Field coverage:", output)
         self.assertIn("Gap counts:", output)
         self.assertIn("Derivative provenance:", output)
