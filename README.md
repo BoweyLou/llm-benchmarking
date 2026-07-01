@@ -124,6 +124,13 @@ Benchmark adapters:
 - FaithJudge
 - Vectara Hallucination
 
+Deferred source candidates:
+
+- MTEB is not ingested yet. Its official leaderboard and result repository
+  cover embedding, retrieval, reranking, and multimodal embedding models, so it
+  should wait until the catalog distinguishes generator models from embedding
+  and reranking model roles. See [docs/data-ingest-map.md](docs/data-ingest-map.md).
+
 Metadata and catalog enrichments:
 
 - OpenRouter models and market/ranking signals

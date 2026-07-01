@@ -7,6 +7,13 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Open
 
+- [ ] LBM-032: P2 Add an MTEB embedding and retrieval source adapter after model-role separation
+  - Source: Data ingest source review 2026-07-01; official MTEB leaderboard, framework, and `embeddings-benchmark/results` repository.
+  - Problem: MTEB is a high-value benchmark for embedding, retrieval, reranking, and multimodal embedding models, but the current catalog treats benchmark rows as generative LLM scores. Ingesting MTEB directly would mix incomparable model roles into generator rankings.
+  - Scope: model taxonomy and storage fields for generator, embedding, reranker, and multimodal embedding roles; ranking/export filters by role; future `backend/sources/mteb.py`; benchmark seed rows for the selected MTEB aggregate and task families.
+  - Acceptance: MTEB rows are imported only after model role is explicit in storage and read surfaces; generator rankings exclude embedding/reranker scores by default; adapter source metadata points to the official results repository and preserves task/language/revision evidence.
+  - Validation: role-filtered temp update; source spot checks against representative MTEB result JSON; ranking/export tests proving generator scores are unchanged when embedding/reranker results exist.
+
 ## Done
 
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
