@@ -9,6 +9,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-019: P2 Add MMMU variant and pro companion metrics
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: MMMU upstream data includes validation/test/pro fields and baselines, but the current adapter only wrote validation overall.
+  - Scope: `backend/sources/mmmu.py`, benchmark seed rows for stable MMMU-Pro or test/pro result fields, score semantics docs/tests.
+  - Acceptance: ingest only stable model-level MMMU variant fields; keep human/random baselines out of model rankings; keep the current validation-overall benchmark unchanged.
+  - Validation: fixture-backed MMMU payload tests; selected temp-database update/export; source spot-check suite; docs and kit readiness checks.
+  - Completed: 2026-07-01. The adapter now keeps validation `mmmu` unchanged, adds `mmmu_test` and `mmmu_pro`, imports test/pro-only rows, and continues excluding human/random baselines.
+
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.
   - Problem: current audit reports hundreds of models with missing metadata/license fields and derivative models without training-data summaries.

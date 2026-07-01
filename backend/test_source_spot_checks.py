@@ -10,12 +10,21 @@ from sqlalchemy import select, update
 
 from backend import audit_engine
 from backend import update_engine
-from backend.database import fetch_all, fetch_one, get_connection, get_engine, init_db, scores as scores_table
+from backend.database import (
+    benchmarks as benchmarks_table,
+    fetch_all,
+    fetch_one,
+    get_connection,
+    get_engine,
+    init_db,
+    scores as scores_table,
+)
 from backend.seed_data import seed_reference_data
 from backend.sources.artificial_analysis import ArtificialAnalysisAdapter
 from backend.sources.base import RawSourceRecord, SourceFetchResult
 from backend.sources.chatbot_arena import ChatbotArenaAdapter
 from backend.sources.ifeval import IfevalAdapter
+from backend.sources.mmmu import MmmuAdapter
 from backend.sources.swebench import SwebenchAdapter
 
 FUTURE_COLLECTED_AT = "2099-01-01T00:00:00Z"
@@ -244,6 +253,90 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(raw_rows[0]["normalized_model_id"], "gpt-5-4")
         self.assertEqual(raw_rows[0]["source_type"], "secondary")
         self.assertEqual(raw_rows[0]["verified"], 0)
+
+    def test_mmmu_spot_check_persists_companion_metrics_and_pro_only_rows(self) -> None:
+        adapter = MmmuAdapter()
+        raw_records = [
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="mmmu",
+                raw_model_name="Claude Opus 4.6",
+                raw_value="72.4",
+                source_url=adapter.source_url,
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="Claude Opus 4.6",
+                payload={},
+                metadata={
+                    "info_type": "proprietary",
+                    "validation_overall": "72.4",
+                    "validation_source": "author",
+                    "test_overall": "74.1",
+                    "test_source": "official",
+                    "pro_overall": "68.5",
+                    "pro_source": "author",
+                    "date": "2026-02-05",
+                    "size": "-",
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="mmmu_pro",
+                raw_model_name="GPT-5.4 (xhigh)",
+                raw_value="70.5",
+                source_url=adapter.source_url,
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="GPT-5.4 (xhigh)",
+                payload={},
+                metadata={
+                    "info_type": "proprietary",
+                    "validation_overall": None,
+                    "test_overall": None,
+                    "pro_overall": "70.5",
+                    "pro_source": "author",
+                    "date": "2026-03-01",
+                    "size": "-",
+                },
+            ),
+        ]
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, raw_records)
+
+        candidate_values = {
+            (candidate.raw_model_name, candidate.benchmark_id): candidate.value for candidate in candidates
+        }
+        self.assertEqual(
+            candidate_values,
+            {
+                ("Claude Opus 4.6", "mmmu"): 72.4,
+                ("Claude Opus 4.6", "mmmu_test"): 74.1,
+                ("Claude Opus 4.6", "mmmu_pro"): 68.5,
+                ("GPT-5.4 (xhigh)", "mmmu_pro"): 70.5,
+            },
+        )
+
+        claude_validation = self._latest_score("claude-opus-4-6", "mmmu")
+        claude_test = self._latest_score("claude-opus-4-6", "mmmu_test")
+        claude_pro = self._latest_score("claude-opus-4-6", "mmmu_pro")
+        gpt_pro = self._latest_score("gpt-5-4", "mmmu_pro")
+        self.assertAlmostEqual(float(claude_validation["value"]), 72.4)
+        self.assertAlmostEqual(float(claude_test["value"]), 74.1)
+        self.assertAlmostEqual(float(claude_pro["value"]), 68.5)
+        self.assertAlmostEqual(float(gpt_pro["value"]), 70.5)
+        self.assertIn("MMMU-Pro", str(claude_pro["notes"]))
+
+        with get_connection(self.engine) as conn:
+            benchmark_rows = fetch_all(
+                conn,
+                select(benchmarks_table.c.id, benchmarks_table.c.higher_is_better).where(
+                    benchmarks_table.c.id.in_(["mmmu_test", "mmmu_pro"])
+                ),
+            )
+        direction_by_id = {row["id"]: row["higher_is_better"] for row in benchmark_rows}
+        self.assertEqual(direction_by_id, {"mmmu_test": 1, "mmmu_pro": 1})
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 2)
+        self.assertTrue(all(row["resolution_status"] == "resolved" for row in raw_rows))
 
     def test_chatbot_arena_same_run_duplicate_resolution_keeps_single_best_score(self) -> None:
         adapter = ChatbotArenaAdapter()

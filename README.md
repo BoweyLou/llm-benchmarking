@@ -124,6 +124,12 @@ Benchmark adapters:
 - FaithJudge
 - Vectara Hallucination
 
+The MMMU adapter keeps the existing validation-overall `mmmu` benchmark and
+adds companion `mmmu_test` and `mmmu_pro` scores when the upstream leaderboard
+publishes stable model-level test or pro results. Human and random baselines are
+still skipped, and use-case weights remain unchanged until the companion
+coverage is reviewed.
+
 Metadata and catalog enrichments:
 
 - OpenRouter models and market/ranking signals
