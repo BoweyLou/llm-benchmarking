@@ -7,13 +7,6 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Open
 
-- [ ] LBM-010: P3 Trim agent instruction debt after kit install
-  - Source: Codex repo review 2026-07-01.
-  - Problem: `make agent-docs-lint` passes with warnings because `AGENTS.md` exceeds its budget and `.agent-workflows/repo-review.md` has a rule-provenance warning.
-  - Scope: `AGENTS.md`, `.agent-workflows/repo-review.md`, scoped docs linked from those files.
-  - Acceptance: `AGENTS.md` becomes a shorter route map; detailed rules move to scoped docs or checker-owned config; rule-like bullets have clear provenance/context.
-  - Validation: `make agent-docs-lint`; `make docs-check`.
-
 ## Done
 
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
@@ -63,6 +56,14 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: Azure pricing rate limits are represented as a retryable/rate-limited skipped outcome that smoke tests accept with a clear reason; non-rate-limit sync failures still fail the script; docs explain that public pricing can rate-limit.
   - Validation: mocked or live Azure 429 run reports a skipped/rate-limited status; `PYTHON=python ./scripts/test_inference_sync_smoke.sh`; `PYTHON=python ./scripts/test_inference_sync_smoke.sh aws-bedrock google-vertex-ai`.
   - Completed: 2026-07-01. Azure Retail Prices API HTTP 429 now reports a retryable `rate_limited` skipped outcome, smoke tests accept skipped retryable destinations, and docs explain the rate-limit behavior.
+
+- [x] LBM-010: P3 Trim agent instruction debt after kit install
+  - Source: Codex repo review 2026-07-01.
+  - Problem: `make agent-docs-lint` passes with warnings because `AGENTS.md` exceeds its budget and `.agent-workflows/repo-review.md` has a rule-provenance warning.
+  - Scope: `AGENTS.md`, `.agent-workflows/repo-review.md`, scoped docs linked from those files.
+  - Acceptance: `AGENTS.md` becomes a shorter route map; detailed rules move to scoped docs or checker-owned config; rule-like bullets have clear provenance/context.
+  - Validation: `make agent-docs-lint`; `make docs-check`.
+  - Completed: 2026-07-01. `AGENTS.md` is back under budget as a route map, detailed kit/task rules route to scoped workflow docs, and `make agent-docs-lint` passes without warnings.
 
 - [x] LBM-001: P1 Split startup bootstrap from live metadata refresh
   - Source: Codex repo review 2026-07-01.

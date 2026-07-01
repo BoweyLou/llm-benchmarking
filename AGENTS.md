@@ -90,55 +90,21 @@ kit templates during updates.
 Use `make kit-status` to inspect installed kit, prompt snapshot, profiles,
 manifest cleanliness, and target repo version. `kit start` may apply only
 local-safe managed-file updates from the already-local tool checkout; it does
-not fetch remote/global updates. Prefer the global CLI for explicit update
-management:
+not fetch remote/global updates.
 
-```bash
-kit setup
-kit status
-kit update --dry-run
-kit update
-kit target import --root /path/to/repos --dry-run
-kit target list --json
-kit update --all --dry-run
-kit worktree audit --root /path/to/repos --json
-kit worktree prune --root /path/to/repos --dry-run
-kit doctor
-```
+For setup, update, import, audit, prune, or doctor workflows, prefer the global
+`kit` CLI and follow `docs/upgrade-flow.md`. Use Make fallbacks such as
+`make kit-update KIT=/path/to/kit` only when the global CLI is unavailable or a
+specific local checkout is required.
 
 If the user asks to set up, inspect, update, or diagnose the kit, check
 `command -v kit` and run the requested `kit` subcommand from the target repo;
 do not search for a workspace script named `kit-setup`.
 
-Use `make kit-update KIT=/path/to/kit` or
-`make kit-refresh KIT=/path/to/kit` only when the global CLI is
-unavailable or a specific local checkout is required. Preserve customized
-managed files and review `.doc-contract-kit/updates/` before accepting proposed
-replacements. Use `kit update --all --apply` only after reviewing the batch
-dry-run; dirty registered targets are skipped. Use `kit target import` only for
-primary repos, with agent-worktree and archive paths excluded by default. Use
-`kit worktree audit` and `kit worktree prune --dry-run` for disposable task
-worktrees instead of enrolling them globally. Use `make kit-explain` when
-ownership is unclear.
-
-For external agent artifacts, use the source kit CLI with `--repo <path>`;
-`sidecar-init` and `--write-sidecar` store packets, plans, and receipts outside
-the target repo.
-For recurring automation that edits backlog or research files from a disposable
-worktree, run `make agent-automation-handoff` before cleanup. It preserves
-accepted edits as a sidecar patch and receipt and blocks primary-checkout runs
-by default.
-Use the review-risk tier from `make agent-start` to choose the smallest safe
-reviewer set. High-risk or critical changes should stay read-only until a human
-accepts a scoped implementation task.
-
-Use `make agent-task-prepare TASK=<id>` for accepted write-capable tasks from
-the primary checkout, not inside an existing task worktree. Use
-`make agent-task-status` before parallel work, `make agent-task-ready` before PR
-or merge handoff, and preview `agent-task-cleanup` / `agent-task-closeout`
-before setting their apply flags.
-If `DIRTY_PRIMARY_BASELINE=1` is intentional, commit or park untracked files in
-the task scope first; the task worktree is created from HEAD.
+Preserve customized managed files and review `.doc-contract-kit/updates/`
+before accepting proposed replacements. For task worktrees, automation handoff,
+sidecar artifacts, readiness, and cleanup, follow `docs/ops/agent-workflow.md`
+and the task-specific Make targets it names.
 
 ## Instruction hygiene
 

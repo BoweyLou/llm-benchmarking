@@ -66,7 +66,7 @@ Return:
 - commands run
 - review risk tier and selected trust profile
 - tests run or skipped with reasons
-- next local command the human should run
+- suggested follow-up command, when there is one
 
 If `make agent-run-review` was used, inspect:
 
