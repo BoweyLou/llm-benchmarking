@@ -9,7 +9,7 @@ python -m backend list-models
 ```
 
 That command prints a JSON array. Each model item includes the serialized metadata used by the old dashboard, including scores, source details, provider origin, license policy, provenance policy, use-case approvals, inference destinations, OpenRouter market metadata, model-card fields, and family/duplicate curation fields.
-It also writes a CSV sidecar to `output/model-list.csv` by default for spreadsheet review. When recommendation proposals have been synced, use-case approvals include proposed and effective recommendation fields.
+It also writes spreadsheet-friendly CSV output to `output/model-list.csv` by default, plus normalized companion CSVs for scores, use-case approvals, inference destinations, provider-origin countries, and source freshness. When recommendation proposals have been synced, use-case approvals include proposed and effective recommendation fields.
 
 ## Stack
 
@@ -42,7 +42,7 @@ What those commands do:
 - `python -m backend update`
   Runs the benchmark ingestion/update pipeline, refreshes external OpenRouter/model-card/market metadata, and writes update history plus audit results.
 - `python -m backend list-models`
-  Prints or exports the complete active model metadata list and writes a default CSV sidecar.
+  Prints or exports the complete active model metadata list and writes a default clean CSV bundle.
 
 If you want the older one-shot bootstrap-and-ingest flow, it still exists:
 
@@ -58,7 +58,7 @@ Print a pretty JSON list to stdout:
 python -m backend list-models
 ```
 
-By default this also writes `output/model-list.csv`. Use `--csv-output <path>` to choose another CSV path, or `--no-csv` to suppress the sidecar when a script needs stdout only.
+By default this also writes `output/model-list.csv` and companion files named `model-list-scores.csv`, `model-list-use-case-approvals.csv`, `model-list-inference-destinations.csv`, `model-list-provider-origin-countries.csv`, and `model-list-source-freshness.csv`. The main CSV keeps model-level columns readable and replaces nested JSON blobs with summary columns. Use `--csv-output <path>` to choose another CSV path, `--no-csv-sidecars` to suppress companion files, or `--no-csv` to suppress the CSV bundle when a script needs stdout only.
 
 Write the list to a file:
 
@@ -76,6 +76,12 @@ Write only CSV:
 
 ```bash
 python -m backend list-models --format csv --output output/model-metadata.csv
+```
+
+Write the legacy one-row-per-model CSV with nested JSON cells:
+
+```bash
+python -m backend list-models --format raw-csv --output output/model-metadata-raw.csv
 ```
 
 ## Recommendation Proposals
@@ -186,6 +192,7 @@ python -m backend update --benchmarks terminal_bench swebench_verified
 python -m backend list-models
 python -m backend list-models --format jsonl --output output/model-metadata.jsonl
 python -m backend list-models --format csv --output output/model-metadata.csv
+python -m backend list-models --format raw-csv --output output/model-metadata-raw.csv
 python -m backend inference-sync
 python -m backend inference-sync --destinations aws-bedrock azure-ai-foundry
 python -m backend model-card-sync
@@ -205,7 +212,7 @@ Notes:
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.
 - `recommendation-audit` previews generated use-case recommendation proposals. `recommendation-sync` persists them so `list-models`, CSV export, and the API include proposed/effective recommendation fields.
 - `model-license-sync` fills missing licenses using safe open-weight family propagation, a `Proprietary` fallback for missing proprietary licenses, and tracked exact/family overrides from [backend/model_license_baseline.json](backend/model_license_baseline.json).
-- `list-models` writes `output/model-list.csv` by default in addition to the requested stdout/file format; pass `--no-csv` when you do not want the sidecar.
+- `list-models` writes a clean CSV bundle to `output/model-list*.csv` by default in addition to the requested stdout/file format; pass `--no-csv` when you do not want the bundle, or `--no-csv-sidecars` when you only want the main model CSV.
 - `provider-origin-export` and `model-curation-export` push live curation back into the tracked baseline JSON files.
 
 ## API Surface

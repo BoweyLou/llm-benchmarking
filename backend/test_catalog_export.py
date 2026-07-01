@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend import cli
-from backend.catalog_export import render_model_metadata_list
+from backend.catalog_export import render_model_metadata_csv_bundle, render_model_metadata_list
 
 
 class CatalogExportTests(unittest.TestCase):
@@ -38,7 +38,46 @@ class CatalogExportTests(unittest.TestCase):
         self.assertEqual(json.loads(lines[0]), models[0])
         self.assertEqual(json.loads(lines[1]), models[1])
 
-    def test_render_csv_flattens_nested_metadata(self) -> None:
+    def test_render_csv_summarizes_nested_metadata_without_json_cells(self) -> None:
+        models = [
+            {
+                "id": "model-a",
+                "name": "Model A",
+                "provider": "Provider",
+                "provider_origin_countries": [{"code": "US", "name": "United States"}],
+                "scores": {"benchmark": {"value": 95.0, "verified": True}},
+                "use_case_approvals": {
+                    "customer_support": {
+                        "approved_for_use": True,
+                        "recommendation_status": "recommended",
+                        "proposed_recommendation_status": "not_recommended",
+                        "effective_recommendation_status": "recommended",
+                    }
+                },
+                "inference_destinations": [
+                    {"id": "aws-bedrock", "name": "AWS Bedrock", "regions": ["us-east-1"]}
+                ],
+            }
+        ]
+
+        rendered = render_model_metadata_list(models, output_format="csv")
+
+        rows = list(csv.DictReader(io.StringIO(rendered)))
+        self.assertEqual(rows[0]["id"], "model-a")
+        self.assertNotIn("scores", rows[0])
+        self.assertNotIn("inference_destinations", rows[0])
+        self.assertEqual(rows[0]["provider_origin_country_names"], "United States")
+        self.assertEqual(rows[0]["score_count"], "1")
+        self.assertEqual(rows[0]["verified_score_count"], "1")
+        self.assertEqual(rows[0]["benchmark_ids_with_scores"], "benchmark")
+        self.assertEqual(rows[0]["inference_destination_count"], "1")
+        self.assertEqual(rows[0]["inference_platform_names"], "AWS Bedrock")
+        self.assertEqual(rows[0]["inference_region_names"], "us-east-1")
+        self.assertEqual(rows[0]["approved_use_case_ids"], "customer_support")
+        self.assertEqual(rows[0]["proposed_not_recommended_use_case_ids"], "customer_support")
+        self.assertEqual(rows[0]["effective_recommended_use_case_ids"], "customer_support")
+
+    def test_render_raw_csv_preserves_nested_payloads(self) -> None:
         models = [
             {
                 "id": "model-a",
@@ -49,12 +88,67 @@ class CatalogExportTests(unittest.TestCase):
             }
         ]
 
-        rendered = render_model_metadata_list(models, output_format="csv")
+        rendered = render_model_metadata_list(models, output_format="raw-csv")
 
         rows = list(csv.DictReader(io.StringIO(rendered)))
-        self.assertEqual(rows[0]["id"], "model-a")
         self.assertEqual(json.loads(rows[0]["scores"]), models[0]["scores"])
         self.assertEqual(json.loads(rows[0]["inference_destinations"]), models[0]["inference_destinations"])
+
+    def test_render_csv_bundle_normalizes_nested_tables(self) -> None:
+        models = [
+            {
+                "id": "model-a",
+                "name": "Model A",
+                "provider": "Provider",
+                "provider_origin_countries": [{"code": "AU", "name": "Australia"}],
+                "scores": {"benchmark": {"value": 95.0, "verified": True}},
+                "use_case_approvals": {
+                    "customer_support": {
+                        "approved_for_use": True,
+                        "recommendation_status": "recommended",
+                        "proposed_recommendation_status": "recommended",
+                        "proposed_recommendation_required_controls": ["PIA"],
+                        "effective_recommendation_status": "recommended",
+                    }
+                },
+                "inference_destinations": [
+                    {
+                        "id": "aws-bedrock",
+                        "name": "AWS Bedrock",
+                        "hyperscaler": "AWS",
+                        "regions": ["ap-southeast-2"],
+                    }
+                ],
+                "source_freshness": [
+                    {
+                        "source_name": "chatbot_arena",
+                        "source_label": "Chatbot Arena",
+                        "benchmark_ids": ["chatbot_arena"],
+                        "model_evidence_status": "current",
+                    }
+                ],
+            }
+        ]
+
+        bundle = render_model_metadata_csv_bundle(models)
+
+        score_rows = list(csv.DictReader(io.StringIO(bundle["scores"])))
+        self.assertEqual(score_rows[0]["benchmark_id"], "benchmark")
+        self.assertEqual(score_rows[0]["value"], "95.0")
+
+        approval_rows = list(csv.DictReader(io.StringIO(bundle["use-case-approvals"])))
+        self.assertEqual(approval_rows[0]["use_case_id"], "customer_support")
+        self.assertEqual(approval_rows[0]["proposed_recommendation_required_controls"], "PIA")
+
+        destination_rows = list(csv.DictReader(io.StringIO(bundle["inference-destinations"])))
+        self.assertEqual(destination_rows[0]["destination_id"], "aws-bedrock")
+        self.assertEqual(destination_rows[0]["regions"], "ap-southeast-2")
+
+        origin_rows = list(csv.DictReader(io.StringIO(bundle["provider-origin-countries"])))
+        self.assertEqual(origin_rows[0]["country_code"], "AU")
+
+        freshness_rows = list(csv.DictReader(io.StringIO(bundle["source-freshness"])))
+        self.assertEqual(freshness_rows[0]["source_name"], "chatbot_arena")
 
     def test_cli_list_models_writes_output_file(self) -> None:
         models = [{"id": "model-a", "name": "Model A", "provider": "Provider"}]
@@ -91,8 +185,16 @@ class CatalogExportTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             self.assertEqual(json.loads(output_path.read_text(encoding="utf-8")), models)
-            self.assertEqual(csv_output_path.read_text(encoding="utf-8"), "id,name,provider\nmodel-a,Model A,Provider\n")
+            rows = list(csv.DictReader(io.StringIO(csv_output_path.read_text(encoding="utf-8"))))
+            self.assertEqual(rows[0]["id"], "model-a")
+            self.assertEqual(rows[0]["provider"], "Provider")
+            self.assertTrue((Path(tempdir) / "model-list-scores.csv").exists())
+            self.assertTrue((Path(tempdir) / "model-list-use-case-approvals.csv").exists())
+            self.assertTrue((Path(tempdir) / "model-list-inference-destinations.csv").exists())
+            self.assertTrue((Path(tempdir) / "model-list-provider-origin-countries.csv").exists())
+            self.assertTrue((Path(tempdir) / "model-list-source-freshness.csv").exists())
             self.assertIn("Exported CSV sidecar", stdout.getvalue())
+            self.assertIn("CSV companion files", stdout.getvalue())
 
 
 if __name__ == "__main__":
