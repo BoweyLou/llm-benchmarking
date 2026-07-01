@@ -5,7 +5,11 @@ import json
 from pathlib import Path
 import sys
 
-from .catalog_export import build_model_metadata_list, render_model_metadata_list
+from .catalog_export import (
+    build_model_metadata_list,
+    render_model_metadata_csv_bundle,
+    render_model_metadata_list,
+)
 from .database import DEFAULT_DB_PATH, get_engine, init_db
 from .inference_sync import sync_inference_catalog
 from .model_card_audit import build_model_card_audit_summary, format_model_card_audit_summary
@@ -43,9 +47,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     list_models_parser.add_argument(
         "--format",
-        choices=("json", "jsonl", "csv"),
+        choices=("json", "jsonl", "csv", "raw-csv"),
         default="json",
-        help="Output format. JSON prints one list; JSONL prints one model per line; CSV flattens nested fields.",
+        help="Output format. JSON prints one list; JSONL prints one model per line; CSV is spreadsheet-clean; raw-csv preserves nested JSON cells.",
     )
     list_models_parser.add_argument(
         "--output",
@@ -57,12 +61,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--csv-output",
         type=Path,
         default=DEFAULT_CSV_OUTPUT_PATH,
-        help=f"Also write a CSV sidecar at this path unless --format csv or --no-csv is used. Defaults to {DEFAULT_CSV_OUTPUT_PATH}.",
+        help=f"Also write a clean model CSV at this path unless --format csv or --no-csv is used. Defaults to {DEFAULT_CSV_OUTPUT_PATH}.",
     )
     list_models_parser.add_argument(
         "--no-csv",
         action="store_true",
         help="Do not write the default CSV sidecar.",
+    )
+    list_models_parser.add_argument(
+        "--no-csv-sidecars",
+        action="store_true",
+        help="Do not write normalized CSV companion files for scores, approvals, inference destinations, origins, and source freshness.",
     )
     list_models_parser.set_defaults(func=cmd_list_models)
 
@@ -210,6 +219,7 @@ def cmd_bootstrap(_args: argparse.Namespace) -> int:
 def cmd_list_models(args: argparse.Namespace) -> int:
     models = build_model_metadata_list()
     rendered = render_model_metadata_list(models, output_format=args.format)
+    sidecar_paths: list[Path] = []
 
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -222,10 +232,26 @@ def cmd_list_models(args: argparse.Namespace) -> int:
         csv_output = Path(args.csv_output)
         csv_output.parent.mkdir(parents=True, exist_ok=True)
         csv_output.write_text(render_model_metadata_list(models, output_format="csv"), encoding="utf-8")
+        if not args.no_csv_sidecars:
+            sidecar_paths = _write_csv_sidecars(models, csv_output)
         if args.output:
             print(f"Exported CSV sidecar to {csv_output}")
+    elif args.format == "csv" and args.output and not args.no_csv_sidecars:
+        sidecar_paths = _write_csv_sidecars(models, Path(args.output))
+
+    if args.output and sidecar_paths:
+        print(f"Exported {len(sidecar_paths)} CSV companion files next to {sidecar_paths[0].parent}")
 
     return 0
+
+
+def _write_csv_sidecars(models: list[dict[str, object]], csv_output: Path) -> list[Path]:
+    paths: list[Path] = []
+    for suffix, content in render_model_metadata_csv_bundle(models).items():
+        sidecar_path = csv_output.with_name(f"{csv_output.stem}-{suffix}{csv_output.suffix}")
+        sidecar_path.write_text(content, encoding="utf-8")
+        paths.append(sidecar_path)
+    return paths
 
 
 def cmd_update(args: argparse.Namespace) -> int:

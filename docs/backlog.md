@@ -147,6 +147,14 @@ No open items.
   - Validation: fixture-backed parser/import tests; RAG ranking regression tests; source-quality docs; `make docs-check`.
   - Completed: 2026-07-01. RAGTruth now imports overall and task-level hallucination rates for the published held-out corpus with split and metric metadata.
 
+- [x] LBM-033: P2 Normalize CSV exports for spreadsheet review
+  - Source: User CSV cleanup review 2026-07-01.
+  - Problem: the default CSV included nested JSON cells for scores, approvals, inference destinations, and related model metadata, which made spreadsheet review unclear.
+  - Scope: model-list CSV rendering, CLI export behavior, normalized companion CSVs, raw CSV fallback, docs, and tests.
+  - Acceptance: the default CSV is model-level and human-readable; repeated/nested structures are exported as named companion CSV files; legacy JSON-in-cell CSV remains available explicitly.
+  - Validation: `python -m unittest backend.test_catalog_export`; `python -m backend list-models --output /tmp/llm-benchmarking-models.json --csv-output /tmp/llm-benchmarking-model-list.csv`.
+  - Completed: 2026-07-01. The export now writes a clean model-list CSV plus scores, use-case approvals, inference destinations, provider-origin countries, and source-freshness companion files.
+
 - [x] LBM-015: P1 Add Australian-bank recommendation proposals
   - Source: Product clarification 2026-07-01.
   - Problem: manual `recommended` / `not_recommended` ratings need a generated, auditable proposal layer that reflects regulated Australian-bank deployment considerations.
