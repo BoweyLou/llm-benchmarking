@@ -329,6 +329,109 @@ class RankingTests(unittest.TestCase):
         self.assertAlmostEqual(cheap_cost["normalised"], 100.0)
         self.assertAlmostEqual(expensive_cost["normalised"], 0.0)
 
+    def test_huggingface_model_discovery_is_visible_but_ranking_evidence_gated(self) -> None:
+        self.add_model("gemma-4-12b-it", "Gemma 4 12B It", provider="Google")
+        with self.engine.begin() as conn:
+            conn.execute(
+                update(models_table)
+                .where(models_table.c.id == "gemma-4-12b-it")
+                .values(
+                    catalog_status="tracked",
+                    openrouter_model_id="google/gemma-4-12b-it",
+                    metadata_source_name="curated",
+                    metadata_source_url="https://example.test/curated",
+                )
+            )
+
+        entry = {
+            "source": "huggingface",
+            "family": "gemma",
+            "provider": "Google",
+            "author": "google",
+            "queries": ["gemma-4"],
+            "include_patterns": ["google/gemma-4*"],
+            "trusted_mirrors": [],
+        }
+        items = [
+            {"modelId": "google/gemma-4-12B-it", "tags": ["text-generation"]},
+            {"modelId": "google/gemma-4-E2B-it"},
+            {"modelId": "google/gemma-4-E4B-it"},
+            {"modelId": "google/gemma-4-26B-A4B-it"},
+            {"modelId": "google/gemma-4-31B-it"},
+            {"modelId": "google/gemma-4-12B-it-qat"},
+            {"modelId": "google/gemma-4-12B-it-GGUF"},
+            {"modelId": "google/gemma-4-mobile"},
+            {"modelId": "google/gemma-4-assistant"},
+            {"modelId": "community/gemma-4-12B-it-GGUF"},
+        ]
+
+        with patch.object(update_engine.model_discovery, "huggingface_discovery_entries", return_value=[entry]), patch.object(
+            update_engine.model_discovery,
+            "fetch_huggingface_discovery_items",
+            return_value=items,
+        ):
+            summary = update_engine.refresh_model_discovery_metadata(source="huggingface", family="gemma")
+
+        self.assertEqual(summary["records_found"], 9)
+        self.assertGreaterEqual(summary["models_created"], 8)
+
+        models = update_engine.list_models()
+        by_repo_id = {model.get("huggingface_repo_id"): model for model in models if model.get("huggingface_repo_id")}
+        self.assertIn("google/gemma-4-12B-it", by_repo_id)
+        self.assertIn("google/gemma-4-E2B-it", by_repo_id)
+        self.assertIn("google/gemma-4-26B-A4B-it", by_repo_id)
+        self.assertNotIn("community/gemma-4-12B-it-GGUF", by_repo_id)
+
+        existing = by_repo_id["google/gemma-4-12B-it"]
+        self.assertEqual(existing["id"], "gemma-4-12b-it")
+        self.assertEqual(existing["metadata_source_name"], "curated")
+        self.assertEqual(existing["openrouter_model_id"], "google/gemma-4-12b-it")
+        self.assertEqual(existing["parameter_count_b"], 12.0)
+        self.assertTrue(existing["small_model_candidate"])
+
+        e2b = by_repo_id["google/gemma-4-E2B-it"]
+        self.assertEqual(e2b["active_parameter_count_b"], 2.0)
+        self.assertIsNone(e2b["parameter_count_b"])
+        self.assertEqual(e2b["model_size_class"], "small")
+        self.assertTrue(e2b["small_model_candidate"])
+        self.assertEqual(e2b["catalog_status"], "provisional")
+
+        moe = by_repo_id["google/gemma-4-26B-A4B-it"]
+        self.assertEqual(moe["parameter_count_b"], 26.0)
+        self.assertEqual(moe["active_parameter_count_b"], 4.0)
+        self.assertTrue(moe["small_model_candidate"])
+
+        medium = by_repo_id["google/gemma-4-31B-it"]
+        self.assertEqual(medium["model_size_class"], "medium")
+        self.assertFalse(medium["small_model_candidate"])
+
+        with get_connection(self.engine) as conn:
+            score_rows = fetch_all(conn, select(scores_table))
+            source_runs = fetch_all(
+                conn,
+                select(source_runs_table).where(source_runs_table.c.source_name == "huggingface_model_discovery"),
+            )
+            raw_records = fetch_all(
+                conn,
+                select(raw_source_records_table).where(raw_source_records_table.c.source_run_id == source_runs[0]["id"]),
+            )
+        self.assertEqual(score_rows, [])
+        self.assertEqual(len(source_runs), 1)
+        self.assertEqual(len(raw_records), 9)
+
+        rankings = update_engine.get_rankings("small_model_routing")
+        self.assertIsNotNone(rankings)
+        ranked_names = [row["model"]["name"] for row in rankings["rankings"]]
+        self.assertNotIn(e2b["name"], ranked_names)
+
+        self.add_score(e2b["id"], "aa_cost", 0.02)
+        self.add_score(e2b["id"], "aa_speed", 220.0)
+
+        refreshed_rankings = update_engine.get_rankings("small_model_routing")
+        self.assertIsNotNone(refreshed_rankings)
+        refreshed_ranked_names = [row["model"]["name"] for row in refreshed_rankings["rankings"]]
+        self.assertIn(e2b["name"], refreshed_ranked_names)
+
     def test_internal_view_weight_boosts_scored_models_without_blocking_missing_models(self) -> None:
         self.add_model("internal-a", "Internal A")
         self.add_model("internal-b", "Internal B")

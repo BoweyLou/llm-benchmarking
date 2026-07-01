@@ -44,6 +44,13 @@ class CatalogExportTests(unittest.TestCase):
                 "id": "model-a",
                 "name": "Model A",
                 "provider": "Provider",
+                "parameter_count_b": 12.0,
+                "active_parameter_count_b": None,
+                "model_size_class": "small",
+                "small_model_candidate": True,
+                "model_size_source_name": "huggingface_model_discovery",
+                "model_size_source_url": "https://huggingface.co/provider/model-a",
+                "model_size_verified_at": "2026-07-01T00:00:00Z",
                 "model_roles": ["embedding", "reranker"],
                 "provider_origin_countries": [{"code": "US", "name": "United States"}],
                 "scores": {"benchmark": {"value": 95.0, "verified": True}},
@@ -67,6 +74,10 @@ class CatalogExportTests(unittest.TestCase):
         self.assertEqual(rows[0]["id"], "model-a")
         self.assertNotIn("scores", rows[0])
         self.assertNotIn("inference_destinations", rows[0])
+        self.assertEqual(rows[0]["parameter_count_b"], "12.0")
+        self.assertEqual(rows[0]["model_size_class"], "small")
+        self.assertEqual(rows[0]["small_model_candidate"], "true")
+        self.assertEqual(rows[0]["model_size_source_name"], "huggingface_model_discovery")
         self.assertEqual(rows[0]["model_roles"], "embedding; reranker")
         self.assertEqual(rows[0]["provider_origin_country_names"], "United States")
         self.assertEqual(rows[0]["score_count"], "1")
@@ -200,6 +211,32 @@ class CatalogExportTests(unittest.TestCase):
             self.assertTrue((Path(tempdir) / "model-list-source-freshness.csv").exists())
             self.assertIn("Exported CSV sidecar", stdout.getvalue())
             self.assertIn("CSV companion files", stdout.getvalue())
+
+    def test_cli_update_can_force_model_discovery_for_benchmark_scope(self) -> None:
+        with patch(
+            "backend.cli.run_update_now",
+            return_value={"id": 12, "status": "completed", "scores_added": 0, "scores_updated": 0},
+        ) as run_update_now:
+            exit_code = cli.main(["update", "--benchmarks", "aa_cost", "--refresh-model-discovery"])
+
+        self.assertEqual(exit_code, 0)
+        run_update_now.assert_called_once_with(
+            benchmarks=["aa_cost"],
+            triggered_by="cli",
+            refresh_model_discovery=True,
+        )
+
+    def test_cli_model_discovery_sync_prints_summary(self) -> None:
+        stdout = io.StringIO()
+        with patch(
+            "backend.cli.refresh_model_discovery_metadata",
+            return_value={"log_id": 7, "source": "huggingface", "records_found": 2},
+        ) as refresh_model_discovery_metadata, redirect_stdout(stdout):
+            exit_code = cli.main(["model-discovery-sync", "--source", "huggingface", "--family", "gemma"])
+
+        self.assertEqual(exit_code, 0)
+        refresh_model_discovery_metadata.assert_called_once_with(source="huggingface", family="gemma")
+        self.assertIn('"records_found": 2', stdout.getvalue())
 
 
 if __name__ == "__main__":

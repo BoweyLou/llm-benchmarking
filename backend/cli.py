@@ -26,6 +26,7 @@ from .seed_data import PROVIDER_ORIGIN_BASELINE_PATH, export_provider_origin_bas
 from .update_engine import (
     bootstrap,
     get_update_log,
+    refresh_model_discovery_metadata,
     refresh_model_card_metadata,
     refresh_model_license_metadata,
     run_update_now,
@@ -87,7 +88,28 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("manual", "api", "scheduled", "bootstrap", "cli"),
         help="Write a source label into update_log.triggered_by.",
     )
+    update_parser.add_argument(
+        "--refresh-model-discovery",
+        action="store_true",
+        help="Run curated metadata-only model discovery even when --benchmarks narrows the update.",
+    )
     update_parser.set_defaults(func=cmd_update)
+
+    model_discovery_parser = subparsers.add_parser(
+        "model-discovery-sync",
+        help="Refresh curated metadata-only model discovery from a configured source.",
+    )
+    model_discovery_parser.add_argument(
+        "--source",
+        default="huggingface",
+        choices=("huggingface",),
+        help="Discovery source to refresh. Defaults to huggingface.",
+    )
+    model_discovery_parser.add_argument(
+        "--family",
+        help="Optional configured model family to refresh, for example gemma.",
+    )
+    model_discovery_parser.set_defaults(func=cmd_model_discovery_sync)
 
     inference_parser = subparsers.add_parser(
         "inference-sync",
@@ -255,7 +277,11 @@ def _write_csv_sidecars(models: list[dict[str, object]], csv_output: Path) -> li
 
 
 def cmd_update(args: argparse.Namespace) -> int:
-    log = run_update_now(benchmarks=args.benchmarks, triggered_by=args.triggered_by)
+    log = run_update_now(
+        benchmarks=args.benchmarks,
+        triggered_by=args.triggered_by,
+        refresh_model_discovery=True if args.refresh_model_discovery else None,
+    )
     audit = log.get("audit_summary") or {}
     errors = log.get("errors") or []
 
@@ -273,6 +299,12 @@ def cmd_update(args: argparse.Namespace) -> int:
             print(f"- {error}")
 
     return 0 if log["status"] == "completed" else 1
+
+
+def cmd_model_discovery_sync(args: argparse.Namespace) -> int:
+    summary = refresh_model_discovery_metadata(source=args.source, family=args.family)
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
 
 
 def cmd_inference_sync(args: argparse.Namespace) -> int:

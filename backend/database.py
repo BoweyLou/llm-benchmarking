@@ -145,6 +145,13 @@ models = Table(
     Column("context_window", String),
     Column("context_window_tokens", Integer),
     Column("max_output_tokens", Integer),
+    Column("parameter_count_b", Float),
+    Column("active_parameter_count_b", Float),
+    Column("model_size_class", String),
+    Column("small_model_candidate", Integer, nullable=False, server_default=text("0")),
+    Column("model_size_source_name", String),
+    Column("model_size_source_url", String),
+    Column("model_size_verified_at", String),
     Column("price_input_per_mtok", Float),
     Column("price_output_per_mtok", Float),
     Column("openrouter_model_id", String),
@@ -446,6 +453,13 @@ def _create_schema_sql() -> list[str]:
             context_window TEXT,
             context_window_tokens INTEGER,
             max_output_tokens INTEGER,
+            parameter_count_b REAL,
+            active_parameter_count_b REAL,
+            model_size_class TEXT,
+            small_model_candidate INTEGER NOT NULL DEFAULT 0,
+            model_size_source_name TEXT,
+            model_size_source_url TEXT,
+            model_size_verified_at TEXT,
             price_input_per_mtok REAL,
             price_output_per_mtok REAL,
             openrouter_model_id TEXT,
@@ -839,6 +853,13 @@ def _migration_20260701_schema_repairs(conn: Connection) -> None:
         "catalog_status": "ALTER TABLE models ADD COLUMN catalog_status TEXT NOT NULL DEFAULT 'tracked'",
         "context_window_tokens": "ALTER TABLE models ADD COLUMN context_window_tokens INTEGER",
         "max_output_tokens": "ALTER TABLE models ADD COLUMN max_output_tokens INTEGER",
+        "parameter_count_b": "ALTER TABLE models ADD COLUMN parameter_count_b REAL",
+        "active_parameter_count_b": "ALTER TABLE models ADD COLUMN active_parameter_count_b REAL",
+        "model_size_class": "ALTER TABLE models ADD COLUMN model_size_class TEXT",
+        "small_model_candidate": "ALTER TABLE models ADD COLUMN small_model_candidate INTEGER NOT NULL DEFAULT 0",
+        "model_size_source_name": "ALTER TABLE models ADD COLUMN model_size_source_name TEXT",
+        "model_size_source_url": "ALTER TABLE models ADD COLUMN model_size_source_url TEXT",
+        "model_size_verified_at": "ALTER TABLE models ADD COLUMN model_size_verified_at TEXT",
         "price_input_per_mtok": "ALTER TABLE models ADD COLUMN price_input_per_mtok REAL",
         "price_output_per_mtok": "ALTER TABLE models ADD COLUMN price_output_per_mtok REAL",
         "openrouter_model_id": "ALTER TABLE models ADD COLUMN openrouter_model_id TEXT",
@@ -1099,10 +1120,30 @@ def _migration_20260701_model_roles(conn: Connection) -> None:
         conn.exec_driver_sql("ALTER TABLE models ADD COLUMN model_roles_json TEXT NOT NULL DEFAULT '[\"generator\"]'")
 
 
+def _migration_20260701_model_size_metadata(conn: Connection) -> None:
+    model_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(models)").fetchall()
+    }
+    expected_model_columns = {
+        "parameter_count_b": "ALTER TABLE models ADD COLUMN parameter_count_b REAL",
+        "active_parameter_count_b": "ALTER TABLE models ADD COLUMN active_parameter_count_b REAL",
+        "model_size_class": "ALTER TABLE models ADD COLUMN model_size_class TEXT",
+        "small_model_candidate": "ALTER TABLE models ADD COLUMN small_model_candidate INTEGER NOT NULL DEFAULT 0",
+        "model_size_source_name": "ALTER TABLE models ADD COLUMN model_size_source_name TEXT",
+        "model_size_source_url": "ALTER TABLE models ADD COLUMN model_size_source_url TEXT",
+        "model_size_verified_at": "ALTER TABLE models ADD COLUMN model_size_verified_at TEXT",
+    }
+    for column_name, statement in expected_model_columns.items():
+        if column_name not in model_columns:
+            conn.exec_driver_sql(statement)
+
+
 SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
     ("20260701_002_model_roles", _migration_20260701_model_roles),
     ("20260701_003_recommendation_proposals", _migration_20260701_recommendation_proposals),
+    ("20260701_004_model_size_metadata", _migration_20260701_model_size_metadata),
 )
 
 

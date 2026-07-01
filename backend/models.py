@@ -265,6 +265,13 @@ class ModelOut(APIModel):
     context_window: str | None = None
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
+    parameter_count_b: float | None = None
+    active_parameter_count_b: float | None = None
+    model_size_class: str | None = None
+    small_model_candidate: bool = False
+    model_size_source_name: str | None = None
+    model_size_source_url: str | None = None
+    model_size_verified_at: datetime | None = None
     price_input_per_mtok: float | None = None
     price_output_per_mtok: float | None = None
     openrouter_model_id: str | None = None
@@ -352,6 +359,13 @@ class ModelSummaryOut(APIModel):
     context_window: str | None = None
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
+    parameter_count_b: float | None = None
+    active_parameter_count_b: float | None = None
+    model_size_class: str | None = None
+    small_model_candidate: bool = False
+    model_size_source_name: str | None = None
+    model_size_source_url: str | None = None
+    model_size_verified_at: datetime | None = None
     openrouter_added_at: datetime | None = None
     huggingface_repo_id: str | None = None
     model_card_url: str | None = None

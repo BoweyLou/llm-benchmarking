@@ -1,6 +1,6 @@
 # LLM Benchmarking
 
-LLM Benchmarking is a local backend-only model intelligence workspace. It stores public benchmark scores, model metadata, provider-origin metadata, license and provenance review fields, use-case approvals, inference-location coverage, and update history in SQLite.
+LLM Benchmarking is a local backend-only model intelligence workspace. It stores public benchmark scores, model metadata, size-aware catalog discovery fields, provider-origin metadata, license and provenance review fields, use-case approvals, inference-location coverage, and update history in SQLite.
 
 The primary output is now a simple model metadata list:
 
@@ -8,7 +8,7 @@ The primary output is now a simple model metadata list:
 python -m backend list-models
 ```
 
-That command prints a JSON array. Each model item includes the serialized metadata used by the old dashboard, including scores, source details, model roles, provider origin, license policy, provenance policy, use-case approvals, inference destinations, OpenRouter market metadata, model-card fields, and family/duplicate curation fields.
+That command prints a JSON array. Each model item includes the serialized metadata used by the old dashboard, including scores, source details, model roles, model size fields, small-model candidate visibility, provider origin, license policy, provenance policy, use-case approvals, inference destinations, OpenRouter market metadata, model-card fields, and family/duplicate curation fields.
 It also writes spreadsheet-friendly CSV output to `output/model-list.csv` by default, plus normalized companion CSVs for scores, use-case approvals, inference destinations, provider-origin countries, and source freshness. When recommendation proposals have been synced, use-case approvals include proposed and effective recommendation fields.
 
 ## Stack
@@ -18,7 +18,7 @@ It also writes spreadsheet-friendly CSV output to `output/model-list.csv` by def
 - SQLAlchemy Core schema in [backend/database.py](backend/database.py)
 - Source adapters in [backend/sources](backend/sources)
 - Backend CLI in [backend/cli.py](backend/cli.py)
-- Update support modules split orchestration, OpenRouter metadata parsing, Hugging Face model-card extraction, and ranking response construction out of [backend/update_engine.py](backend/update_engine.py).
+- Update support modules split orchestration, OpenRouter metadata parsing, curated Hugging Face model discovery, Hugging Face model-card extraction, and ranking response construction out of [backend/update_engine.py](backend/update_engine.py).
 
 ## Quick Start
 
@@ -40,7 +40,7 @@ What those commands do:
 - `python -m backend bootstrap`
   Creates the schema, repairs local runtime state, seeds reference data, and applies repo-backed provider-origin, model-curation, and model-license baselines. It does not call external metadata services.
 - `python -m backend update`
-  Runs the benchmark ingestion/update pipeline, refreshes external OpenRouter/model-card/market metadata, and writes update history plus audit results.
+  Runs the benchmark ingestion/update pipeline, refreshes external OpenRouter/catalog-discovery/model-card/market metadata, and writes update history plus audit results. Full updates run curated model discovery; benchmark-scoped updates skip it unless `--refresh-model-discovery` is passed.
 - `python -m backend list-models`
   Prints or exports the complete active model metadata list and writes a default clean CSV bundle.
 
@@ -142,6 +142,12 @@ generator models default to `["generator"]`; embedding and reranker models use
 separate roles so MTEB retrieval/reranking scores do not enter generator-model
 rankings.
 
+Models also carry size-aware catalog fields in exports and API responses:
+`parameter_count_b`, `active_parameter_count_b`, `model_size_class`,
+`small_model_candidate`, `model_size_source_name`, `model_size_source_url`, and
+`model_size_verified_at`. These fields make small-model candidates visible in
+the catalog without changing evidence-gated ranking semantics.
+
 ## Current Data Sources
 
 For a detailed source-by-source data-flow diagram, source inventory, and
@@ -171,6 +177,7 @@ Benchmark adapters:
 
 Metadata and catalog enrichments:
 
+- Curated Hugging Face model discovery for official/provider-owned repos
 - OpenRouter models and market/ranking signals
   Recent OpenRouter models from the last 60 days are imported as provisional rows when no exact OpenRouter ID or canonical slug is already represented.
 - Hugging Face model-card metadata
@@ -193,6 +200,7 @@ The approval model is more than a global allow-list:
 SQLite is the runtime store, but important manual metadata is also kept in tracked repo baselines so it does not get lost on rebuilds:
 
 - provider origin baseline: [backend/provider_origin_baseline.json](backend/provider_origin_baseline.json)
+- model discovery baseline: [backend/model_discovery_baseline.json](backend/model_discovery_baseline.json)
 - model curation baseline: [backend/model_curation_baseline.json](backend/model_curation_baseline.json)
 - model license baseline: [backend/model_license_baseline.json](backend/model_license_baseline.json)
 
@@ -206,6 +214,8 @@ Common commands:
 python -m backend bootstrap
 python -m backend update
 python -m backend update --benchmarks terminal_bench swebench_verified
+python -m backend update --benchmarks aa_cost aa_speed --refresh-model-discovery
+python -m backend model-discovery-sync --source huggingface --family gemma
 python -m backend list-models
 python -m backend list-models --format jsonl --output output/model-metadata.jsonl
 python -m backend list-models --format csv --output output/model-metadata.csv
@@ -224,6 +234,8 @@ python -m backend model-curation-export
 
 Notes:
 
+- Full `update` runs curated Hugging Face model discovery before model-card refresh. `update --benchmarks ...` skips that discovery phase unless `--refresh-model-discovery` is passed.
+- `model-discovery-sync` runs only the curated metadata discovery lane. The v1 repo-backed baseline covers official Google Gemma discovery and intentionally excludes community quantizations/fine-tunes unless a trusted mirror is configured.
 - `inference-sync` supports destination subsets.
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.

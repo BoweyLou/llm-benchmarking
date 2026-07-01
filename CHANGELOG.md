@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 - Unreleased
+
+- Added curated Hugging Face model discovery for official/provider-owned model families, starting with Google Gemma, so small-model candidates appear in catalog exports even without leaderboard coverage.
+- Added model size metadata fields to the SQLite schema, API/list-models payloads, and clean CSV export.
+- Added `python -m backend model-discovery-sync --source huggingface --family gemma` and `python -m backend update --refresh-model-discovery` for targeted discovery refreshes while keeping benchmark-scoped updates fast by default.
+- Preserved `small_model_routing` evidence gates: discovered models are visible in the catalog, but they are not ranked until required cost and speed scores exist.
+
 ## 0.1.0 - Unreleased
 
 - Initial local version baseline.

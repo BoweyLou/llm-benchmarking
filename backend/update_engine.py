@@ -36,7 +36,7 @@ from .database import (
     use_case_benchmark_weights as use_case_benchmark_weights_table,
     utc_now_iso,
 )
-from . import model_card_refresh, openrouter_metadata, ranking_views, update_orchestration
+from . import model_card_refresh, model_discovery, openrouter_metadata, ranking_views, update_orchestration
 from .audit_engine import get_audit_run, get_audit_summary, run_audit
 from .inference_catalog import (
     attach_inference_catalog,
@@ -89,6 +89,7 @@ OPENROUTER_RANKINGS_URL = "https://openrouter.ai/rankings"
 OPENROUTER_PROGRAMMING_COLLECTION_URL = "https://openrouter.ai/collections/programming"
 OPENROUTER_MARKET_SOURCE_NAME = "openrouter"
 OPENROUTER_NEW_RELEASE_LOOKBACK_DAYS = 60
+HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME = "huggingface_model_discovery"
 HUGGINGFACE_MODEL_API_URL_TEMPLATE = "https://huggingface.co/api/models/{repo_id}"
 HUGGINGFACE_RAW_README_URL_TEMPLATE = "https://huggingface.co/{repo_id}/raw/main/README.md"
 MODEL_CARD_REFRESH_STALE_DAYS = 30
@@ -131,6 +132,7 @@ SOURCE_STEP_LABEL_OVERRIDES = {
     "swebench": "SWE-bench Verified",
     "terminal_bench": "Terminal-Bench",
     "vectara_hallucination": "Vectara Hallucination",
+    HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME: "Hugging Face model discovery",
 }
 UPDATE_POST_PHASES = [
     {"key": "phase:identity-refresh-initial", "label": "Refresh model identity metadata", "kind": "phase"},
@@ -138,6 +140,7 @@ UPDATE_POST_PHASES = [
     {"key": "phase:identity-refresh-final", "label": "Refresh model identity metadata again", "kind": "phase"},
     {"key": "phase:provider-origin-baseline", "label": "Apply provider origin baseline", "kind": "phase"},
     {"key": "phase:openrouter-models", "label": "Refresh OpenRouter model metadata", "kind": "phase"},
+    {"key": "phase:model-discovery", "label": "Refresh model discovery metadata", "kind": "phase"},
     {"key": "phase:model-card-metadata", "label": "Refresh model card metadata", "kind": "phase"},
     {"key": "phase:openrouter-market", "label": "Refresh OpenRouter market signals", "kind": "phase"},
     {"key": "phase:audit", "label": "Run post-update audit", "kind": "phase"},
@@ -262,6 +265,62 @@ def refresh_model_license_metadata(*, refresh_model_cards: bool = False, force_m
     return _refresh_model_license_metadata()
 
 
+def refresh_model_discovery_metadata(*, source: str = "huggingface", family: str | None = None) -> dict[str, Any]:
+    bootstrap()
+    normalized_source = str(source or "").strip().lower()
+    if normalized_source != "huggingface":
+        raise ValueError(f"Unsupported model discovery source: {source}")
+
+    step_plan = [
+        {"key": "phase:model-discovery", "label": "Refresh model discovery metadata", "kind": "phase"},
+        {"key": "phase:finalize", "label": "Finalize update", "kind": "phase"},
+    ]
+    log_id = _create_update_log("cli", step_plan)
+    total_steps = len(step_plan)
+    errors: list[dict[str, Any]] = []
+    summary: dict[str, Any] = {}
+    try:
+        _set_update_progress(log_id, step_plan[0], 1, total_steps)
+        summary = _refresh_huggingface_model_discovery(log_id=log_id, family=family)
+        _refresh_model_identity_metadata()
+        _canonicalize_model_catalog()
+        _refresh_model_identity_metadata()
+        _set_update_progress(log_id, step_plan[1], 2, total_steps)
+    except Exception as exc:
+        errors.append(
+            {
+                "benchmark_id": "",
+                "source_id": HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME,
+                "error_message": str(exc),
+            }
+        )
+        _finalize_update_log(
+            log_id,
+            status="failed",
+            scores_added=0,
+            scores_updated=0,
+            errors=errors,
+            audit_result=None,
+            step=step_plan[-1],
+            step_index=total_steps,
+            total_steps=total_steps,
+        )
+        raise
+
+    _finalize_update_log(
+        log_id,
+        status="completed",
+        scores_added=0,
+        scores_updated=0,
+        errors=errors,
+        audit_result=None,
+        step=step_plan[-1],
+        step_index=total_steps,
+        total_steps=total_steps,
+    )
+    return {"log_id": log_id, "source": normalized_source, **summary}
+
+
 def _recover_interrupted_updates() -> None:
     with ENGINE.begin() as conn:
         rows = fetch_all(
@@ -349,10 +408,19 @@ def _humanize_source_name(source_name: str) -> str:
     return update_orchestration.humanize_source_name(source_name, SOURCE_STEP_LABEL_OVERRIDES)
 
 
-def _build_update_plan(adapters: list[BaseSourceAdapter]) -> list[dict[str, Any]]:
+def _build_update_plan(
+    adapters: list[BaseSourceAdapter],
+    *,
+    include_model_discovery: bool = True,
+) -> list[dict[str, Any]]:
+    post_phases = [
+        phase
+        for phase in UPDATE_POST_PHASES
+        if include_model_discovery or phase.get("key") != "phase:model-discovery"
+    ]
     return update_orchestration.build_update_plan(
         adapters,
-        post_phases=UPDATE_POST_PHASES,
+        post_phases=post_phases,
         label_overrides=SOURCE_STEP_LABEL_OVERRIDES,
     )
 
@@ -2424,11 +2492,30 @@ def _is_better_benchmark_score(
     return str(candidate.get("collected_at") or "") > str(current_best.get("collected_at") or "")
 
 
-def schedule_update(benchmarks: Iterable[str] | None = None, triggered_by: str = "manual") -> int:
+def _should_refresh_model_discovery(
+    selected_benchmarks: set[str],
+    *,
+    refresh_model_discovery: bool | None,
+) -> bool:
+    if refresh_model_discovery is not None:
+        return bool(refresh_model_discovery)
+    return not selected_benchmarks
+
+
+def schedule_update(
+    benchmarks: Iterable[str] | None = None,
+    triggered_by: str = "manual",
+    *,
+    refresh_model_discovery: bool | None = None,
+) -> int:
     bootstrap()
     selected_benchmarks = {benchmark_id for benchmark_id in (benchmarks or [])}
     adapters = _selected_adapters(selected_benchmarks or None)
-    step_plan = _build_update_plan(adapters)
+    include_model_discovery = _should_refresh_model_discovery(
+        selected_benchmarks,
+        refresh_model_discovery=refresh_model_discovery,
+    )
+    step_plan = _build_update_plan(adapters, include_model_discovery=include_model_discovery)
 
     with UPDATE_SCHEDULE_LOCK:
         active_log_id = _find_running_update_log_id()
@@ -2440,17 +2527,27 @@ def schedule_update(benchmarks: Iterable[str] | None = None, triggered_by: str =
         worker = threading.Thread(
             target=_run_update_job,
             args=(log_id, adapters, step_plan, triggered_by),
+            kwargs={"refresh_model_discovery": include_model_discovery},
             daemon=True,
         )
         worker.start()
     return log_id
 
 
-def run_update_sync(benchmarks: Iterable[str] | None = None, triggered_by: str = "manual") -> int:
+def run_update_sync(
+    benchmarks: Iterable[str] | None = None,
+    triggered_by: str = "manual",
+    *,
+    refresh_model_discovery: bool | None = None,
+) -> int:
     bootstrap()
     selected_benchmarks = {benchmark_id for benchmark_id in (benchmarks or [])}
     adapters = _selected_adapters(selected_benchmarks or None)
-    step_plan = _build_update_plan(adapters)
+    include_model_discovery = _should_refresh_model_discovery(
+        selected_benchmarks,
+        refresh_model_discovery=refresh_model_discovery,
+    )
+    step_plan = _build_update_plan(adapters, include_model_discovery=include_model_discovery)
 
     with UPDATE_SCHEDULE_LOCK:
         active_log_id = _find_running_update_log_id()
@@ -2459,12 +2556,27 @@ def run_update_sync(benchmarks: Iterable[str] | None = None, triggered_by: str =
 
         log_id = _create_update_log(triggered_by, step_plan)
 
-    _run_update_job(log_id, adapters, step_plan, triggered_by)
+    _run_update_job(
+        log_id,
+        adapters,
+        step_plan,
+        triggered_by,
+        refresh_model_discovery=include_model_discovery,
+    )
     return log_id
 
 
-def run_update_now(benchmarks: Iterable[str] | None = None, triggered_by: str = "bootstrap") -> dict[str, Any]:
-    log_id = run_update_sync(benchmarks=benchmarks, triggered_by=triggered_by)
+def run_update_now(
+    benchmarks: Iterable[str] | None = None,
+    triggered_by: str = "bootstrap",
+    *,
+    refresh_model_discovery: bool | None = None,
+) -> dict[str, Any]:
+    log_id = run_update_sync(
+        benchmarks=benchmarks,
+        triggered_by=triggered_by,
+        refresh_model_discovery=refresh_model_discovery,
+    )
     log = get_update_log(log_id)
     if log is None:
         raise RuntimeError(f"Update log {log_id} was not found after sync update.")
@@ -2594,6 +2706,8 @@ def _run_update_job(
     adapters: list[BaseSourceAdapter],
     step_plan: list[dict[str, Any]],
     triggered_by: str,
+    *,
+    refresh_model_discovery: bool = True,
 ) -> None:
     bootstrap()
     errors: list[dict[str, Any]] = []
@@ -2625,26 +2739,31 @@ def _run_update_job(
                     )
                     _finish_source_run(source_run_id, status="failed", records_found=0, error_message=str(exc))
 
-            phase_offset = len(adapters)
+            current_step_index = len(adapters)
 
-            current_step_index = phase_offset + 1
-            _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
+            def advance_phase(expected_key: str) -> dict[str, Any]:
+                nonlocal current_step_index
+                current_step_index += 1
+                step = step_plan[current_step_index - 1]
+                actual_key = str(step.get("key") or "")
+                if actual_key != expected_key:
+                    raise RuntimeError(f"Expected update phase {expected_key}, found {actual_key or 'unknown'}.")
+                _set_update_progress(log_id, step, current_step_index, total_steps)
+                return step
+
+            advance_phase("phase:identity-refresh-initial")
             _refresh_model_identity_metadata()
 
-            current_step_index = phase_offset + 2
-            _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
+            advance_phase("phase:catalog-canonicalization")
             _canonicalize_model_catalog()
 
-            current_step_index = phase_offset + 3
-            _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
+            advance_phase("phase:identity-refresh-final")
             _refresh_model_identity_metadata()
 
-            current_step_index = phase_offset + 4
-            _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
+            advance_phase("phase:provider-origin-baseline")
             apply_provider_origin_baseline(ENGINE)
 
-            current_step_index = phase_offset + 5
-            _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
+            advance_phase("phase:openrouter-models")
             try:
                 _refresh_openrouter_model_metadata()
                 if _repair_submitter_provider_leaks() > 0:
@@ -2660,8 +2779,23 @@ def _run_update_job(
                     }
                 )
 
-            current_step_index = phase_offset + 6
-            _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
+            if refresh_model_discovery:
+                advance_phase("phase:model-discovery")
+                try:
+                    _refresh_huggingface_model_discovery(log_id=log_id)
+                    _refresh_model_identity_metadata()
+                    _canonicalize_model_catalog()
+                    _refresh_model_identity_metadata()
+                except Exception as exc:
+                    errors.append(
+                        {
+                            "benchmark_id": "",
+                            "source_id": HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME,
+                            "error_message": str(exc),
+                        }
+                    )
+
+            advance_phase("phase:model-card-metadata")
             try:
                 _refresh_model_card_metadata()
                 _refresh_model_license_metadata()
@@ -2674,8 +2808,7 @@ def _run_update_job(
                     }
                 )
 
-            current_step_index = phase_offset + 7
-            _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
+            advance_phase("phase:openrouter-market")
             try:
                 _refresh_openrouter_market_signals()
             except OptionalSourceUnavailable as exc:
@@ -2697,8 +2830,7 @@ def _run_update_job(
                     }
                 )
 
-            current_step_index = phase_offset + 8
-            _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
+            advance_phase("phase:audit")
             try:
                 audit_result = run_audit(ENGINE, log_id)
             except Exception as exc:
@@ -2717,8 +2849,7 @@ def _run_update_job(
                     }
                 )
 
-            current_step_index = total_steps
-            _set_update_progress(log_id, step_plan[current_step_index - 1], current_step_index, total_steps)
+            advance_phase("phase:finalize")
     except Exception as exc:
         errors.append(
             {
@@ -2843,6 +2974,129 @@ def _selected_adapters(selected_benchmarks: set[str] | None) -> list[BaseSourceA
         for adapter in adapters
         if selected_benchmarks.intersection(adapter.benchmark_ids)
     ]
+
+
+def _refresh_huggingface_model_discovery(
+    *,
+    log_id: int,
+    family: str | None = None,
+) -> dict[str, Any]:
+    entries = model_discovery.huggingface_discovery_entries(family=family)
+    summary = {
+        "family": _clean_text(family),
+        "entries": len(entries),
+        "records_found": 0,
+        "models_created": 0,
+        "models_updated": 0,
+        "models_unchanged": 0,
+    }
+    if not entries:
+        return summary
+
+    verified_at = utc_now_iso()
+    source_run_id = _start_metadata_source_run(
+        log_id,
+        source_name=HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME,
+        benchmark_id=_model_discovery_benchmark_id(family),
+    )
+    records_found = 0
+    try:
+        with httpx.Client(headers=HTTP_HEADERS, follow_redirects=True, timeout=30.0) as client:
+            for entry in entries:
+                fetched_items = model_discovery.fetch_huggingface_discovery_items(client, entry)
+                items = model_discovery.filter_huggingface_discovery_items(fetched_items, entry)
+                for item in items:
+                    repo_id = model_discovery.repo_id_from_huggingface_item(item)
+                    if not repo_id:
+                        continue
+                    display_name = _suggest_display_name(repo_id.split("/", 1)[1]) or repo_id
+                    provider = _clean_text(entry.get("provider")) or _provider_hint_from_name(repo_id) or "Unknown"
+                    source_url = f"https://huggingface.co/{repo_id}"
+                    size_metadata = model_discovery.infer_model_size_metadata(
+                        repo_id,
+                        display_name,
+                        item.get("pipeline_tag"),
+                        item.get("tags"),
+                        item.get("cardData"),
+                    )
+                    size_values = model_discovery.model_size_values_from_metadata(
+                        size_metadata,
+                        source_name=HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME,
+                        source_url=source_url,
+                        verified_at=verified_at,
+                    )
+                    model_id, outcome = _ensure_discovered_huggingface_model(
+                        repo_id=repo_id,
+                        display_name=display_name,
+                        provider=provider,
+                        source_url=source_url,
+                        verified_at=verified_at,
+                        discovered_update_log_id=log_id,
+                        size_values=size_values,
+                    )
+                    raw_record = RawSourceRecord(
+                        source_id=HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME,
+                        benchmark_id=_model_discovery_benchmark_id(entry.get("family") or family),
+                        raw_model_name=display_name,
+                        raw_value=repo_id,
+                        source_url=source_url,
+                        collected_at=verified_at,
+                        raw_model_key=repo_id,
+                        payload=item,
+                        metadata={
+                            "source": "huggingface",
+                            "family": _clean_text(entry.get("family")),
+                            "provider": provider,
+                            "huggingface_repo_id": repo_id,
+                            "model_roles": [MODEL_ROLE_GENERATOR],
+                            **size_values,
+                        },
+                    )
+                    _insert_raw_source_record(
+                        source_run_id,
+                        raw_record,
+                        normalized_model_id=model_id,
+                        source_type="primary",
+                        verified=True,
+                        resolution_status="resolved",
+                    )
+                    records_found += 1
+                    if outcome == "created":
+                        summary["models_created"] += 1
+                    elif outcome == "updated":
+                        summary["models_updated"] += 1
+                    else:
+                        summary["models_unchanged"] += 1
+    except Exception as exc:
+        _finish_source_run(source_run_id, status="failed", records_found=records_found, error_message=str(exc))
+        raise
+
+    summary["records_found"] = records_found
+    _finish_source_run(source_run_id, status="completed", records_found=records_found, error_message=None)
+    return summary
+
+
+def _model_discovery_benchmark_id(family: Any) -> str:
+    family_text = _clean_text(family)
+    return f"model_discovery:{family_text}" if family_text else "model_discovery"
+
+
+def _start_metadata_source_run(log_id: int, *, source_name: str, benchmark_id: str) -> int:
+    with ENGINE.begin() as conn:
+        result = conn.execute(
+            insert(source_runs_table).values(
+                update_log_id=log_id,
+                source_name=source_name,
+                benchmark_id=benchmark_id,
+                started_at=utc_now_iso(),
+                completed_at=None,
+                status="running",
+                records_found=0,
+                error_message=None,
+                details_json=None,
+            )
+        )
+        return int(result.inserted_primary_key[0])
 
 
 def _start_source_run(log_id: int, adapter: BaseSourceAdapter) -> int:
@@ -3451,6 +3705,154 @@ def _ensure_model(
     return model_id
 
 
+def _ensure_discovered_huggingface_model(
+    *,
+    repo_id: str,
+    display_name: str,
+    provider: str,
+    source_url: str,
+    verified_at: str,
+    discovered_update_log_id: int | None,
+    size_values: dict[str, Any],
+) -> tuple[str, str]:
+    existing_model_id = _resolve_huggingface_model_id(repo_id, display_name, provider)
+    if existing_model_id:
+        with ENGINE.begin() as conn:
+            row = fetch_one(conn, select(models_table).where(models_table.c.id == existing_model_id))
+            if row is None:
+                return existing_model_id, "unchanged"
+            values = _huggingface_discovery_existing_model_values(
+                row,
+                repo_id=repo_id,
+                provider=provider,
+                source_url=source_url,
+                verified_at=verified_at,
+                discovered_update_log_id=discovered_update_log_id,
+                size_values=size_values,
+                conn=conn,
+            )
+            if not values:
+                return existing_model_id, "unchanged"
+            conn.execute(
+                update(models_table)
+                .where(models_table.c.id == existing_model_id)
+                .values(**values)
+            )
+            return existing_model_id, "updated"
+
+    model_id = _choose_model_id(display_name, repo_id)
+    identity = infer_model_identity(display_name, provider, repo_id)
+    discovered_at = verified_at
+    with ENGINE.begin() as conn:
+        provider_id = _ensure_provider_row(provider, conn=conn)
+        values = {
+            "id": model_id,
+            "name": display_name,
+            "provider_id": provider_id,
+            "provider": provider,
+            "type": "open_weights",
+            "model_roles_json": json.dumps([MODEL_ROLE_GENERATOR], ensure_ascii=True),
+            "catalog_status": CATALOG_STATUS_PROVISIONAL,
+            "release_date": None,
+            "context_window": None,
+            "family_id": identity.family_id,
+            "family_name": identity.family_name,
+            "canonical_model_id": identity.canonical_model_id,
+            "canonical_model_name": identity.canonical_model_name,
+            "variant_label": identity.variant_label,
+            "discovered_at": discovered_at,
+            "discovered_update_log_id": discovered_update_log_id,
+            "active": 1,
+            "huggingface_repo_id": repo_id,
+            "metadata_source_name": HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME,
+            "metadata_source_url": source_url,
+            "metadata_verified_at": verified_at,
+            **size_values,
+        }
+        stmt = sqlite_insert(models_table).values(**values)
+        stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
+        result = conn.execute(stmt)
+        if result.rowcount:
+            return model_id, "created"
+        conflict_row = fetch_one(conn, select(models_table).where(models_table.c.id == model_id))
+        if conflict_row is not None:
+            return str(conflict_row["id"]), "unchanged"
+
+    return model_id, "unchanged"
+
+
+def _resolve_huggingface_model_id(repo_id: str, display_name: str, provider: str) -> str | None:
+    with get_connection(ENGINE) as conn:
+        repo_match = fetch_one(
+            conn,
+            select(models_table.c.id)
+            .where(
+                models_table.c.active == 1,
+                models_table.c.huggingface_repo_id == repo_id,
+            )
+            .limit(1),
+        )
+        if repo_match is not None:
+            return str(repo_match["id"])
+
+    resolved = _resolve_model_id(display_name)
+    if resolved:
+        return resolved
+
+    identity = infer_model_identity(display_name, provider, repo_id)
+    if not identity.canonical_model_id:
+        return None
+
+    with get_connection(ENGINE) as conn:
+        identity_match = fetch_one(
+            conn,
+            select(models_table.c.id)
+            .where(
+                models_table.c.active == 1,
+                models_table.c.canonical_model_id == identity.canonical_model_id,
+            )
+            .limit(1),
+        )
+    return str(identity_match["id"]) if identity_match is not None else None
+
+
+def _huggingface_discovery_existing_model_values(
+    row: dict[str, Any],
+    *,
+    repo_id: str,
+    provider: str,
+    source_url: str,
+    verified_at: str,
+    discovered_update_log_id: int | None,
+    size_values: dict[str, Any],
+    conn: Any,
+) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    if _model_field_missing(row, "huggingface_repo_id"):
+        values["huggingface_repo_id"] = repo_id
+
+    current_provider = _clean_text(row.get("provider"))
+    if not current_provider or current_provider.lower() == "unknown":
+        values["provider"] = provider
+        values["provider_id"] = _ensure_provider_row(provider, conn=conn)
+
+    if _model_field_missing(row, "metadata_source_name"):
+        values["metadata_source_name"] = HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME
+        values["metadata_source_url"] = source_url
+        values["metadata_verified_at"] = verified_at
+
+    current_size_source = _clean_text(row.get("model_size_source_name"))
+    if not current_size_source or current_size_source == HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME:
+        values.update(size_values)
+
+    if _model_field_missing(row, "discovered_at"):
+        values["discovered_at"] = verified_at
+    if _model_field_missing(row, "discovered_update_log_id"):
+        values["discovered_update_log_id"] = discovered_update_log_id
+
+    return values
+
+
 def _sync_provider_directory() -> None:
     with ENGINE.begin() as conn:
         provider_rows = fetch_all(conn, select(providers_table))
@@ -3714,8 +4116,38 @@ def _canonicalize_model_catalog() -> None:
                 models_table.c.catalog_status,
                 models_table.c.release_date,
                 models_table.c.context_window,
+                models_table.c.context_window_tokens,
+                models_table.c.max_output_tokens,
+                models_table.c.parameter_count_b,
+                models_table.c.active_parameter_count_b,
+                models_table.c.model_size_class,
+                models_table.c.small_model_candidate,
+                models_table.c.model_size_source_name,
+                models_table.c.model_size_source_url,
+                models_table.c.model_size_verified_at,
                 models_table.c.openrouter_model_id,
                 models_table.c.openrouter_canonical_slug,
+                models_table.c.openrouter_added_at,
+                models_table.c.huggingface_repo_id,
+                models_table.c.metadata_source_name,
+                models_table.c.metadata_source_url,
+                models_table.c.metadata_verified_at,
+                models_table.c.model_card_url,
+                models_table.c.model_card_source,
+                models_table.c.model_card_verified_at,
+                models_table.c.documentation_url,
+                models_table.c.repo_url,
+                models_table.c.paper_url,
+                models_table.c.license_id,
+                models_table.c.license_name,
+                models_table.c.license_url,
+                models_table.c.base_models_json,
+                models_table.c.supported_languages_json,
+                models_table.c.capabilities_json,
+                models_table.c.intended_use_short,
+                models_table.c.limitations_short,
+                models_table.c.training_data_summary,
+                models_table.c.training_cutoff,
                 models_table.c.active,
             ).where(models_table.c.active == 1),
         )
@@ -5093,6 +5525,7 @@ def _choose_canonical_model(group: list[dict[str, Any]], score_counts: dict[str,
         metadata_fields = (
             int(bool(row.get("release_date")))
             + int(bool(row.get("context_window")))
+            + int(bool(row.get("parameter_count_b") or row.get("active_parameter_count_b")))
             + int(bool(row.get("license_id") or row.get("license_name")))
             + int(bool(row.get("model_card_url")))
             + int(bool(_decode_json_string_list(row.get("capabilities_json"))))
@@ -5154,6 +5587,12 @@ def _canonical_model_enrichment(group: list[dict[str, Any]], canonical: dict[str
     merge_fields = (
         "context_window_tokens",
         "max_output_tokens",
+        "parameter_count_b",
+        "active_parameter_count_b",
+        "model_size_class",
+        "model_size_source_name",
+        "model_size_source_url",
+        "model_size_verified_at",
         "price_input_per_mtok",
         "price_output_per_mtok",
         "openrouter_model_id",
@@ -5189,6 +5628,9 @@ def _canonical_model_enrichment(group: list[dict[str, Any]], canonical: dict[str
             if row_value not in (None, "", "[]"):
                 payload[field_name] = row_value
                 break
+
+    if not bool(canonical.get("small_model_candidate")) and any(bool(row.get("small_model_candidate")) for row in group):
+        payload["small_model_candidate"] = 1
 
     merged_roles = sorted(
         dict.fromkeys(
@@ -5374,6 +5816,10 @@ def _serialize_model(
     payload["provider_origin_basis"] = provider_metadata.get("origin_basis") if provider_metadata is not None else None
     payload["provider_origin_source_url"] = provider_metadata.get("source_url") if provider_metadata is not None else None
     payload["provider_origin_verified_at"] = provider_metadata.get("verified_at") if provider_metadata is not None else None
+    payload["small_model_candidate"] = bool(payload.get("small_model_candidate", 0))
+    payload["model_size_class"] = _clean_text(payload.get("model_size_class"))
+    payload["model_size_source_name"] = _clean_text(payload.get("model_size_source_name"))
+    payload["model_size_source_url"] = _clean_text(payload.get("model_size_source_url"))
     payload["base_models"] = _decode_json_string_list(payload.pop("base_models_json", None))
     payload["supported_languages"] = _decode_json_string_list(payload.pop("supported_languages_json", None))
     payload["capabilities"] = _decode_json_string_list(payload.pop("capabilities_json", None))
@@ -5685,6 +6131,13 @@ def _model_summary(model: dict[str, Any]) -> dict[str, Any]:
         "context_window": model.get("context_window"),
         "context_window_tokens": model.get("context_window_tokens"),
         "max_output_tokens": model.get("max_output_tokens"),
+        "parameter_count_b": model.get("parameter_count_b"),
+        "active_parameter_count_b": model.get("active_parameter_count_b"),
+        "model_size_class": _clean_text(model.get("model_size_class")),
+        "small_model_candidate": bool(model.get("small_model_candidate", False)),
+        "model_size_source_name": _clean_text(model.get("model_size_source_name")),
+        "model_size_source_url": _clean_text(model.get("model_size_source_url")),
+        "model_size_verified_at": model.get("model_size_verified_at"),
         "openrouter_added_at": model.get("openrouter_added_at"),
         "huggingface_repo_id": model.get("huggingface_repo_id"),
         "model_card_url": model.get("model_card_url"),
@@ -5964,6 +6417,7 @@ __all__ = [
     "list_source_runs",
     "list_update_logs",
     "list_use_cases",
+    "refresh_model_discovery_metadata",
     "run_update_now",
     "run_update_sync",
     "schedule_update",
