@@ -7,7 +7,127 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Open
 
+- [ ] LBM-016: P1 Promote adapter-fetched metadata into model metadata with source precedence
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: Chatbot Arena and IFEval already fetch useful organization, license, pricing, context, latency, throughput, provider/model ID, and model URL fields, but most of that evidence remains raw-record-only and cannot help catalog review when OpenRouter or Hugging Face data is absent or stale.
+  - Scope: `backend/update_engine.py`, `backend/sources/chatbot_arena.py`, `backend/sources/ifeval.py`, `backend/models.py` if response models need new fields, source-precedence docs/tests.
+  - Acceptance: define explicit metadata precedence rules; promote only trustworthy fields into model metadata; preserve raw evidence and source URLs; avoid overriding higher-trust first-party, tracked baseline, OpenRouter, or Hugging Face fields without a clear rule.
+  - Validation: targeted unit tests for precedence and conflict handling; temp-database update using mocked Chatbot Arena/IFEval records; `python -m backend list-models --no-csv`; `make docs-check`.
+
+- [ ] LBM-017: P2 Add Vectara hallucination companion metrics
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: the Vectara adapter already sees hallucination rate, answer rate, factual consistency, and average summary length, but only factual consistency becomes a catalog score.
+  - Scope: `backend/sources/vectara.py`, benchmark seed rows, score normalization, ranking weights if companion metrics are consumed, docs/tests.
+  - Acceptance: preserve the existing factual-consistency benchmark while adding explicit hallucination-rate and answer-rate evidence with clear lower-is-better semantics where applicable; do not treat grounded summarization as retrieval relevance.
+  - Validation: fixture-backed Vectara normalization tests; ranking regression tests for RAG/document use cases; `PYTHON=python ./scripts/test_inference_suite.sh`; `make docs-check`.
+
+- [ ] LBM-018: P2 Add FaithJudge task-level hallucination metrics
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: FaithJudge raw rows already include FaithBench/RAGTruth subtask rates, but the catalog stores only one hallucination aggregate.
+  - Scope: `backend/sources/faithjudge.py`, benchmark seed rows for summarization, QA, and data-to-text subtasks, source-quality docs/tests.
+  - Acceptance: add stable task-level benchmark IDs without removing the aggregate; preserve task labels, rank/source URL metadata, and lower-is-better direction.
+  - Validation: fixture-backed FaithJudge parser tests; RAG ranking regression tests; `python -m unittest backend.test_source_spot_checks`; `make docs-check`.
+
+- [ ] LBM-019: P2 Add MMMU variant and pro companion metrics
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: MMMU upstream data includes validation/test/pro fields and baselines, but the current adapter only writes validation overall.
+  - Scope: `backend/sources/mmmu.py`, benchmark seed rows for stable MMMU-Pro or test/pro result fields, score semantics docs/tests.
+  - Acceptance: ingest only stable model-level MMMU variant fields; keep human/random baselines out of model rankings; keep the current validation-overall benchmark unchanged.
+  - Validation: fixture-backed MMMU payload tests; multimodal ranking regression tests; `python -m unittest backend.test_source_spot_checks`; `make docs-check`.
+
+- [ ] LBM-020: P2 Preserve Terminal-Bench agent and harness evidence
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: Terminal-Bench rows include agent, version, integration method, date, and stderr details, but the current score collapses harness effects into a single model capability score.
+  - Scope: `backend/sources/terminal_bench.py`, raw metadata persistence, companion evidence or benchmark model for agent systems, ranking/docs/tests.
+  - Acceptance: preserve model-only ranking compatibility while making agent/harness metadata queryable; document the difference between model capability and best agent system evidence.
+  - Validation: fixture-backed Terminal-Bench parsing tests; ranking regression tests for agentic use cases; `python -m unittest backend.test_source_spot_checks`; `make docs-check`.
+
+- [ ] LBM-021: P2 Expand AILuminate locale, system-class, and risk evidence
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: AILuminate currently selects one best public grade per model, losing locale, system-class, and risk-category detail that matters for safety/compliance review.
+  - Scope: `backend/sources/ailuminate.py`, benchmark seed rows or companion evidence storage, detail-page parser if stable, safety docs/tests.
+  - Acceptance: retain the current public-grade benchmark while preserving per-locale and per-system-class evidence; add risk-category breakdowns only when the source surface is stable enough to test.
+  - Validation: fixture-backed AILuminate normalization tests; safety ranking regression tests; `PYTHON=python ./scripts/test_inference_suite.sh`; `make docs-check`.
+
+- [ ] LBM-022: P2 Expand Artificial Analysis ingestion beyond the model leaderboard
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: the current Artificial Analysis adapter only ingests intelligence, speed, and blended cost from the model leaderboard, while AA publishes additional evaluation pages that could fill coding, instruction-following, long-context, safety/openness, and enterprise-agent gaps.
+  - Scope: new or generalized AA evaluation adapters under `backend/sources/`, benchmark seed rows, parser tests, source-quality documentation.
+  - Acceptance: ingest at least one additional stable AA evaluation page first; record source page, metric, score direction, token/cost data when present, and parser degradation as source-run errors rather than failing unrelated updates.
+  - Validation: fixture-backed parser tests; selected temp-database update for the new AA benchmark; `python -m backend update --benchmarks <new-aa-benchmark>` on a temp database when network access is appropriate; `make docs-check`.
+
+- [ ] LBM-023: P2 Expand SWE-bench coverage beyond Verified while preserving scaffold metadata
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: the current SWE-bench adapter only imports the Verified board and collapses harness/scaffold effects into a model score, while official SWE-bench surfaces include other splits such as Lite, Full, Multilingual, and Multimodal.
+  - Scope: `backend/sources/swebench.py`, benchmark seed rows, raw metadata persistence, ranking weights if additional SWE-bench splits are consumed, docs.
+  - Acceptance: ingest one or more official additional splits with split IDs; preserve submitter, scaffold, agent, date, and single-model policy metadata; keep current Verified behavior stable.
+  - Validation: fixture-backed split parsing tests; best-submission selection tests; `python -m unittest backend.test_source_spot_checks`; `make docs-check`.
+
+- [ ] LBM-025: P1 Add a LiveBench source adapter
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: LiveBench is designed for contamination-resistant, objectively scored public evaluation with newer/monthly question releases, but the catalog has no LiveBench signal for general reasoning, math, coding, data analysis, language, or instruction-following.
+  - Scope: `backend/sources/livebench.py`, benchmark seed rows, name resolution fixtures, source-run/raw-record tests, docs.
+  - Acceptance: import LiveBench category-level scores first; include release/version metadata and source URLs; optionally add task-level subscores only after category ingestion is stable.
+  - Validation: fixture-backed parser tests; temp-database selected update; ranking coverage check for affected use cases; `make docs-check`.
+
+- [ ] LBM-026: P1 Add a Berkeley Function Calling Leaderboard source adapter
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: the catalog lacks a function-calling/tool-use benchmark even though BFCL is a public executable benchmark for function invocation, multi-turn, and multi-step tool-use behavior.
+  - Scope: `backend/sources/bfcl.py`, benchmark seed rows for function-calling categories, source metadata/trust labels, docs/tests.
+  - Acceptance: ingest model scores with category, multi-turn/multi-step, executable/static, and source-release metadata; keep BFCL distinct from broader agentic benchmarks such as Terminal-Bench.
+  - Validation: parser tests from stable public artifacts; temp-database selected update; ranking tests for agentic/workflow use cases; `make docs-check`.
+
+- [ ] LBM-027: P1 Add a LiveCodeBench source adapter
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: coding rankings currently depend heavily on SWE-bench, Terminal-Bench, and Artificial Analysis aggregate intelligence, but not a contamination-resistant coding benchmark focused on fresh competition problems, self-repair, and execution.
+  - Scope: `backend/sources/livecodebench.py`, benchmark seed rows, coding use-case weights, source-quality docs/tests.
+  - Acceptance: ingest score plus variant metadata such as pass@1, easy/medium/hard, self-repair/execution dimensions when available, release window, and source URL.
+  - Validation: fixture-backed parser tests; temp-database selected update; coding ranking regression tests; `make docs-check`.
+
+- [ ] LBM-028: P2 Add a BigCodeBench source adapter
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: the catalog has limited pure code-generation evidence beyond agent/harness-driven coding boards; BigCodeBench provides practical programming tasks with Hard/Full and Complete/Instruct variants.
+  - Scope: `backend/sources/bigcodebench.py`, benchmark seed rows for variant scores, parser fixtures, docs/tests.
+  - Acceptance: ingest BigCodeBench scores without collapsing Hard/Full and Complete/Instruct variants into one opaque score; record recommendation/size/view metadata when available.
+  - Validation: fixture-backed parser tests; temp-database selected update; coding ranking regression tests; `make docs-check`.
+
+- [ ] LBM-029: P2 Add a HELM published-leaderboard snapshot adapter
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: HELM provides transparent and reproducible capability, safety, and vision-language leaderboards that can triangulate general, safety, instruction-following, and multimodal decisions, but the repo has no HELM import path.
+  - Scope: `backend/sources/helm.py`, benchmark seed rows for selected HELM surfaces, release/version metadata, docs/tests.
+  - Acceptance: import published snapshots with explicit HELM release/version and maintenance/freshness metadata; treat HELM as triangulation rather than the freshest primary signal.
+  - Validation: fixture-backed snapshot parsing tests; selected update against a stable snapshot; docs note HELM maintenance-mode caveat; `make docs-check`.
+
+- [ ] LBM-030: P2 Add a tau-bench result ingest lane
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: enterprise support/workflow rankings lack realistic customer-service, tool-policy, knowledge/RAG, and voice-agent evaluation signals from tau2/tau3-bench domains.
+  - Scope: a tau-bench adapter or local-result import module, benchmark seed rows, result schema for domain/mode/task metadata, docs/tests.
+  - Acceptance: support ingesting public leaderboard data if stable, or local tau-bench result artifacts if the public leaderboard is not machine-readable; preserve domain, mode, policy/tool, user-simulator, and run metadata.
+  - Validation: fixture-backed result import tests; schema validation for local result artifacts; ranking tests for customer-support/workflow use cases; `make docs-check`.
+
+- [ ] LBM-031: P2 Add a RAGTruth direct evidence adapter or local-result import
+  - Source: Data ingest source map 2026-07-01, new source adapter.
+  - Problem: current RAG evidence uses Vectara and FaithJudge aggregates, but RAGTruth has direct word-level hallucination annotations across QA, data-to-text, and summarization that could improve RAG and document-operation suitability decisions.
+  - Scope: `backend/sources/ragtruth.py` or local-result import module, benchmark seed rows for task-level hallucination metrics, docs/tests.
+  - Acceptance: ingest only curated published model results unless a local evaluation harness is explicitly added; preserve task type, label granularity, split, and source-response metadata.
+  - Validation: fixture-backed parser/import tests; RAG ranking regression tests; source-quality docs; `make docs-check`.
+
+- [ ] LBM-032: P3 Add MTEB retrieval/reranking support after model taxonomy can distinguish generator vs embedding models
+  - Source: Data ingest source map 2026-07-01, conditional new source adapter.
+  - Problem: MTEB is relevant for embedding and reranking model selection, especially RAG retrieval sorting and document operations, but the current catalog is primarily generator-model oriented.
+  - Scope: model taxonomy changes for embedding/reranking model kinds, `backend/sources/mteb.py`, retrieval/reranking benchmark seed rows, export/ranking docs/tests.
+  - Acceptance: do not ingest MTEB into the current generator ranking model until schema and taxonomy explicitly represent non-generator models; once supported, import task/category scores with language/task metadata.
+  - Validation: taxonomy tests; fixture-backed MTEB import tests; export tests showing generator and embedding/reranking models are not mixed incorrectly; `make docs-check`.
+
 ## Done
+
+- [x] LBM-024: P1 Expose source freshness and degraded-source status in model exports
+  - Source: Data ingest source map 2026-07-01, existing-source win.
+  - Problem: update logs and source runs already know source failures, stale data, and nonfatal OpenRouter market warnings, but `list-models` does not expose enough freshness/degradation context for downstream review.
+  - Scope: `backend/update_engine.py`, `backend/catalog_export.py`, API response models if needed, export docs/tests.
+  - Acceptance: each exported model or source summary can show latest successful source collection, latest failure/degraded warning, and whether a score or metadata field is stale or missing because a source failed.
+  - Validation: unit tests using synthetic update logs/source runs; `python -m backend list-models --format json --no-csv`; catalog export tests; `make docs-check`.
+  - Completed: 2026-07-01. Model exports now include `source_freshness` entries for active benchmark sources with latest source status, success/failure timestamps, stale/missing-source-failed flags, and model evidence timestamps.
 
 - [x] LBM-005: P2 Turn model-card audit gaps into a governed quality gate
   - Source: Codex repo review 2026-07-01.

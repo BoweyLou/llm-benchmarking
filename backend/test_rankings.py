@@ -171,6 +171,33 @@ class RankingTests(unittest.TestCase):
                 ],
             )
 
+    def add_source_run(
+        self,
+        source_name: str,
+        benchmark_id: str,
+        *,
+        status: str = "completed",
+        started_at: str = "2026-04-08T00:00:00Z",
+        completed_at: str | None = "2026-04-08T00:01:00Z",
+        records_found: int = 1,
+        error_message: str | None = None,
+    ) -> int:
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                source_runs_table.insert().values(
+                    update_log_id=None,
+                    source_name=source_name,
+                    benchmark_id=benchmark_id,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    status=status,
+                    records_found=records_found,
+                    error_message=error_message,
+                    details_json=None,
+                )
+            )
+            return int(result.inserted_primary_key[0])
+
     def ranking_for(self, use_case_id: str, model_name: str) -> dict:
         rankings = update_engine.get_rankings(use_case_id)
         self.assertIsNotNone(rankings)
@@ -1003,6 +1030,66 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(warning["severity"], "warning")
         self.assertTrue(warning["nonfatal"])
         self.assertIn("rankingData", warning["error_message"])
+
+    def test_list_models_exposes_stale_source_freshness_after_failed_run(self) -> None:
+        self.add_model("acme-model", "Acme Model", provider="Acme")
+        self.add_score("acme-model", "chatbot_arena", 1234.0, collected_at="2026-04-08T00:00:00Z")
+        self.add_source_run(
+            "chatbot_arena",
+            "chatbot_arena",
+            status="completed",
+            started_at="2026-04-08T00:00:00Z",
+            completed_at="2026-04-08T00:01:00Z",
+            records_found=1,
+        )
+        self.add_source_run(
+            "chatbot_arena",
+            "chatbot_arena",
+            status="failed",
+            started_at="2026-04-09T00:00:00Z",
+            completed_at="2026-04-09T00:01:00Z",
+            records_found=0,
+            error_message="upstream changed shape",
+        )
+
+        models = update_engine.list_models()
+        model = next(model for model in models if model["id"] == "acme-model")
+        source = next(entry for entry in model["source_freshness"] if entry["source_name"] == "chatbot_arena")
+
+        self.assertEqual(source["source_label"], "Chatbot Arena")
+        self.assertEqual(source["latest_source_status"], "failed")
+        self.assertEqual(source["latest_success_at"], "2026-04-08T00:01:00Z")
+        self.assertEqual(source["latest_failure_at"], "2026-04-09T00:01:00Z")
+        self.assertEqual(source["latest_error"], "upstream changed shape")
+        self.assertEqual(source["latest_model_score_at"], "2026-04-08T00:00:00Z")
+        self.assertEqual(source["model_evidence_status"], "stale")
+        self.assertTrue(source["has_model_score"])
+        self.assertTrue(source["degraded"])
+        self.assertTrue(source["stale"])
+        self.assertFalse(source["missing_because_source_failed"])
+
+    def test_list_models_marks_missing_score_when_latest_source_failed(self) -> None:
+        self.add_model("acme-model", "Acme Model", provider="Acme")
+        self.add_source_run(
+            "ifeval",
+            "ifeval",
+            status="failed",
+            started_at="2026-04-09T00:00:00Z",
+            completed_at="2026-04-09T00:01:00Z",
+            records_found=0,
+            error_message="rate limited",
+        )
+
+        models = update_engine.list_models()
+        model = next(model for model in models if model["id"] == "acme-model")
+        source = next(entry for entry in model["source_freshness"] if entry["source_name"] == "ifeval")
+
+        self.assertEqual(source["latest_source_status"], "failed")
+        self.assertEqual(source["model_evidence_status"], "missing_source_failed")
+        self.assertFalse(source["has_model_score"])
+        self.assertTrue(source["degraded"])
+        self.assertFalse(source["stale"])
+        self.assertTrue(source["missing_because_source_failed"])
 
     def test_refresh_openrouter_model_metadata_persists_created_timestamp_and_alias_match(self) -> None:
         self.add_model("nova-pro", "Nova Pro", provider="Amazon")

@@ -111,6 +111,14 @@ Fresh SQLite databases are initialized from the current schema in [backend/datab
 
 ## Current Data Sources
 
+For a detailed source-by-source data-flow diagram, source inventory, and
+recommended ingest gaps, see [docs/data-ingest-map.md](docs/data-ingest-map.md).
+
+Model exports include a `source_freshness` list for each active benchmark source.
+Each entry reports the latest source-run status, latest success/failure
+timestamps, model evidence timestamps, and whether the model's evidence is
+current, stale, missing, or missing because the source failed.
+
 Benchmark adapters:
 
 - Artificial Analysis

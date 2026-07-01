@@ -644,6 +644,7 @@ def list_models() -> list[dict[str, Any]]:
     bootstrap()
     benchmarks = list_benchmarks()
     benchmark_ids = [benchmark["id"] for benchmark in benchmarks]
+    benchmark_source_ids = _benchmark_source_ids(benchmarks)
     latest_scores = _load_latest_scores()
 
     with get_connection(ENGINE) as conn:
@@ -662,6 +663,12 @@ def list_models() -> list[dict[str, Any]]:
         inference_approvals_by_model_id = _load_model_use_case_inference_approvals(conn, model_ids)
         inference_rows_by_model = load_synced_inference_catalog(conn, model_ids)
         authoritative_destination_ids = load_authoritative_destination_ids(conn)
+        source_freshness_by_model_id = _load_source_freshness_by_model_id(
+            conn,
+            model_ids,
+            benchmark_source_ids=benchmark_source_ids,
+            latest_scores=latest_scores,
+        )
 
     providers_by_id = {str(row["id"]): _serialize_provider(row) for row in provider_rows}
     providers_by_name = {
@@ -678,6 +685,7 @@ def list_models() -> list[dict[str, Any]]:
             use_case_approvals=approvals_by_model_id.get(str(row["id"]), {}),
             inference_route_approvals=inference_approvals_by_model_id.get(str(row["id"]), {}),
         )
+        model["source_freshness"] = source_freshness_by_model_id.get(str(row["id"]), [])
         model = attach_inference_catalog(
             model,
             synced_destinations=inference_rows_by_model.get(model["id"]),
@@ -692,6 +700,197 @@ def list_models() -> list[dict[str, Any]]:
         }
         payload.append(model)
     return payload
+
+
+def _benchmark_source_ids(benchmarks: list[dict[str, Any]]) -> dict[str, str]:
+    source_id_by_scraper = {
+        adapter.__class__.__name__: adapter.source_id
+        for adapter in get_source_adapters(include_phase_two=True)
+    }
+    payload: dict[str, str] = {}
+    for benchmark in benchmarks:
+        benchmark_id = str(benchmark.get("id") or "").strip()
+        scraper_id = str(benchmark.get("scraper_id") or "").strip()
+        source_id = source_id_by_scraper.get(scraper_id)
+        if benchmark_id and source_id:
+            payload[benchmark_id] = source_id
+    return payload
+
+
+def _load_source_freshness_by_model_id(
+    conn,
+    model_ids: list[str],
+    *,
+    benchmark_source_ids: dict[str, str],
+    latest_scores: dict[tuple[str, str], dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    if not model_ids:
+        return {}
+
+    source_benchmark_ids: dict[str, set[str]] = {}
+    for benchmark_id, source_name in benchmark_source_ids.items():
+        source_benchmark_ids.setdefault(source_name, set()).add(benchmark_id)
+    source_names = sorted(source_benchmark_ids)
+
+    source_runs = fetch_all(
+        conn,
+        select(source_runs_table).where(source_runs_table.c.source_name.in_(source_names)),
+    ) if source_names else []
+    latest_attempt_by_source: dict[str, dict[str, Any]] = {}
+    latest_success_by_source: dict[str, dict[str, Any]] = {}
+    latest_failure_by_source: dict[str, dict[str, Any]] = {}
+    for row in source_runs:
+        source_name = str(row.get("source_name") or "").strip()
+        if not source_name:
+            continue
+        if _source_run_is_newer(row, latest_attempt_by_source.get(source_name)):
+            latest_attempt_by_source[source_name] = row
+        status = str(row.get("status") or "").strip()
+        if status == "completed" and _source_run_is_newer(row, latest_success_by_source.get(source_name)):
+            latest_success_by_source[source_name] = row
+        if status == "failed" and _source_run_is_newer(row, latest_failure_by_source.get(source_name)):
+            latest_failure_by_source[source_name] = row
+
+    score_data: dict[str, dict[str, dict[str, Any]]] = {model_id: {} for model_id in model_ids}
+    for (model_id, benchmark_id), score in latest_scores.items():
+        model_id = str(model_id)
+        source_name = benchmark_source_ids.get(str(benchmark_id))
+        if model_id not in score_data or source_name is None:
+            continue
+        current = score_data[model_id].setdefault(
+            source_name,
+            {"benchmark_ids": set(), "latest_model_score_at": None},
+        )
+        current["benchmark_ids"].add(str(benchmark_id))
+        collected_at = str(score.get("collected_at") or "")
+        if collected_at and collected_at > str(current.get("latest_model_score_at") or ""):
+            current["latest_model_score_at"] = collected_at
+
+    raw_data: dict[str, dict[str, dict[str, Any]]] = {model_id: {} for model_id in model_ids}
+    raw_join = raw_source_records_table.join(
+        source_runs_table,
+        raw_source_records_table.c.source_run_id == source_runs_table.c.id,
+    )
+    raw_rows = fetch_all(
+        conn,
+        select(
+            raw_source_records_table.c.normalized_model_id,
+            raw_source_records_table.c.benchmark_id,
+            raw_source_records_table.c.collected_at,
+            source_runs_table.c.source_name,
+        )
+        .select_from(raw_join)
+        .where(raw_source_records_table.c.normalized_model_id.in_(model_ids)),
+    )
+    for row in raw_rows:
+        model_id = str(row.get("normalized_model_id") or "").strip()
+        source_name = str(row.get("source_name") or "").strip()
+        benchmark_id = str(row.get("benchmark_id") or "").strip()
+        if model_id not in raw_data or source_name not in source_benchmark_ids:
+            continue
+        current = raw_data[model_id].setdefault(
+            source_name,
+            {"benchmark_ids": set(), "latest_model_raw_record_at": None},
+        )
+        if benchmark_id:
+            current["benchmark_ids"].add(benchmark_id)
+        collected_at = str(row.get("collected_at") or "")
+        if collected_at and collected_at > str(current.get("latest_model_raw_record_at") or ""):
+            current["latest_model_raw_record_at"] = collected_at
+
+    payload: dict[str, list[dict[str, Any]]] = {}
+    for model_id in model_ids:
+        entries = []
+        for source_name in source_names:
+            entries.append(
+                _source_freshness_entry(
+                    source_name,
+                    benchmark_ids=sorted(source_benchmark_ids.get(source_name, set())),
+                    latest_attempt=latest_attempt_by_source.get(source_name),
+                    latest_success=latest_success_by_source.get(source_name),
+                    latest_failure=latest_failure_by_source.get(source_name),
+                    score_data=score_data.get(model_id, {}).get(source_name, {}),
+                    raw_data=raw_data.get(model_id, {}).get(source_name, {}),
+                )
+            )
+        payload[model_id] = entries
+    return payload
+
+
+def _source_freshness_entry(
+    source_name: str,
+    *,
+    benchmark_ids: list[str],
+    latest_attempt: dict[str, Any] | None,
+    latest_success: dict[str, Any] | None,
+    latest_failure: dict[str, Any] | None,
+    score_data: dict[str, Any],
+    raw_data: dict[str, Any],
+) -> dict[str, Any]:
+    latest_source_status = str(latest_attempt.get("status") or "") if latest_attempt is not None else None
+    latest_attempted_at = _source_run_timestamp(latest_attempt)
+    latest_success_at = _source_run_timestamp(latest_success)
+    latest_failure_at = _source_run_timestamp(latest_failure)
+    latest_model_score_at = score_data.get("latest_model_score_at")
+    latest_model_raw_record_at = raw_data.get("latest_model_raw_record_at")
+    has_model_score = bool(score_data.get("benchmark_ids"))
+    has_model_raw_record = bool(raw_data.get("benchmark_ids"))
+    has_model_evidence = has_model_score or has_model_raw_record
+    degraded = latest_source_status == "failed"
+
+    if degraded and has_model_evidence:
+        model_evidence_status = "stale"
+    elif degraded:
+        model_evidence_status = "missing_source_failed"
+    elif latest_source_status == "running" and has_model_evidence:
+        model_evidence_status = "refreshing"
+    elif has_model_evidence:
+        model_evidence_status = "current"
+    elif latest_source_status == "completed":
+        model_evidence_status = "missing"
+    else:
+        model_evidence_status = "unknown"
+
+    return {
+        "source_name": source_name,
+        "source_label": _humanize_source_name(source_name),
+        "benchmark_ids": benchmark_ids,
+        "model_benchmark_ids": sorted(
+            set(score_data.get("benchmark_ids") or set())
+            | set(raw_data.get("benchmark_ids") or set())
+        ),
+        "latest_source_status": latest_source_status,
+        "latest_attempted_at": latest_attempted_at,
+        "latest_success_at": latest_success_at,
+        "latest_failure_at": latest_failure_at,
+        "latest_error": latest_failure.get("error_message") if latest_failure is not None else None,
+        "latest_model_score_at": latest_model_score_at,
+        "latest_model_raw_record_at": latest_model_raw_record_at,
+        "has_model_score": has_model_score,
+        "has_model_raw_record": has_model_raw_record,
+        "model_evidence_status": model_evidence_status,
+        "degraded": degraded,
+        "stale": model_evidence_status == "stale",
+        "missing_because_source_failed": model_evidence_status == "missing_source_failed",
+    }
+
+
+def _source_run_timestamp(row: dict[str, Any] | None) -> str | None:
+    if row is None:
+        return None
+    return str(row.get("completed_at") or row.get("started_at") or "") or None
+
+
+def _source_run_is_newer(row: dict[str, Any], current: dict[str, Any] | None) -> bool:
+    if current is None:
+        return True
+    return (
+        str(row.get("completed_at") or row.get("started_at") or ""),
+        int(row.get("id") or 0),
+    ) > (
+        str(current.get("completed_at") or current.get("started_at") or ""),
+        int(current.get("id") or 0),
+    )
 
 
 def list_providers() -> list[dict[str, Any]]:
@@ -5081,6 +5280,7 @@ def _model_summary(model: dict[str, Any]) -> dict[str, Any]:
         "approval_updated_at": model.get("approval_updated_at"),
         "active": bool(model.get("active", True)),
         "inference_summary": model.get("inference_summary", {}),
+        "source_freshness": list(model.get("source_freshness", []) or []),
     }
     summary.update(build_license_policy_payload(license_id, license_name))
     summary.update(
