@@ -11,9 +11,7 @@ from .base import BaseSourceAdapter, RawSourceRecord, ScoreCandidate, compact_te
 
 PATHS_URL = "https://raw.githubusercontent.com/embeddings-benchmark/results/main/paths.json"
 RAW_RESULTS_BASE_URL = "https://raw.githubusercontent.com/embeddings-benchmark/results/main/"
-MAX_MODELS = 80
 MAX_TASK_FILES_PER_MODEL = 12
-MAX_TOTAL_TASK_FILES = 500
 RETRIEVAL_TASK_NAMES = {
     "arguana",
     "climatefever",
@@ -57,8 +55,7 @@ class MtebAdapter(BaseSourceAdapter):
             raise ValueError("MTEB paths payload was not a JSON object.")
 
         raw_records: list[RawSourceRecord] = []
-        total_task_files = 0
-        for model_dir, raw_paths in list(paths_payload.items())[:MAX_MODELS]:
+        for model_dir, raw_paths in paths_payload.items():
             if not isinstance(raw_paths, list):
                 continue
             selected_paths = _selected_task_paths(raw_paths)
@@ -66,14 +63,9 @@ class MtebAdapter(BaseSourceAdapter):
                 continue
 
             for result_path in selected_paths[:MAX_TASK_FILES_PER_MODEL]:
-                if total_task_files >= MAX_TOTAL_TASK_FILES:
-                    break
                 record = await _fetch_result_record(client, model_dir, str(result_path), fetched_at)
                 if record is not None:
                     raw_records.append(record)
-                    total_task_files += 1
-            if total_task_files >= MAX_TOTAL_TASK_FILES:
-                break
 
         if not raw_records:
             raise ValueError("Could not parse any MTEB retrieval or reranking result rows.")

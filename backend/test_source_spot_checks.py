@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import unittest
@@ -34,7 +35,7 @@ from backend.sources.ifeval import IfevalAdapter
 from backend.sources.livebench import LiveBenchAdapter
 from backend.sources.livecodebench import LiveCodeBenchAdapter
 from backend.sources.mmmu import MmmuAdapter
-from backend.sources.mteb import MtebAdapter
+from backend.sources.mteb import PATHS_URL, RAW_RESULTS_BASE_URL, MtebAdapter
 from backend.sources.ragtruth import RagtruthAdapter
 from backend.sources.swebench import SwebenchAdapter
 from backend.sources.taubench import TaubenchAdapter
@@ -42,6 +43,27 @@ from backend.sources.terminal_bench import TerminalBenchAdapter
 from backend.sources.vectara_hallucination import VectaraHallucinationAdapter
 
 FUTURE_COLLECTED_AT = "2099-01-01T00:00:00Z"
+
+
+class FakeHttpResponse:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self.payload
+
+
+class FakeMtebClient:
+    def __init__(self, payloads_by_url: dict[str, dict]) -> None:
+        self.payloads_by_url = payloads_by_url
+        self.requested_urls: list[str] = []
+
+    async def get(self, url: str, timeout: float = 30.0) -> FakeHttpResponse:
+        self.requested_urls.append(url)
+        return FakeHttpResponse(self.payloads_by_url[url])
 
 
 class SourceSpotCheckTests(unittest.TestCase):
@@ -94,6 +116,40 @@ class SourceSpotCheckTests(unittest.TestCase):
                 )
             self.assertIsNotNone(row, f"Missing latest score for model={model_id} benchmark={benchmark_id}")
             return dict(row)
+
+    def test_mteb_fetch_scans_past_first_eighty_models_for_openai_embeddings(self) -> None:
+        adapter = MtebAdapter()
+        openai_result_path = "results/openai__text-embedding-3-large/1/ArguAna.json"
+        paths_payload = {
+            f"placeholder__model-{index:03d}": [
+                f"results/placeholder__model-{index:03d}/rev/STSBenchmark.json",
+            ]
+            for index in range(80)
+        }
+        paths_payload["openai__text-embedding-3-large"] = [openai_result_path]
+        result_url = f"{RAW_RESULTS_BASE_URL}{openai_result_path}"
+        client = FakeMtebClient(
+            {
+                PATHS_URL: paths_payload,
+                result_url: {
+                    "task_name": "ArguAna",
+                    "scores": {
+                        "test": [
+                            {
+                                "main_score": 0.55321,
+                                "languages": ["eng-Latn"],
+                            }
+                        ]
+                    },
+                },
+            }
+        )
+
+        raw_records = asyncio.run(adapter.fetch_raw(client))
+
+        self.assertEqual([record.raw_model_name for record in raw_records], ["openai/text-embedding-3-large"])
+        self.assertEqual(raw_records[0].metadata["model_roles"], ["embedding"])
+        self.assertIn(result_url, client.requested_urls)
 
     def test_mteb_spot_check_persists_embedding_and_reranker_scores(self) -> None:
         adapter = MtebAdapter()

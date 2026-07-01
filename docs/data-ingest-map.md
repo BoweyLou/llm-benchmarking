@@ -152,7 +152,7 @@ flowchart LR
 | LiveBench | `LiveBenchAdapter` | Official static leaderboard overall and category scores with release and task-score metadata. | Task-level LiveBench scores remain raw metadata until category ingestion is stable in production. |
 | LiveCodeBench | `LiveCodeBenchAdapter` | Code-generation Pass@1 for the default window plus difficulty, platform, release-window, and contamination metadata. | Contamination flags should be inspected before using the score as a sole coding signal. |
 | MMMU | `MmmuAdapter` | Validation overall plus stable test and MMMU-Pro companion metrics; human/random baselines are skipped. | Use validation overall as the continuity anchor; companion rows add coverage. |
-| MTEB | `MtebAdapter` | Retrieval, reranking, and blended retrieval/reranking averages from official per-task result files, with task, revision, language, and role metadata. | Used only for embedding/reranker model-role rankings; generator use cases remain separated. |
+| MTEB | `MtebAdapter` | Retrieval, reranking, and blended retrieval/reranking averages from official per-task result files, with task, revision, language, and role metadata. The adapter scans every model directory in upstream `paths.json` and samples task files per model instead of capping the source by model order. | Used only for embedding/reranker model-role rankings; generator use cases remain separated. |
 | RAGTruth | `RagtruthAdapter` | Overall and task-level hallucination rates for published held-out corpus evidence. | Historical corpus evidence; lower is better. |
 | SWE-bench | `SwebenchAdapter` | Verified best single-model submission plus Lite, Full, Multilingual, and Multimodal companion split scores; submitter/scaffold metadata is preserved. | Harness and scaffold effects still require review when interpreting scores. |
 | tau-bench | `TaubenchAdapter` | Standard text and voice domain Pass^1 scores with domain, mode, retrieval, and submission metadata. | Custom or aggregate systems are skipped for model score rows. |
@@ -203,7 +203,9 @@ model rankings. The `models.model_roles_json` schema field and serialized
 `model_roles` API/export field distinguish `generator`, `embedding`,
 `reranker`, and future `multimodal_embedding` roles. Generator use cases default
 to `["generator"]`; the new `retrieval_embeddings` and `retrieval_reranking`
-use cases rank only embedding or reranker models.
+use cases rank only embedding or reranker models. MTEB model coverage is not
+limited by upstream `paths.json` ordering, so later-listed providers such as
+OpenAI embeddings remain eligible for import.
 
 ## Source Evidence Checked
 
