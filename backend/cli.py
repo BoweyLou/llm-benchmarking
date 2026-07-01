@@ -11,6 +11,13 @@ from .inference_sync import sync_inference_catalog
 from .model_card_audit import build_model_card_audit_summary, format_model_card_audit_summary
 from .model_curation import MODEL_CURATION_BASELINE_PATH, export_model_curation_baseline
 from .model_licenses import MODEL_LICENSE_BASELINE_PATH
+from .recommendation_engine import (
+    PROFILE_AUSTRALIAN_BANK,
+    SUPPORTED_PROFILES,
+    build_recommendation_audit,
+    format_recommendation_audit_summary,
+    sync_recommendation_proposals,
+)
 from .seed_data import PROVIDER_ORIGIN_BASELINE_PATH, export_provider_origin_baseline
 from .update_engine import (
     bootstrap,
@@ -106,6 +113,52 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the audit summary as JSON.",
     )
     model_card_audit_parser.set_defaults(func=cmd_model_card_audit)
+
+    recommendation_audit_parser = subparsers.add_parser(
+        "recommendation-audit",
+        help="Generate recommendation proposals without writing them to the database.",
+    )
+    recommendation_audit_parser.add_argument(
+        "--profile",
+        default=PROFILE_AUSTRALIAN_BANK,
+        choices=sorted(SUPPORTED_PROFILES),
+        help=f"Recommendation policy profile. Defaults to {PROFILE_AUSTRALIAN_BANK}.",
+    )
+    recommendation_audit_parser.add_argument(
+        "--use-case",
+        dest="use_cases",
+        action="append",
+        help="Limit the audit to one use-case id. Repeat for multiple use cases.",
+    )
+    recommendation_audit_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the full proposal audit as JSON.",
+    )
+    recommendation_audit_parser.set_defaults(func=cmd_recommendation_audit)
+
+    recommendation_sync_parser = subparsers.add_parser(
+        "recommendation-sync",
+        help="Generate and persist recommendation proposals for the current model catalog.",
+    )
+    recommendation_sync_parser.add_argument(
+        "--profile",
+        default=PROFILE_AUSTRALIAN_BANK,
+        choices=sorted(SUPPORTED_PROFILES),
+        help=f"Recommendation policy profile. Defaults to {PROFILE_AUSTRALIAN_BANK}.",
+    )
+    recommendation_sync_parser.add_argument(
+        "--use-case",
+        dest="use_cases",
+        action="append",
+        help="Limit the sync to one use-case id. Repeat for multiple use cases.",
+    )
+    recommendation_sync_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the persisted summary as JSON.",
+    )
+    recommendation_sync_parser.set_defaults(func=cmd_recommendation_sync)
 
     model_license_parser = subparsers.add_parser(
         "model-license-sync",
@@ -217,6 +270,25 @@ def cmd_model_card_audit(args: argparse.Namespace) -> int:
         print(json.dumps(summary, indent=2, sort_keys=True))
     else:
         print(format_model_card_audit_summary(summary))
+    return 0
+
+
+def cmd_recommendation_audit(args: argparse.Namespace) -> int:
+    summary = build_recommendation_audit(profile_id=args.profile, use_case_ids=args.use_cases)
+    if args.json:
+        print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+    else:
+        print(format_recommendation_audit_summary(summary), end="")
+    return 0
+
+
+def cmd_recommendation_sync(args: argparse.Namespace) -> int:
+    summary = sync_recommendation_proposals(profile_id=args.profile, use_case_ids=args.use_cases)
+    if args.json:
+        print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+    else:
+        print(format_recommendation_audit_summary(summary), end="")
+        print(f"Stored proposal rows: {summary.get('stored_count', 0)}")
     return 0
 
 
