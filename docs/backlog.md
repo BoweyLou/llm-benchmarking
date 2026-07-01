@@ -14,13 +14,6 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: `AGENTS.md` becomes a shorter route map; detailed rules move to scoped docs or checker-owned config; rule-like bullets have clear provenance/context.
   - Validation: `make agent-docs-lint`; `make docs-check`.
 
-- [ ] LBM-012: P2 Print captured inference-sync smoke output on failure
-  - Source: Codex update-script test 2026-07-01.
-  - Problem: `scripts/test_inference_sync_smoke.sh` redirects CLI output to a temp JSON file, but `set -e` exits before printing the captured payload when the CLI returns nonzero.
-  - Scope: `scripts/test_inference_sync_smoke.sh`.
-  - Acceptance: when the inference-sync CLI fails, the smoke script prints the captured JSON or stderr/stdout diagnostic plus the exit code before exiting nonzero; successful runs keep the current concise JSON report.
-  - Validation: a failing destination run such as `PYTHON=python ./scripts/test_inference_sync_smoke.sh azure-ai-foundry` prints the destination failure reason; the AWS/Google subset still exits 0 and prints valid JSON.
-
 - [ ] LBM-014: P2 Treat Azure pricing 429 as a retryable smoke-test skip
   - Source: Codex update-script test 2026-07-01.
   - Problem: Azure AI Foundry public pricing returned HTTP 429 during `inference-sync`, causing the all-destination smoke script to fail even though AWS Bedrock pricing-only and Google Vertex published-endpoints fallbacks completed.
@@ -61,6 +54,14 @@ the row is older than 14 days or the backend/API shape has changed.
   - Acceptance: area contracts cover backend source/tests, scripts, schemas, `.codex/prompts`, `.doc-contract-kit`, GitHub workflow files, and root project metadata; repo goal is specific to LLM Benchmarking.
   - Validation: `make goal-check` reports no unknown paths for the current baseline or documents intentional exceptions.
   - Completed: 2026-07-01. The repo goal now names the LLM benchmarking workspace, and area contracts cover all 185 tracked baseline files with zero unknown paths in a tracked-file goal-check audit.
+
+- [x] LBM-012: P2 Print captured inference-sync smoke output on failure
+  - Source: Codex update-script test 2026-07-01.
+  - Problem: `scripts/test_inference_sync_smoke.sh` redirects CLI output to a temp JSON file, but `set -e` exits before printing the captured payload when the CLI returns nonzero.
+  - Scope: `scripts/test_inference_sync_smoke.sh`.
+  - Acceptance: when the inference-sync CLI fails, the smoke script prints the captured JSON or stderr/stdout diagnostic plus the exit code before exiting nonzero; successful runs keep the current concise JSON report.
+  - Validation: a failing destination run such as `PYTHON=python ./scripts/test_inference_sync_smoke.sh azure-ai-foundry` prints the destination failure reason; the AWS/Google subset still exits 0 and prints valid JSON.
+  - Completed: 2026-07-01. The smoke script now captures stdout/stderr around the CLI, prints diagnostics with the exit code on command failure, and prints the sync JSON payload when validation fails.
 
 - [x] LBM-001: P1 Split startup bootstrap from live metadata refresh
   - Source: Codex repo review 2026-07-01.

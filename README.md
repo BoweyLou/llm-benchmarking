@@ -210,4 +210,8 @@ PYTHON=python ./scripts/test_inference_sync_smoke.sh aws-bedrock
 PYTHON=python ./scripts/test_inference_sync_smoke.sh azure-ai-foundry google-vertex-ai
 ```
 
+If `inference-sync` exits nonzero, the smoke script prints the captured stdout,
+stderr, and exit code before failing. If JSON validation fails after a command
+completes, it prints the captured sync payload with the failing reason.
+
 `aws-bedrock` can run in pricing-only mode without credentials. `azure-ai-foundry` has a public-pricing-only fallback without credentials. `google-vertex-ai` has a published-endpoints-only fallback without credentials.

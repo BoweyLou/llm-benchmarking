@@ -39,14 +39,31 @@ fi
 
 TMP_DIR="$(mktemp -d)"
 OUTPUT_JSON="$TMP_DIR/inference-sync.json"
+OUTPUT_STDERR="$TMP_DIR/inference-sync.stderr"
 cleanup() {
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
 
+set +e
 DATABASE_URL="sqlite:///$TMP_DIR/test.sqlite" \
 AWS_BEDROCK_REGIONS="${AWS_BEDROCK_REGIONS:-us-east-1}" \
-"$PYTHON_BIN" -m backend.cli inference-sync --destinations "${DESTINATIONS[@]}" >"$OUTPUT_JSON"
+"$PYTHON_BIN" -m backend.cli inference-sync --destinations "${DESTINATIONS[@]}" >"$OUTPUT_JSON" 2>"$OUTPUT_STDERR"
+CLI_STATUS=$?
+set -e
+
+if [[ "$CLI_STATUS" -ne 0 ]]; then
+  echo "inference-sync command failed with exit code $CLI_STATUS" >&2
+  if [[ -s "$OUTPUT_JSON" ]]; then
+    echo "Captured stdout:" >&2
+    cat "$OUTPUT_JSON" >&2
+  fi
+  if [[ -s "$OUTPUT_STDERR" ]]; then
+    echo "Captured stderr:" >&2
+    cat "$OUTPUT_STDERR" >&2
+  fi
+  exit "$CLI_STATUS"
+fi
 
 "$PYTHON_BIN" - "$OUTPUT_JSON" "${DESTINATIONS[@]}" <<'PY'
 from __future__ import annotations
@@ -59,9 +76,15 @@ payload = json.loads(Path(sys.argv[1]).read_text())
 expected = sys.argv[2:]
 destinations = payload.get("destinations", {})
 
+def fail(message: str) -> None:
+    print(message, file=sys.stderr)
+    print("Captured inference-sync payload:", file=sys.stderr)
+    print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
+    raise SystemExit(1)
+
 missing = [destination for destination in expected if destination not in destinations]
 if missing:
-    raise SystemExit(f"Missing sync results for: {', '.join(missing)}")
+    fail(f"Missing sync results for: {', '.join(missing)}")
 
 failed = [
     f"{destination}: {destinations[destination].get('reason', 'unknown failure')}"
@@ -69,7 +92,7 @@ failed = [
     if destinations[destination].get("status") == "failed"
 ]
 if failed:
-    raise SystemExit("Inference sync smoke test failed: " + "; ".join(failed))
+    fail("Inference sync smoke test failed: " + "; ".join(failed))
 
 invalid = [
     f"{destination}: {destinations[destination].get('status')}"
@@ -77,7 +100,7 @@ invalid = [
     if destinations[destination].get("status") not in {"completed", "skipped"}
 ]
 if invalid:
-    raise SystemExit("Unexpected sync status: " + "; ".join(invalid))
+    fail("Unexpected sync status: " + "; ".join(invalid))
 
 print(json.dumps(payload, indent=2, sort_keys=True))
 PY
