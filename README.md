@@ -230,6 +230,14 @@ Use `Reject model` to clear model-level approval in bulk. Use `Not approved use
 case` to clear approval for the active use case. Use `Clear rating` only when you
 want to reset the manual recommendation rating to `unrated` while leaving
 approval state unchanged.
+The bulk bar also shows policy suggestions computed from the currently filtered
+catalog. `Trusted provider approval` targets OpenAI, Anthropic, Google, and
+Google DeepMind rows that are not deprecated or stale, then saves general model
+approval plus active-use-case approval and a manual `recommended` rating.
+`Stale trusted versions` groups those trusted-provider rows by family, keeps the
+latest plus two previous parsed numeric versions, and suggests older tracked
+rows for `deprecated` catalog status. Use `Select` on a suggestion when you want
+to inspect the exact rows before applying it.
 
 To run the workbench on the Proxmox tailnet host, use the deploy script:
 

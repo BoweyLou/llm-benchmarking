@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-059: P1 Add suggested bulk review policy actions
+  - Source: Human request 2026-07-03 while using the banking review workbench.
+  - Problem: reviewers had bulk write controls but still had to manually infer repeatable policy passes such as trusted-provider approval and stale-version deprecation.
+  - Scope: add UI-computed suggested bulk actions for OpenAI, Anthropic, Google, and Google DeepMind rows; approve/recommend trusted non-stale rows for the active use case; group trusted-provider rows by family and suggest deprecation for rows older than the latest plus two previous parsed numeric versions.
+  - Acceptance: `/review` exposes selectable/applicable policy suggestions, suggestions operate on exact model IDs from the current filtered catalog, trusted approval writes through the existing model-approval and decision APIs, and stale-version deprecation writes the existing catalog-status API.
+  - Validation: static review workbench coverage, inline script parse, focused review-workbench tests, docs/version checks.
+  - Completed: 2026-07-03. Policy-suggested bulk actions are available in the review workbench bulk bar.
+
 - [x] LBM-058: P2 Add role-aware benchmark rankings to review workbench
   - Source: Human approval 2026-07-02 after planning benchmark ranking views for generative, embedding, and reranker models.
   - Problem: reviewers needed benchmark rankings somewhere in the interactive workbench, but a single mixed leaderboard would incorrectly compare embeddings, rerankers, and generative models.

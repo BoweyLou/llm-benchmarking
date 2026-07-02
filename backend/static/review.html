@@ -422,6 +422,38 @@
       font-size: 12px;
     }
 
+    .policy-suggestions {
+      display: grid;
+      gap: 8px;
+      padding: 10px 12px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .suggestion-row {
+      display: grid;
+      grid-template-columns: minmax(230px, 1fr) auto auto;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .suggestion-main {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .suggestion-title {
+      font-weight: 720;
+      color: var(--text);
+    }
+
+    .suggestion-meta {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
     .rankings-toolbar {
       display: grid;
       grid-template-columns: minmax(240px, 1fr) minmax(220px, 1fr) auto;
@@ -1106,6 +1138,14 @@
         margin: 8px 10px;
       }
 
+      .suggestion-row {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .suggestion-main {
+        grid-column: 1 / -1;
+      }
+
       .meta-grid,
       .form-grid,
       .control-grid {
@@ -1311,6 +1351,7 @@
               <span id="bulkScope">Actions apply to selected rows. If none are selected, they apply to the filtered list.</span>
               <button class="linkish" id="selectFiltered">Select all filtered</button>
             </div>
+            <div class="policy-suggestions" id="policySuggestions" hidden></div>
           </div>
         </div>
         <div id="mainTable" class="table-wrap"></div>
@@ -1411,6 +1452,12 @@
       }
     };
 
+    const TRUSTED_PROVIDER_POLICY = {
+      providerNames: new Set(["openai", "anthropic", "google", "google deepmind"]),
+      providerLabel: "OpenAI, Anthropic, Google",
+      recentVersionDepth: 3
+    };
+
     const tabs = [
       ["all", "All models"],
       ["usecase", "Use-case review"],
@@ -1443,6 +1490,7 @@
       inspectorBody: document.getElementById("inspectorBody"),
       tableActions: document.getElementById("tableActions"),
       bulkbar: document.getElementById("bulkbar"),
+      policySuggestions: document.getElementById("policySuggestions"),
       modelCount: document.getElementById("modelCount"),
       selectedCount: document.getElementById("selectedCount"),
       activeUseCaseLabel: document.getElementById("activeUseCaseLabel"),
@@ -1854,6 +1902,187 @@
       });
     }
 
+    function renderPolicySuggestions(models) {
+      const suggestions = buildPolicySuggestions(models);
+      if (!suggestions.length) {
+        els.policySuggestions.hidden = true;
+        els.policySuggestions.innerHTML = "";
+        return;
+      }
+
+      els.policySuggestions.hidden = false;
+      els.policySuggestions.innerHTML = suggestions.map((suggestion) => `
+        <div class="suggestion-row">
+          <div class="suggestion-main">
+            <span class="suggestion-title">${escapeHtml(suggestion.title)} ${badge(suggestion.modelIds.length, suggestion.tone)}</span>
+            <span class="suggestion-meta">${escapeHtml(suggestion.meta)}</span>
+          </div>
+          <button class="btn small" data-policy-select="${escapeAttr(suggestion.id)}">Select</button>
+          <button class="btn small ${escapeAttr(suggestion.buttonTone)}" data-policy-apply="${escapeAttr(suggestion.id)}">${escapeHtml(suggestion.applyLabel)}</button>
+        </div>
+      `).join("");
+    }
+
+    function buildPolicySuggestions(models) {
+      const activeUseCase = useCaseForPolicyAction();
+      const staleIds = staleTrustedModelIds(models);
+      const trustedApprovalIds = models
+        .filter((model) => trustedApprovalCandidate(model, staleIds, activeUseCase.id))
+        .map((model) => model.id);
+      const staleVersionIds = models
+        .filter((model) => staleIds.has(model.id) && model.catalog_status !== "deprecated")
+        .map((model) => model.id);
+      const previousVersions = Math.max(0, TRUSTED_PROVIDER_POLICY.recentVersionDepth - 1);
+      const suggestions = [];
+      if (trustedApprovalIds.length) {
+        suggestions.push({
+          id: "trusted_provider_approval",
+          title: "Trusted provider approval",
+          meta: `${TRUSTED_PROVIDER_POLICY.providerLabel}; ${activeUseCase.label}; excludes stale and deprecated rows.`,
+          applyLabel: "Approve + rec.",
+          modelIds: trustedApprovalIds,
+          tone: "green",
+          buttonTone: "green"
+        });
+      }
+      if (staleVersionIds.length) {
+        suggestions.push({
+          id: "stale_trusted_versions",
+          title: "Stale trusted versions",
+          meta: `Older than latest plus ${previousVersions} previous parsed versions in the filtered family set.`,
+          applyLabel: "Deprecate",
+          modelIds: staleVersionIds,
+          tone: "red",
+          buttonTone: "purple"
+        });
+      }
+      return suggestions;
+    }
+
+    function useCaseForPolicyAction() {
+      const id = state.filters.useCase || state.activeUseCaseId || ((state.catalog.use_cases || [])[0] || {}).id || "";
+      const useCase = (state.catalog.use_cases || []).find((item) => item.id === id) || {};
+      return { id, label: useCase.label ? `Use case: ${useCase.label}` : "No active use case" };
+    }
+
+    function trustedApprovalCandidate(model, staleIds, useCaseId) {
+      if (!isTrustedProviderModel(model)) return false;
+      if (staleIds.has(model.id)) return false;
+      if (model.catalog_status === "deprecated") return false;
+      const approval = useCaseId ? ((model.use_case_approvals || {})[useCaseId] || {}) : {};
+      return generalApprovalStatus(model) !== "approved" ||
+        Boolean(useCaseId && !approval.approved_for_use) ||
+        Boolean(useCaseId && (approval.recommendation_status || "unrated") !== "recommended");
+    }
+
+    function staleTrustedModelIds(models) {
+      const groups = new Map();
+      models.forEach((model) => {
+        if (!isTrustedProviderModel(model) || model.catalog_status === "deprecated") return;
+        const version = parsedPolicyVersion(model);
+        if (!version) return;
+        const familyKey = policyVersionFamilyKey(model);
+        if (!groups.has(familyKey)) groups.set(familyKey, []);
+        groups.get(familyKey).push({ model, version, key: versionKey(version) });
+      });
+
+      const staleIds = new Set();
+      groups.forEach((items) => {
+        const versions = new Map();
+        items.forEach((item) => {
+          if (!versions.has(item.key)) versions.set(item.key, item.version);
+        });
+        const orderedVersionKeys = Array.from(versions.entries())
+          .sort((a, b) => compareVersionParts(b[1], a[1]))
+          .map(([key]) => key);
+        const staleVersionKeys = new Set(orderedVersionKeys.slice(TRUSTED_PROVIDER_POLICY.recentVersionDepth));
+        items.forEach((item) => {
+          if (staleVersionKeys.has(item.key)) staleIds.add(item.model.id);
+        });
+      });
+      return staleIds;
+    }
+
+    function isTrustedProviderModel(model) {
+      return Boolean(trustedProviderName(model));
+    }
+
+    function trustedProviderName(model) {
+      return providerTokensFor(model).find((token) => TRUSTED_PROVIDER_POLICY.providerNames.has(token)) || "";
+    }
+
+    function providerTokensFor(model) {
+      const tokens = new Set();
+      [model.provider, model.provider_name, model.provider_display_name].forEach((value) => {
+        const raw = String(value || "").trim();
+        const normalized = normalizePolicyToken(raw);
+        if (!normalized) return;
+        tokens.add(normalized);
+        raw.split(/\s*(?:,|\/|&|\+|\|)\s*/).forEach((part) => {
+          const token = normalizePolicyToken(part);
+          if (token) tokens.add(token);
+        });
+      });
+      return Array.from(tokens);
+    }
+
+    function parsedPolicyVersion(model) {
+      const candidates = [model.name, model.id, model.family_name, model.family_id].filter(Boolean);
+      const matches = [];
+      candidates.forEach((candidate) => {
+        const text = stripPolicyDateTokens(String(candidate));
+        const pattern = /(?:^|[^\d])(\d{1,2})(?:[.-](\d{1,2}))?(?:[.-](\d{1,2}))?(?=$|[^\d])/g;
+        let match;
+        while ((match = pattern.exec(text)) !== null) {
+          const parts = [match[1], match[2], match[3]]
+            .filter((part) => part !== undefined)
+            .map((part) => Number(part));
+          if (parts.length >= 2 && parts.every((part) => Number.isFinite(part))) {
+            matches.push(parts);
+          }
+        }
+      });
+      matches.sort((a, b) => b.length - a.length || compareVersionParts(b, a));
+      return matches[0] || null;
+    }
+
+    function policyVersionFamilyKey(model) {
+      const provider = trustedProviderName(model) || normalizePolicyToken(model.provider) || "provider";
+      const seed = model.family_id || model.family_name || model.name || model.id || "";
+      const family = stripPolicyDateTokens(String(seed))
+        .replace(/(?:^|[^\d])\d{1,2}(?:[.-]\d{1,2}){0,2}(?=$|[^\d])/g, " ")
+        .replace(/\s+/g, " ");
+      return `${provider}::${normalizePolicyToken(family) || normalizePolicyToken(seed) || "family"}`;
+    }
+
+    function stripPolicyDateTokens(value) {
+      return value
+        .replace(/\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b/g, " ")
+        .replace(/\b\d{8}\b/g, " ");
+    }
+
+    function normalizePolicyToken(value) {
+      return String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim()
+        .replace(/\s+/g, " ");
+    }
+
+    function versionKey(parts) {
+      return parts.join(".");
+    }
+
+    function compareVersionParts(a, b) {
+      const length = Math.max(a.length, b.length);
+      for (let index = 0; index < length; index += 1) {
+        const left = a[index] || 0;
+        const right = b[index] || 0;
+        if (left !== right) return left - right;
+      }
+      return 0;
+    }
+
     function render() {
       const models = filteredModels();
       renderTabs(models);
@@ -1913,6 +2142,7 @@
         : null;
       els.activeUseCaseLabel.textContent = useCase ? `Use case: ${useCase.label}` : "Use case: All";
       document.getElementById("applyFiltered").textContent = `Select all filtered (${models.length})`;
+      renderPolicySuggestions(models);
     }
 
     function renderRankingCounts(rows) {
@@ -1926,6 +2156,8 @@
       els.showingCount.textContent = `Showing ${rows.length} ranked rows`;
       els.pageLabel.textContent = rows.length ? `1-${Math.min(state.pageSize, rows.length)} of ${rows.length}` : "No ranked rows";
       document.getElementById("applyFiltered").textContent = "Select all filtered";
+      els.policySuggestions.hidden = true;
+      els.policySuggestions.innerHTML = "";
     }
 
     function renderRankingsView(rows) {
@@ -2756,6 +2988,53 @@
       await loadCatalog();
     }
 
+    async function applyPolicySuggestion(suggestionId) {
+      const suggestion = buildPolicySuggestions(filteredModels()).find((item) => item.id === suggestionId);
+      if (!suggestion || !suggestion.modelIds.length) return toast("No matching policy suggestion");
+      if (suggestion.id === "trusted_provider_approval") {
+        const useCase = useCaseForPolicyAction();
+        await request("/api/review/model-approvals", {
+          method: "POST",
+          body: JSON.stringify({
+            model_ids: suggestion.modelIds,
+            approval_status: "approved",
+            approved_for_use: true
+          })
+        });
+        if (useCase.id) {
+          await request("/api/review/decisions", {
+            method: "POST",
+            body: JSON.stringify({
+              model_ids: suggestion.modelIds,
+              use_case_ids: [useCase.id],
+              approved_for_use: true,
+              recommendation_status: "recommended"
+            })
+          });
+        }
+      } else if (suggestion.id === "stale_trusted_versions") {
+        await request("/api/review/decisions", {
+          method: "POST",
+          body: JSON.stringify({
+            model_ids: suggestion.modelIds,
+            use_case_ids: [],
+            catalog_status: "deprecated"
+          })
+        });
+      }
+      toast(`Saved ${suggestion.applyLabel.toLowerCase()} for ${suggestion.modelIds.length} models`);
+      state.selected.clear();
+      await loadCatalog();
+    }
+
+    function selectPolicySuggestion(suggestionId) {
+      const suggestion = buildPolicySuggestions(filteredModels()).find((item) => item.id === suggestionId);
+      if (!suggestion || !suggestion.modelIds.length) return toast("No matching policy suggestion");
+      state.selected = new Set(suggestion.modelIds);
+      render();
+      toast(`Selected ${suggestion.modelIds.length} suggested ${suggestion.modelIds.length === 1 ? "row" : "rows"}`);
+    }
+
     function isModelApprovalAction(action) {
       return action === "approve_model" || action === "reject_model";
     }
@@ -3293,6 +3572,17 @@
           const task = isModelApprovalAction(action) ? applyModelApproval(action) : applyBulk(action);
           task.catch((error) => toast(error.message));
         });
+      });
+      els.policySuggestions.addEventListener("click", (event) => {
+        const selectButton = event.target.closest("[data-policy-select]");
+        if (selectButton) {
+          selectPolicySuggestion(selectButton.dataset.policySelect);
+          return;
+        }
+        const applyButton = event.target.closest("[data-policy-apply]");
+        if (applyButton) {
+          applyPolicySuggestion(applyButton.dataset.policyApply).catch((error) => toast(error.message));
+        }
       });
       document.getElementById("selectFiltered").addEventListener("click", selectAllFiltered);
       els.selectAllFiltered.addEventListener("click", selectAllFiltered);
