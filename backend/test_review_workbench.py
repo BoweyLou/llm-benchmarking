@@ -52,7 +52,12 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def test_review_app_and_catalog_are_readable(self) -> None:
-        self._insert_review_model("catalog-model", family_id="provider::catalog-family")
+        self._insert_review_model(
+            "catalog-model",
+            family_id="provider::catalog-family",
+            release_date="2026-01-15",
+            release_date_confidence="high",
+        )
         self._insert_inference_destination("catalog-model", "azure-ai-foundry", "Azure AI Foundry")
 
         with patch("backend.main.bootstrap"):
@@ -77,6 +82,10 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Run updates", app_response.text)
         self.assertIn("updateProgressPanel", app_response.text)
         self.assertIn("/api/update/status/", app_response.text)
+        self.assertIn('${header("release_date", "Release")}', app_response.text)
+        self.assertIn("modelReleaseInfo", app_response.text)
+        self.assertIn("best_release_date", app_response.text)
+        self.assertNotIn('${header("approval_updated_at", "Updated")}', app_response.text)
         self.assertIn("Unreviewed", app_response.text)
         self.assertIn("general_approval_status", app_response.text)
         self.assertIn('data-inspector-tab="controls"', app_response.text)
@@ -106,6 +115,9 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertFalse(model["general_approved_for_use"])
         self.assertEqual(model["general_approval_status"], "unreviewed")
         self.assertIn("Azure AI Foundry", model["inference_summary"]["platform_names"])
+        self.assertEqual(model["release_date"], "2026-01-15")
+        self.assertEqual(model["release_date_confidence"], "high")
+        self.assertEqual(model["model_age_basis"], "release_date")
 
     def test_review_decision_route_requires_admin_token(self) -> None:
         self._insert_review_model("guard-model")
@@ -422,6 +434,8 @@ class ReviewWorkbenchTests(unittest.TestCase):
         *,
         family_id: str = "provider::review-model",
         family_name: str = "Review Model",
+        release_date: str | None = None,
+        release_date_confidence: str | None = None,
     ) -> None:
         with self.engine.begin() as conn:
             conn.execute(
@@ -438,6 +452,12 @@ class ReviewWorkbenchTests(unittest.TestCase):
                     "canonical_model_name": family_name,
                     "model_card_url": "https://example.com/model-card",
                     "model_card_verified_at": "2026-07-01T00:00:00Z",
+                    "release_date": release_date,
+                    "release_date_precision": "day" if release_date else None,
+                    "release_date_confidence": release_date_confidence,
+                    "release_date_source_name": "test-fixture" if release_date else None,
+                    "release_date_source_url": "https://example.com/release" if release_date else None,
+                    "release_date_verified_at": "2026-07-01T00:00:00Z" if release_date else None,
                     "license_id": "apache-2.0",
                     "license_name": "Apache 2.0",
                     "training_data_summary": "Reviewed public and licensed data.",

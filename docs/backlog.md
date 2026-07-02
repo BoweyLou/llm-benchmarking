@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-057: P2 Show release-date evidence in review table
+  - Source: Human request 2026-07-02 while triaging models in the banking review workbench.
+  - Problem: the model table showed use-case approval update time, but reviewers needed the release date or best available indication of model age when comparing listings.
+  - Scope: replace the table `Updated` column with a sortable `Release` column using official release date first, then proxy age dates from Hugging Face creation, OpenRouter addition, or local discovery; add matching browser CSV best-release columns; update docs and regression coverage.
+  - Acceptance: `/review` displays the best available release indicator in the table and exports the same value, basis, and confidence in browser CSV without losing raw release-date fields.
+  - Validation: static workbench coverage, JavaScript syntax check, focused review-workbench tests, rendered local browser smoke, docs/version checks, and live Proxmox redeploy.
+  - Completed: 2026-07-02. Review table rows now show release/proxy age evidence instead of approval update timestamps.
+
 - [x] LBM-056: P2 Add unreviewed general approval triage state
   - Source: Human request 2026-07-02 while triaging models in the banking review workbench.
   - Problem: the general approval field only showed approved/not-approved-style states, making it hard to distinguish explicitly rejected models from models that had not been triaged yet.

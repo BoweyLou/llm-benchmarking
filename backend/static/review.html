@@ -481,6 +481,31 @@
       text-overflow: ellipsis;
     }
 
+    .release-cell {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      line-height: 1.15;
+    }
+
+    .release-date {
+      color: #273244;
+      font-size: 12px;
+      font-weight: 680;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .release-basis {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     .linkish {
       color: var(--blue);
       text-decoration: none;
@@ -1589,6 +1614,7 @@
       if (key === "proposed") return statusFor(model).proposed;
       if (key === "approval") return statusFor(model).approved ? "approved" : "not";
       if (key === "general_approval") return generalApprovalStatus(model);
+      if (key === "release_date") return modelReleaseInfo(model).sortValue;
       return model[key] || "";
     }
 
@@ -1775,7 +1801,7 @@
             <col style="width: 76px">
             <col style="width: 74px">
             <col style="width: 54px">
-            <col style="width: 68px">
+            <col style="width: 86px">
           </colgroup>
           <thead>
             <tr>
@@ -1791,7 +1817,7 @@
               ${header("effective", "Effective")}
               ${header("approval", "Use-case")}
               <th>Controls</th>
-              ${header("approval_updated_at", "Updated")}
+              ${header("release_date", "Release")}
             </tr>
           </thead>
           <tbody>
@@ -1814,6 +1840,7 @@
       const status = statusFor(model);
       const selected = state.selected.has(model.id);
       const generalStatus = generalApprovalStatus(model);
+      const releaseInfo = modelReleaseInfo(model);
       return `<tr class="${selected ? "selected" : ""}" data-model-id="${escapeAttr(model.id)}">
         <td><input type="checkbox" class="row-select" data-model-id="${escapeAttr(model.id)}" ${selected ? "checked" : ""}></td>
         <td><div class="model-name">${escapeHtml(model.name)}</div><div class="subtle">${escapeHtml(model.id)}</div></td>
@@ -1827,7 +1854,7 @@
         <td>${compactBadge(status.effective, recommendationClass(status.effective))}</td>
         <td>${badge(status.approved ? "Approved" : "Pending", status.approved ? "green" : "orange")}</td>
         <td><span class="${status.controls ? "status-ok" : "subtle"}">${status.controls} / ${status.blockers + status.warnings + status.controls}</span></td>
-        <td><span class="subtle">${escapeHtml(formatUpdated(firstApproval(model)))}</span></td>
+        <td><div class="release-cell" title="${escapeAttr(releaseInfo.title)}"><span class="release-date">${escapeHtml(releaseInfo.label)}</span><span class="release-basis">${escapeHtml(releaseInfo.basisLabel)}</span></div></td>
       </tr>`;
     }
 
@@ -2273,7 +2300,11 @@
         ["parameter_count_b", (model) => model.parameter_count_b],
         ["active_parameter_count_b", (model) => model.active_parameter_count_b],
         ["context_window_tokens", (model) => model.context_window_tokens],
+        ["best_release_date", (model) => modelReleaseInfo(model).value],
+        ["best_release_date_basis", (model) => modelReleaseInfo(model).basis],
+        ["best_release_date_confidence", (model) => modelReleaseInfo(model).confidence],
         ["release_date", (model) => model.release_date],
+        ["release_date_precision", (model) => model.release_date_precision],
         ["release_date_confidence", (model) => model.release_date_confidence],
         ["license_id", (model) => model.license_id],
         ["license_name", (model) => model.license_name],
@@ -2423,9 +2454,96 @@
       return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
     }
 
-    function formatUpdated(approval) {
-      const value = approval && (approval.recommendation_updated_at || approval.approval_updated_at);
-      return formatDateTime(value);
+    function modelReleaseInfo(model) {
+      const candidates = [
+        {
+          basis: "release_date",
+          basisLabel: "Release",
+          value: model.release_date,
+          precision: model.release_date_precision,
+          confidence: model.release_date_confidence || (model.release_date ? "medium" : ""),
+          sourceName: model.release_date_source_name,
+          sourceUrl: model.release_date_source_url,
+          proxy: false
+        },
+        {
+          basis: "huggingface_created_at",
+          basisLabel: "HF created",
+          value: model.huggingface_created_at,
+          precision: "day",
+          confidence: model.model_age_basis === "huggingface_created_at" ? model.model_age_confidence : "low",
+          sourceName: "huggingface",
+          sourceUrl: model.huggingface_repo_id ? `https://huggingface.co/${model.huggingface_repo_id}` : model.model_age_source_url,
+          proxy: true
+        },
+        {
+          basis: "openrouter_added_at",
+          basisLabel: "OR added",
+          value: model.openrouter_added_at,
+          precision: "day",
+          confidence: model.model_age_basis === "openrouter_added_at" ? model.model_age_confidence : "low",
+          sourceName: "openrouter",
+          sourceUrl: model.model_age_basis === "openrouter_added_at" ? model.model_age_source_url : "",
+          proxy: true
+        },
+        {
+          basis: "discovered_at",
+          basisLabel: "Discovered",
+          value: model.discovered_at,
+          precision: "day",
+          confidence: model.model_age_basis === "discovered_at" ? model.model_age_confidence : "low",
+          sourceName: model.model_age_basis === "discovered_at" ? model.model_age_source_name : model.metadata_source_name,
+          sourceUrl: model.model_age_basis === "discovered_at" ? model.model_age_source_url : model.metadata_source_url,
+          proxy: true
+        }
+      ];
+      const candidate = candidates.find((item) => String(item.value || "").trim());
+      if (!candidate) {
+        return {
+          value: "",
+          label: "-",
+          basis: "",
+          basisLabel: "",
+          confidence: "",
+          sortValue: "",
+          title: "No release date or proxy age evidence available"
+        };
+      }
+      const label = formatReleaseDate(candidate.value, candidate.precision);
+      const detail = [`${candidate.basisLabel}: ${label}`];
+      if (candidate.confidence) detail.push(`Confidence: ${candidate.confidence}`);
+      if (candidate.sourceName) detail.push(`Source: ${candidate.sourceName}`);
+      if (candidate.sourceUrl) detail.push(candidate.sourceUrl);
+      if (candidate.proxy) detail.push("Proxy date, not an official release date");
+      return {
+        value: label === "-" ? "" : label,
+        label,
+        basis: candidate.basis,
+        basisLabel: candidate.basisLabel,
+        confidence: candidate.confidence || "",
+        sortValue: releaseSortValue(candidate.value, candidate.precision),
+        title: detail.join(" | ")
+      };
+    }
+
+    function formatReleaseDate(value, precision) {
+      const text = String(value || "").trim();
+      if (!text) return "-";
+      if (precision === "year" && /^\d{4}/.test(text)) return text.slice(0, 4);
+      if (precision === "month" && /^\d{4}-\d{2}/.test(text)) return text.slice(0, 7);
+      if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+      const date = new Date(text);
+      return Number.isNaN(date.getTime()) ? text : date.toISOString().slice(0, 10);
+    }
+
+    function releaseSortValue(value, precision) {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      if (precision === "year" && /^\d{4}/.test(text)) return `${text.slice(0, 4)}-00-00`;
+      if (precision === "month" && /^\d{4}-\d{2}/.test(text)) return `${text.slice(0, 7)}-00`;
+      if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+      const date = new Date(text);
+      return Number.isNaN(date.getTime()) ? text : date.toISOString().slice(0, 10);
     }
 
     function toast(message) {

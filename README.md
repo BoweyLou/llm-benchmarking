@@ -119,6 +119,10 @@ manual-recommendation, use-case approval, family, catalog-status, model-role,
 small-model, and hyperscaler-availability filters; a sortable model table; family and needs-decision
 views; and a detail inspector for model approval plus per-use-case approval
 notes, manual ratings, generated blockers, warnings, and required controls.
+The model table `Release` column shows the best available release indicator:
+trusted source release date first, then proxy dates such as Hugging Face
+repository creation, OpenRouter addition, or local catalog discovery when an
+official release date is not available.
 Provider filters use canonical parent providers: for example, Amazon Nova,
 AWS, and Amazon Bedrock are shown under Amazon, while Azure, Microsoft Azure,
 and Azure AI Foundry are shown under Microsoft. Qwen rows are shown under
@@ -205,7 +209,9 @@ The model table can also export CSV directly from the browser. Choose filtered,
 selected, or all rows in the table toolbar, then use `Export CSV`. The CSV
 contains the model listing fields, general model approval, active use-case approval,
 manual/proposed/effective recommendation, proposal blockers, warnings, and
-required controls.
+required controls. It includes `best_release_date`,
+`best_release_date_basis`, and `best_release_date_confidence` alongside the raw
+official release-date fields.
 
 Bulk review actions can target the current visible page with the table checkbox
 or the full filtered result set with `Select all filtered`. Selecting all
