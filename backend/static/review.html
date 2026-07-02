@@ -833,6 +833,12 @@
                 <option value="family">Group by: Family</option>
                 <option value="provider">Group by: Provider</option>
               </select>
+              <select class="select" id="csvExportScope" style="width: 142px">
+                <option value="filtered">CSV: Filtered</option>
+                <option value="selected">CSV: Selected</option>
+                <option value="all">CSV: All</option>
+              </select>
+              <button class="btn small" id="exportCsvButton">Export CSV</button>
               <button class="btn small" id="columnsButton">Columns</button>
             </div>
           </div>
@@ -966,7 +972,9 @@
       toast: document.getElementById("toast"),
       addModelDialog: document.getElementById("addModelDialog"),
       addModelForm: document.getElementById("addModelForm"),
-      snapshotFile: document.getElementById("snapshotFile")
+      snapshotFile: document.getElementById("snapshotFile"),
+      csvExportScope: document.getElementById("csvExportScope"),
+      exportCsvButton: document.getElementById("exportCsvButton")
     };
 
     function adminHeaders() {
@@ -1385,6 +1393,110 @@
       toast("Snapshot exported");
     }
 
+    function exportCsv() {
+      const scope = els.csvExportScope.value || "filtered";
+      const models = modelsForCsvScope(scope);
+      if (!models.length) return toast(scope === "selected" ? "No selected rows to export" : "No rows to export");
+      const csv = buildModelCsv(models, scope);
+      downloadText(csv, `banking-model-review-${scope}-${new Date().toISOString().slice(0, 10)}.csv`, "text/csv;charset=utf-8");
+      toast(`Exported ${models.length} ${models.length === 1 ? "row" : "rows"}`);
+    }
+
+    function modelsForCsvScope(scope) {
+      if (!state.catalog) return [];
+      if (scope === "all") return state.catalog.models.slice().sort(compareModels);
+      if (scope === "selected") {
+        return state.catalog.models
+          .filter((model) => state.selected.has(model.id))
+          .sort(compareModels);
+      }
+      return filteredModels();
+    }
+
+    function buildModelCsv(models, scope) {
+      const exportedAt = new Date().toISOString();
+      const activeUseCase = useCaseForExport();
+      const columns = [
+        ["export_scope", () => scope],
+        ["exported_at", () => exportedAt],
+        ["review_use_case_id", () => activeUseCase.id],
+        ["review_use_case_label", () => activeUseCase.label],
+        ["model_id", (model) => model.id],
+        ["model_name", (model) => model.name],
+        ["provider", (model) => model.provider],
+        ["family_id", (model) => model.family_id],
+        ["family_name", (model) => model.family_name],
+        ["catalog_status", (model) => model.catalog_status],
+        ["model_roles", (model) => joinList(model.model_roles)],
+        ["small_model_candidate", (model) => Boolean(model.small_model_candidate)],
+        ["model_size_class", (model) => model.model_size_class],
+        ["parameter_count_b", (model) => model.parameter_count_b],
+        ["active_parameter_count_b", (model) => model.active_parameter_count_b],
+        ["context_window_tokens", (model) => model.context_window_tokens],
+        ["release_date", (model) => model.release_date],
+        ["release_date_confidence", (model) => model.release_date_confidence],
+        ["license_id", (model) => model.license_id],
+        ["license_name", (model) => model.license_name],
+        ["provenance_policy_class", (model) => model.provenance_policy_class],
+        ["manual_recommendation", (model) => approvalForExport(model).recommendation_status || "unrated"],
+        ["proposed_recommendation", (model) => approvalForExport(model).proposed_recommendation_status || "unrated"],
+        ["effective_recommendation", (model) => approvalForExport(model).effective_recommendation_status || "unrated"],
+        ["approved_for_use", (model) => Boolean(approvalForExport(model).approved_for_use)],
+        ["approval_updated_at", (model) => approvalForExport(model).approval_updated_at],
+        ["recommendation_updated_at", (model) => approvalForExport(model).recommendation_updated_at],
+        ["approval_notes", (model) => approvalForExport(model).approval_notes],
+        ["recommendation_notes", (model) => approvalForExport(model).recommendation_notes],
+        ["proposal_score", (model) => approvalForExport(model).proposed_recommendation_score],
+        ["proposal_confidence", (model) => approvalForExport(model).proposed_recommendation_confidence],
+        ["proposal_policy_version", (model) => approvalForExport(model).proposed_recommendation_policy_version],
+        ["proposal_computed_at", (model) => approvalForExport(model).proposed_recommendation_computed_at],
+        ["proposal_blockers", (model) => joinList(approvalForExport(model).proposed_recommendation_blockers)],
+        ["proposal_warnings", (model) => joinList(approvalForExport(model).proposed_recommendation_warnings)],
+        ["required_controls", (model) => joinList(approvalForExport(model).proposed_recommendation_required_controls)],
+        ["inference_destinations", (model) => joinList((model.inference_summary || {}).platform_names)],
+        ["model_card_url", (model) => model.model_card_url],
+        ["documentation_url", (model) => model.documentation_url],
+        ["repo_url", (model) => model.repo_url],
+        ["metadata_source_name", (model) => model.metadata_source_name],
+        ["metadata_verified_at", (model) => model.metadata_verified_at]
+      ];
+      const rows = [columns.map(([header]) => csvCell(header)).join(",")];
+      models.forEach((model) => {
+        rows.push(columns.map(([, valueFor]) => csvCell(valueFor(model))).join(","));
+      });
+      return rows.join("\n") + "\n";
+    }
+
+    function useCaseForExport() {
+      const id = state.filters.useCase || state.activeUseCaseId || "";
+      const useCase = (state.catalog.use_cases || []).find((item) => item.id === id) || {};
+      return { id, label: useCase.label || "" };
+    }
+
+    function approvalForExport(model) {
+      const useCase = useCaseForExport();
+      return ((model.use_case_approvals || {})[useCase.id]) || firstApproval(model) || {};
+    }
+
+    function joinList(value) {
+      return Array.isArray(value) ? value.filter((item) => item !== null && item !== undefined && item !== "").join("; ") : value;
+    }
+
+    function csvCell(value) {
+      const text = String(value ?? "");
+      return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    }
+
+    function downloadText(text, filename, type) {
+      const blob = new Blob([text], { type });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
     async function importSnapshot(file) {
       const text = await file.text();
       const snapshot = JSON.parse(text);
@@ -1604,6 +1716,7 @@
         toast("Admin token saved for this tab");
       });
       document.getElementById("exportSnapshot").addEventListener("click", () => exportSnapshot().catch((error) => toast(error.message)));
+      els.exportCsvButton.addEventListener("click", exportCsv);
       document.getElementById("importSnapshot").addEventListener("click", () => els.snapshotFile.click());
       els.snapshotFile.addEventListener("change", () => {
         const file = els.snapshotFile.files[0];

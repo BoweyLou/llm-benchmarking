@@ -137,6 +137,12 @@ The workbench can export and import a JSON review snapshot. Use that snapshot
 when rebuilding a database so manual listings, deprecation markers, and
 approval/recommendation rows can be restored.
 
+The model table can also export CSV directly from the browser. Choose filtered,
+selected, or all rows in the table toolbar, then use `Export CSV`. The CSV
+contains the model listing fields plus the active use-case approval,
+manual/proposed/effective recommendation, proposal blockers, warnings, and
+required controls.
+
 To run the workbench on the Proxmox tailnet host, use the deploy script:
 
 ```bash
@@ -338,7 +344,7 @@ Notes:
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.
 - `recommendation-audit` previews generated use-case recommendation proposals. `recommendation-sync` persists them so `list-models`, CSV export, and the API include proposed/effective recommendation fields.
-- `/review` is the interactive banking model review workbench. `banking-review export` writes the review-friendly combined CSV. `banking-review set` and `banking-review deprecate` apply model- or family-scoped manual approval and recommendation decisions from the CLI.
+- `/review` is the interactive banking model review workbench and can export all, filtered, or selected model rows to CSV from the browser. `banking-review export` writes the review-friendly combined CSV from the CLI. `banking-review set` and `banking-review deprecate` apply model- or family-scoped manual approval and recommendation decisions from the CLI.
 - `model-license-sync` fills missing licenses using safe open-weight family propagation, a `Proprietary` fallback for missing proprietary licenses, and tracked exact/family overrides from [backend/model_license_baseline.json](backend/model_license_baseline.json).
 - `list-models` writes a clean CSV bundle to `output/model-list*.csv` by default in addition to the requested stdout/file format; pass `--no-csv` when you do not want the bundle, or `--no-csv-sidecars` when you only want the main model CSV.
 - `provider-origin-export` and `model-curation-export` push live curation back into the tracked baseline JSON files.

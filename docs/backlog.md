@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-040: P2 Add browser CSV export scopes to the banking review workbench
+  - Source: Human request 2026-07-02 after using the deployed interactive review workbench.
+  - Problem: reviewers needed quick CSV exports from the front end for the whole catalog, the current filtered list, or selected rows without dropping back to the CLI.
+  - Scope: workbench table toolbar export scope selector, client-side CSV generation, model/review/proposal columns for the active use case, README docs, changelog entry, live Proxmox redeploy, and smoke verification.
+  - Acceptance: `/review` can export all rows, filtered rows, or selected rows to CSV; filtered export uses the same filter/sort state as the visible table; selected export preserves explicit row selection; export requires no admin token because it only serializes loaded catalog data.
+  - Validation: backend suite remains green, docs/version checks pass, deployed HTML contains the export control, and live catalog export smoke verifies the updated app is served from Proxmox.
+  - Completed: 2026-07-02. Browser CSV exports are available from the review workbench toolbar.
+
 - [x] LBM-039: P1 Allow token-free review saves from trusted Tailscale clients
   - Source: Human request 2026-07-02 after trying to save from the deployed workbench and hitting the admin-token prompt.
   - Problem: the Proxmox workbench needed to be usable from any Tailscale device without manually copying an admin token into each browser session.
