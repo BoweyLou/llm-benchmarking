@@ -123,7 +123,10 @@ The `Rankings` view keeps benchmark comparison separate from manual review. It
 can show weighted use-case rankings from `/api/rankings` or raw benchmark
 leaderboards from the loaded score data. Ranking lanes stay model-role aware:
 generator use cases rank generator models, retrieval embeddings rank embedding
-models, and retrieval reranking ranks reranker models.
+models, and retrieval reranking ranks reranker models. Use-case rankings also
+include an `Under-tested` toggle for sparse candidates that have some evidence
+or official metadata but fail the production coverage or required-benchmark
+gates; those candidates stay separate from the production-ranked list.
 The model table `Release` column shows the best available release indicator:
 trusted source release date first, then proxy dates such as Hugging Face
 repository creation, OpenRouter addition, or local catalog discovery when an
@@ -197,8 +200,10 @@ use-case `Approval` in `Notes`, then save. For many models, filter first, use
 action to the exact selected model IDs.
 In `Rankings`, select a use-case ranking or a benchmark leaderboard, then select
 a ranked row to inspect score, coverage, missing evidence, and raw benchmark
-details. Ranking evidence is read-only; use the review tabs for approval and
-recommendation decisions.
+details. The `Under-tested` use-case view shows sparse candidates with an
+available-evidence score, conservative weighted score, coverage threshold, and
+the reason they are excluded from production ranking. Ranking evidence is
+read-only; use the review tabs for approval and recommendation decisions.
 Use `Restricted` for limited-audience access decisions and record who may use
 the model in the recommendation notes.
 Use `Effective recommendation` to filter the final status shown in exports and
@@ -430,10 +435,10 @@ python -m backend model-curation-export
 Notes:
 
 - Full `update` runs configured model discovery before model-card refresh. `update --benchmarks ...` skips that discovery phase unless `--refresh-model-discovery` is passed.
-- `model-discovery-sync` runs only the curated metadata discovery lane. `--source configured` runs both static provider catalog rows and provider-owned Hugging Face discovery; use `--source huggingface` or `--source catalog` to narrow the run. The repo-backed baseline covers small generator families such as Google Gemma, Microsoft Phi, Meta Llama 3.2 small models, Qwen small models, Mistral/Ministral small models, and IBM Granite generators, plus NVIDIA retrieval, IBM watsonx Slate, and IBM Granite retrieval entries. It intentionally excludes community quantizations/fine-tunes unless a trusted mirror is configured.
+- `model-discovery-sync` runs only the curated metadata discovery lane. `--source configured` runs both static provider catalog rows and provider-owned Hugging Face discovery; use `--source huggingface` or `--source catalog` to narrow the run. The repo-backed baseline covers small generator families such as Google Gemma, Microsoft Phi, Meta Llama 3.2 small models, Qwen small models, Mistral/Ministral small models, and IBM Granite generators, Anthropic Opus system-card rows, plus NVIDIA retrieval, IBM watsonx Slate, and IBM Granite retrieval entries. It intentionally excludes community quantizations/fine-tunes unless a trusted mirror is configured.
 - OpenRouter model refresh requests all output modalities so non-text-capable catalog rows are not hidden by the provider default.
 - `inference-sync` supports destination subsets.
-- `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
+- `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations. Configured catalog and model-card refreshes propagate missing official card metadata across canonical variants, for example benchmark effort variants of the same base model.
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.
 - `recommendation-audit` previews generated use-case recommendation proposals. `recommendation-sync` persists them so `list-models`, CSV export, and the API include proposed/effective recommendation fields.
 - `/review` is the interactive banking model review workbench and can export all, filtered, or selected model rows to CSV from the browser. It can also start `/api/update` and show live progress from `/api/update/status/{log_id}`. `banking-review export` writes the review-friendly combined CSV from the CLI. `banking-review set` and `banking-review deprecate` apply model- or family-scoped manual approval and recommendation decisions from the CLI.
@@ -456,6 +461,10 @@ The core API is in [backend/main.py](backend/main.py). High-level groups:
 POST/PATCH/PUT mutation routes require either the local admin token described in
 the run instructions above, or trusted tailnet mode for loopback/Tailscale
 clients. GET routes remain read-only and unauthenticated.
+
+`/api/rankings` returns production-gated rows in `rankings` and under-tested
+models in `sparse_rankings`. Sparse rows are for investigation and manual
+triage; they do not relax benchmark coverage or required-evidence gates.
 
 ## Contributor Workflow
 

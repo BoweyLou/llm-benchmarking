@@ -224,6 +224,32 @@ class RankingTests(unittest.TestCase):
         self.assertIn("Complete Model", ranked_names)
         self.assertNotIn("Intel Only", ranked_names)
 
+    def test_use_case_rankings_expose_sparse_candidates_separately(self) -> None:
+        self.add_model("covered-coder", "Covered Coder")
+        self.add_model("new-coder", "New Coder")
+
+        self.add_score("covered-coder", "swebench_verified", 78.0)
+        self.add_score("covered-coder", "terminal_bench", 68.0)
+        self.add_score("covered-coder", "aa_intelligence", 54.0)
+
+        self.add_score("new-coder", "livebench_coding", 96.0)
+        self.add_score("new-coder", "aa_intelligence", 60.0)
+
+        rankings = update_engine.get_rankings("coding")
+        self.assertIsNotNone(rankings)
+
+        ranked_names = [row["model"]["name"] for row in rankings["rankings"]]
+        sparse_names = [row["model"]["name"] for row in rankings["sparse_rankings"]]
+        self.assertIn("Covered Coder", ranked_names)
+        self.assertNotIn("New Coder", ranked_names)
+        self.assertIn("New Coder", sparse_names)
+
+        sparse = next(row for row in rankings["sparse_rankings"] if row["model"]["name"] == "New Coder")
+        self.assertEqual(sparse["ranking_status"], "missing_required_benchmark")
+        self.assertLess(sparse["coverage"], sparse["coverage_threshold"])
+        self.assertGreater(sparse["available_evidence_score"], sparse["score"])
+        self.assertTrue(sparse["eligibility_notes"])
+
     def test_model_role_rankings_do_not_mix_generator_and_embedding_models(self) -> None:
         self.add_model("generator-a", "Generator A", model_roles=["generator"])
         self.add_model("embedding-a", "Embedding A", model_roles=["embedding"])
@@ -570,6 +596,55 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(score_rows, [])
         self.assertEqual(len(source_runs), 1)
         self.assertEqual(len(raw_records), 1)
+
+    def test_catalog_discovery_propagates_model_card_to_canonical_variants(self) -> None:
+        self.add_model(
+            "claude-opus-4-8-xhigh-effort",
+            "Claude Opus 4.8 xhigh Effort",
+            provider="Anthropic",
+            family_id="anthropic::claude-4-8",
+            family_name="Claude 4.8",
+            canonical_model_id="anthropic::claude-4-8-opus",
+            canonical_model_name="Claude Opus 4.8",
+        )
+        entry = {
+            "source": "catalog",
+            "family": "anthropic-claude-opus-system-cards",
+            "provider": "Anthropic",
+            "model_type": "proprietary",
+            "source_url": "https://www.anthropic.com/system-cards",
+            "models": [
+                {
+                    "id": "claude-opus-4-8",
+                    "name": "Claude Opus 4.8",
+                    "match_existing_by_name": False,
+                    "model_card_url": "https://www.anthropic.com/claude-opus-4-8-system-card",
+                    "documentation_url": "https://www.anthropic.com/news/claude-opus-4-8",
+                    "metadata_source_name": "anthropic_system_card",
+                    "release_date": "2026-05-28",
+                    "context_window_tokens": 1000000,
+                    "max_output_tokens": 128000,
+                    "training_cutoff": "January 2026",
+                    "capabilities": ["coding", "agentic"],
+                    "intended_use_short": "Complex agentic coding.",
+                }
+            ],
+        }
+
+        with patch.object(update_engine.model_discovery, "catalog_discovery_entries", return_value=[entry]):
+            summary = update_engine.refresh_model_discovery_metadata(source="catalog", family="anthropic-claude-opus-system-cards")
+
+        self.assertEqual(summary["records_found"], 1)
+        self.assertEqual(summary["sources"]["catalog"]["family_metadata_propagated"], 1)
+        models = update_engine.list_models()
+        variant = next(model for model in models if model["id"] == "claude-opus-4-8-xhigh-effort")
+        self.assertEqual(variant["model_card_url"], "https://www.anthropic.com/claude-opus-4-8-system-card")
+        self.assertEqual(variant["documentation_url"], "https://www.anthropic.com/news/claude-opus-4-8")
+        self.assertEqual(variant["release_date"], "2026-05-28")
+        self.assertEqual(variant["context_window_tokens"], 1000000)
+        self.assertEqual(variant["max_output_tokens"], 128000)
+        self.assertEqual(variant["training_cutoff"], "January 2026")
+        self.assertIn("coding", variant["capabilities"])
 
     def test_internal_view_weight_boosts_scored_models_without_blocking_missing_models(self) -> None:
         self.add_model("internal-a", "Internal A")

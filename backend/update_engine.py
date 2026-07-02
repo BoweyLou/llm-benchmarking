@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import threading
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable
 
@@ -95,6 +96,30 @@ CATALOG_MODEL_DISCOVERY_SOURCE_NAME = "catalog_model_discovery"
 HUGGINGFACE_MODEL_API_URL_TEMPLATE = "https://huggingface.co/api/models/{repo_id}"
 HUGGINGFACE_RAW_README_URL_TEMPLATE = "https://huggingface.co/{repo_id}/raw/main/README.md"
 MODEL_CARD_REFRESH_STALE_DAYS = 30
+FAMILY_MODEL_METADATA_PROPAGATION_FIELDS = (
+    "model_card_url",
+    "model_card_source",
+    "model_card_verified_at",
+    "documentation_url",
+    "repo_url",
+    "paper_url",
+    "license_id",
+    "license_name",
+    "license_url",
+    "intended_use_short",
+    "limitations_short",
+    "training_data_summary",
+    "training_cutoff",
+    "context_window",
+    "context_window_tokens",
+    "max_output_tokens",
+    "release_date",
+    "release_date_precision",
+    "release_date_confidence",
+    "release_date_source_name",
+    "release_date_source_url",
+    "release_date_verified_at",
+)
 INTERNAL_VIEW_NOTE = (
     "Optional internal assessment overlay entered in Admin. Missing internal scores do not block ranking eligibility."
 )
@@ -3102,6 +3127,7 @@ def _refresh_huggingface_model_discovery(
 
     summary["records_found"] = records_found
     _finish_source_run(source_run_id, status="completed", records_found=records_found, error_message=None)
+    summary["family_metadata_propagated"] = _propagate_family_model_metadata(verified_at=verified_at)
     return summary
 
 
@@ -3233,6 +3259,7 @@ def _refresh_catalog_model_discovery(
 
     summary["records_found"] = records_found
     _finish_source_run(source_run_id, status="completed", records_found=records_found, error_message=None)
+    summary["family_metadata_propagated"] = _propagate_family_model_metadata(verified_at=verified_at)
     return summary
 
 
@@ -3989,7 +4016,17 @@ def _ensure_discovered_catalog_model(
     license_url = _clean_text(item.get("license_url"))
     capabilities = _decode_json_string_list(item.get("capabilities"))
     intended_use = _clean_text(item.get("intended_use_short")) or _clean_text(item.get("description"))
+    limitations = _clean_text(item.get("limitations_short"))
+    training_data_summary = _clean_text(item.get("training_data_summary"))
+    training_cutoff = _clean_text(item.get("training_cutoff"))
+    release_date = _clean_text(item.get("release_date"))
+    release_date_precision = _clean_text(item.get("release_date_precision")) or _release_date_precision(release_date)
+    release_date_confidence = _clean_text(item.get("release_date_confidence")) or ("high" if release_date else "")
+    release_date_source_name = _clean_text(item.get("release_date_source_name")) or source_name
+    release_date_source_url = _clean_text(item.get("release_date_source_url")) or source_url
     context_window_tokens = _safe_int(item.get("context_window_tokens"))
+    context_window = _clean_text(item.get("context_window"))
+    max_output_tokens = _safe_int(item.get("max_output_tokens"))
     parameter_count_b = _safe_float(item.get("parameter_count_b"))
     active_parameter_count_b = _safe_float(item.get("active_parameter_count_b"))
     model_size_class = _clean_text(item.get("model_size_class"))
@@ -4002,7 +4039,7 @@ def _ensure_discovered_catalog_model(
     with ENGINE.begin() as conn:
         provider_id = _ensure_provider_row(provider, conn=conn)
         existing = fetch_one(conn, select(models_table).where(models_table.c.id == model_id))
-        if existing is None:
+        if existing is None and item.get("match_existing_by_name") is not False:
             resolved = _resolve_model_id(name)
             if resolved:
                 existing = fetch_one(conn, select(models_table).where(models_table.c.id == resolved))
@@ -4045,6 +4082,17 @@ def _ensure_discovered_catalog_model(
                 values["license_url"] = license_url
             if context_window_tokens and _model_field_missing(existing, "context_window_tokens"):
                 values["context_window_tokens"] = context_window_tokens
+            if context_window and _model_field_missing(existing, "context_window"):
+                values["context_window"] = context_window
+            if max_output_tokens and _model_field_missing(existing, "max_output_tokens"):
+                values["max_output_tokens"] = max_output_tokens
+            if release_date and _model_field_missing(existing, "release_date"):
+                values["release_date"] = release_date
+                values["release_date_precision"] = release_date_precision
+                values["release_date_confidence"] = release_date_confidence
+                values["release_date_source_name"] = release_date_source_name
+                values["release_date_source_url"] = release_date_source_url
+                values["release_date_verified_at"] = verified_at
             if parameter_count_b is not None and _model_field_missing(existing, "parameter_count_b"):
                 values["parameter_count_b"] = parameter_count_b
             if active_parameter_count_b is not None and _model_field_missing(existing, "active_parameter_count_b"):
@@ -4064,6 +4112,12 @@ def _ensure_discovered_catalog_model(
                     values["capabilities_json"] = json.dumps(merged_capabilities, ensure_ascii=True)
             if intended_use and _model_field_missing(existing, "intended_use_short"):
                 values["intended_use_short"] = intended_use
+            if limitations and _model_field_missing(existing, "limitations_short"):
+                values["limitations_short"] = limitations
+            if training_data_summary and _model_field_missing(existing, "training_data_summary"):
+                values["training_data_summary"] = training_data_summary
+            if training_cutoff and _model_field_missing(existing, "training_cutoff"):
+                values["training_cutoff"] = training_cutoff
             if _model_field_missing(existing, "discovered_at"):
                 values["discovered_at"] = verified_at
             if _model_field_missing(existing, "discovered_update_log_id"):
@@ -4101,7 +4155,15 @@ def _ensure_discovered_catalog_model(
             "license_id": license_id,
             "license_name": license_name,
             "license_url": license_url,
+            "release_date": release_date,
+            "release_date_precision": release_date_precision,
+            "release_date_confidence": release_date_confidence,
+            "release_date_source_name": release_date_source_name if release_date else None,
+            "release_date_source_url": release_date_source_url if release_date else None,
+            "release_date_verified_at": verified_at if release_date else None,
+            "context_window": context_window,
             "context_window_tokens": context_window_tokens,
+            "max_output_tokens": max_output_tokens,
             "parameter_count_b": parameter_count_b,
             "active_parameter_count_b": active_parameter_count_b,
             "model_size_class": model_size_class,
@@ -4118,6 +4180,9 @@ def _ensure_discovered_catalog_model(
             "huggingface_repo_id": huggingface_repo_id,
             "capabilities_json": json.dumps(capabilities, ensure_ascii=True),
             "intended_use_short": intended_use,
+            "limitations_short": limitations,
+            "training_data_summary": training_data_summary,
+            "training_cutoff": training_cutoff,
             "active": 1,
         }
         stmt = sqlite_insert(models_table).values(**values)
@@ -5776,6 +5841,130 @@ def _refresh_model_card_metadata(*, force: bool = False) -> None:
                         .where(models_table.c.id == row["id"])
                         .values(**merged_values)
                     )
+    _propagate_family_model_metadata(verified_at=verified_at)
+
+
+def _propagate_family_model_metadata(*, verified_at: str | None = None) -> int:
+    with get_connection(ENGINE) as conn:
+        rows = fetch_all(
+            conn,
+            select(
+                models_table.c.id,
+                models_table.c.family_id,
+                models_table.c.canonical_model_id,
+                models_table.c.model_card_url,
+                models_table.c.model_card_source,
+                models_table.c.model_card_verified_at,
+                models_table.c.documentation_url,
+                models_table.c.repo_url,
+                models_table.c.paper_url,
+                models_table.c.license_id,
+                models_table.c.license_name,
+                models_table.c.license_url,
+                models_table.c.capabilities_json,
+                models_table.c.intended_use_short,
+                models_table.c.limitations_short,
+                models_table.c.training_data_summary,
+                models_table.c.training_cutoff,
+                models_table.c.context_window,
+                models_table.c.context_window_tokens,
+                models_table.c.max_output_tokens,
+                models_table.c.release_date,
+                models_table.c.release_date_precision,
+                models_table.c.release_date_confidence,
+                models_table.c.release_date_source_name,
+                models_table.c.release_date_source_url,
+                models_table.c.release_date_verified_at,
+            ).where(models_table.c.active == 1),
+        )
+
+    rows_by_group: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        group_key = _model_metadata_group_key(row)
+        if group_key:
+            rows_by_group[group_key].append(row)
+
+    propagated_count = 0
+    with ENGINE.begin() as conn:
+        for group_rows in rows_by_group.values():
+            donor = _choose_model_metadata_donor(group_rows)
+            if donor is None:
+                continue
+            donor_model_card_url = _clean_text(donor.get("model_card_url"))
+            donor_capabilities = _decode_json_string_list(donor.get("capabilities_json"))
+            for row in group_rows:
+                if row["id"] == donor["id"]:
+                    continue
+                values: dict[str, Any] = {}
+                for field in FAMILY_MODEL_METADATA_PROPAGATION_FIELDS:
+                    donor_value = donor.get(field)
+                    if not _metadata_value_present(donor_value):
+                        continue
+                    if not _model_field_missing(row, field):
+                        continue
+                    if field in {"model_card_source", "model_card_verified_at"}:
+                        target_model_card_url = _clean_text(row.get("model_card_url"))
+                        if target_model_card_url and target_model_card_url != donor_model_card_url:
+                            continue
+                    values[field] = donor_value
+
+                if values.get("model_card_url") and not _metadata_value_present(values.get("model_card_source")):
+                    values["model_card_source"] = _clean_text(donor.get("model_card_source")) or "family_model_metadata"
+                if values.get("model_card_url") and not _metadata_value_present(values.get("model_card_verified_at")) and verified_at:
+                    values["model_card_verified_at"] = verified_at
+                if values.get("release_date") and not _metadata_value_present(values.get("release_date_verified_at")) and verified_at:
+                    values["release_date_verified_at"] = verified_at
+
+                if donor_capabilities:
+                    current_capabilities = _decode_json_string_list(row.get("capabilities_json"))
+                    merged_capabilities = _merge_string_lists(current_capabilities, donor_capabilities)
+                    if merged_capabilities != current_capabilities:
+                        values["capabilities_json"] = json.dumps(merged_capabilities, ensure_ascii=True)
+
+                if not values:
+                    continue
+                conn.execute(update(models_table).where(models_table.c.id == row["id"]).values(**values))
+                propagated_count += 1
+    return propagated_count
+
+
+def _model_metadata_group_key(row: dict[str, Any]) -> str | None:
+    canonical_model_id = _clean_text(row.get("canonical_model_id"))
+    if canonical_model_id:
+        return f"canonical:{canonical_model_id}"
+    family_id = _clean_text(row.get("family_id"))
+    if family_id:
+        return f"family:{family_id}"
+    return None
+
+
+def _choose_model_metadata_donor(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    donors = [row for row in rows if _clean_text(row.get("model_card_url"))]
+    if not donors:
+        return None
+    return max(donors, key=_model_metadata_donor_score)
+
+
+def _model_metadata_donor_score(row: dict[str, Any]) -> tuple[int, int, str]:
+    source = _clean_text(row.get("model_card_source")).lower()
+    source_score = 0
+    if source in {"catalog_model_discovery", "anthropic_system_card", "aws_bedrock_model_card", "azure_ai_foundry_model_card"}:
+        source_score = 3
+    elif source == "huggingface":
+        source_score = 2
+    elif source:
+        source_score = 1
+    field_score = sum(1 for field in FAMILY_MODEL_METADATA_PROPAGATION_FIELDS if _metadata_value_present(row.get(field)))
+    field_score += len(_decode_json_string_list(row.get("capabilities_json")))
+    return (source_score, field_score, str(row.get("id") or ""))
+
+
+def _metadata_value_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
 
 
 def _needs_model_card_refresh(row: dict[str, Any], *, now: datetime) -> bool:

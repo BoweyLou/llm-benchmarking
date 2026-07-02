@@ -548,6 +548,10 @@ class RankingOut(APIModel):
     rank: int
     score: float
     coverage: float
+    available_evidence_score: float | None = None
+    coverage_threshold: float | None = None
+    ranking_status: str = "ranked"
+    eligibility_notes: list[str] = Field(default_factory=list)
     model: ModelSummaryOut
     breakdown: list[RankingBreakdownOut] = Field(default_factory=list)
     missing_benchmarks: list[str] = Field(default_factory=list)
@@ -557,6 +561,7 @@ class RankingOut(APIModel):
 class RankingsResponseOut(APIModel):
     use_case: UseCaseOut
     rankings: list[RankingOut] = Field(default_factory=list)
+    sparse_rankings: list[RankingOut] = Field(default_factory=list)
 
 
 class MarketSnapshotOut(APIModel):

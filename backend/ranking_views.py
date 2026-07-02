@@ -34,8 +34,9 @@ def build_rankings_response(
     )
 
     rankings: list[dict[str, Any]] = []
+    sparse_rankings: list[dict[str, Any]] = []
     for model in eligible_models:
-        ranking = build_model_ranking(
+        ranking = _build_model_ranking_candidate(
             model=model,
             benchmarks=benchmarks,
             weights=weights,
@@ -48,7 +49,10 @@ def build_rankings_response(
             model_summary=model_summary,
         )
         if ranking is not None:
-            rankings.append(ranking)
+            if ranking["ranking_status"] == "ranked":
+                rankings.append(ranking)
+            elif ranking["breakdown"]:
+                sparse_rankings.append(ranking)
 
     rankings.sort(
         key=lambda item: (
@@ -60,6 +64,19 @@ def build_rankings_response(
     )
 
     for index, ranking in enumerate(rankings, start=1):
+        ranking["rank"] = index
+
+    sparse_rankings.sort(
+        key=lambda item: (
+            -float(item.get("available_evidence_score") or 0.0),
+            -float(item["coverage"]),
+            -float(item["score"]),
+            item["model"]["name"].lower(),
+            item["model"]["id"],
+        )
+    )
+
+    for index, ranking in enumerate(sparse_rankings, start=1):
         ranking["rank"] = index
 
     return {
@@ -77,6 +94,7 @@ def build_rankings_response(
             "weights": dict(use_case["weights"]),
         },
         "rankings": rankings,
+        "sparse_rankings": sparse_rankings,
     }
 
 
@@ -116,7 +134,39 @@ def build_model_ranking(
     coverage_exempt_benchmark_ids: set[str],
     model_summary: ModelSummaryBuilder,
 ) -> dict[str, Any] | None:
+    candidate = _build_model_ranking_candidate(
+        model=model,
+        benchmarks=benchmarks,
+        weights=weights,
+        required_benchmarks=required_benchmarks,
+        ranges=ranges,
+        total_configured_weight=total_configured_weight,
+        total_coverage_weight=total_coverage_weight,
+        use_case_min_coverage=use_case_min_coverage,
+        coverage_exempt_benchmark_ids=coverage_exempt_benchmark_ids,
+        model_summary=model_summary,
+    )
+    if candidate is None or candidate["ranking_status"] != "ranked":
+        return None
+    return candidate
+
+
+def _build_model_ranking_candidate(
+    *,
+    model: dict[str, Any],
+    benchmarks: dict[str, dict[str, Any]],
+    weights: dict[str, float],
+    required_benchmarks: list[str],
+    ranges: dict[str, tuple[float, float]],
+    total_configured_weight: float,
+    total_coverage_weight: float,
+    use_case_min_coverage: float,
+    coverage_exempt_benchmark_ids: set[str],
+    model_summary: ModelSummaryBuilder,
+) -> dict[str, Any] | None:
     weighted_sum = 0.0
+    available_weighted_sum = 0.0
+    present_weight = 0.0
     available_coverage_weight = 0.0
     breakdown: list[dict[str, Any]] = []
     missing_benchmarks: list[str] = []
@@ -141,6 +191,8 @@ def build_model_ranking(
             bool(benchmark["higher_is_better"]),
         )
         weighted_sum += normalised * weight
+        available_weighted_sum += normalised * weight
+        present_weight += weight
         if benchmark_id not in coverage_exempt_benchmark_ids:
             available_coverage_weight += weight
         breakdown.append(
@@ -162,14 +214,28 @@ def build_model_ranking(
         return None
 
     coverage = 1.0 if total_coverage_weight <= 0 else available_coverage_weight / total_coverage_weight
+    eligibility_notes: list[str] = []
+    ranking_status = "ranked"
     if coverage < use_case_min_coverage:
-        return None
+        ranking_status = "insufficient_coverage"
+        eligibility_notes.append(
+            f"Benchmark coverage {coverage:.0%} is below the {use_case_min_coverage:.0%} production ranking threshold."
+        )
     if critical_missing_benchmarks:
-        return None
+        ranking_status = "missing_required_benchmark"
+        eligibility_notes.append(
+            "Missing required benchmark evidence: " + ", ".join(critical_missing_benchmarks) + "."
+        )
+
+    available_evidence_score = available_weighted_sum / present_weight if present_weight > 0 else None
 
     return {
         "score": weighted_sum / total_configured_weight,
+        "available_evidence_score": available_evidence_score,
         "coverage": coverage,
+        "coverage_threshold": use_case_min_coverage,
+        "ranking_status": ranking_status,
+        "eligibility_notes": eligibility_notes,
         "model": model_summary(model),
         "breakdown": breakdown,
         "missing_benchmarks": missing_benchmarks,

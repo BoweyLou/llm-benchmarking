@@ -508,6 +508,10 @@
       table-layout: fixed;
     }
 
+    .ranking-table {
+      min-width: 760px;
+    }
+
     th,
     td {
       border-bottom: 1px solid #e9edf3;
@@ -835,6 +839,16 @@
     .list-stack {
       display: grid;
       gap: 8px;
+    }
+
+    .callout {
+      padding: 8px 10px;
+      border: 1px solid #f1d79b;
+      border-radius: 7px;
+      background: #fff8e5;
+      color: #6b4d12;
+      font-size: 12px;
+      line-height: 1.35;
     }
 
     .breakdown-row {
@@ -1403,6 +1417,7 @@
       },
       rankings: {
         mode: "use_case",
+        candidateSet: "ranked",
         useCaseId: "",
         benchmarkId: "",
         cache: {},
@@ -1943,6 +1958,7 @@
             <button class="segment ${state.rankings.mode === "benchmark" ? "active" : ""}" data-ranking-mode="benchmark">Benchmark leaderboard</button>
           </div>
           ${state.rankings.mode === "benchmark" ? renderBenchmarkSelect() : renderRankingUseCaseSelect()}
+          ${state.rankings.mode === "use_case" ? renderRankingCandidateSet() : ""}
           <button class="btn small" id="refreshRanking">Refresh ranking</button>
         </div>
         ${renderRankingSummary(rows)}
@@ -1958,6 +1974,13 @@
           }).join("")}
         </select>
       </label>`;
+    }
+
+    function renderRankingCandidateSet() {
+      return `<div class="segmented" role="tablist" aria-label="Use-case ranking set">
+        <button class="segment ${state.rankings.candidateSet === "ranked" ? "active" : ""}" data-ranking-set="ranked">Production ranked</button>
+        <button class="segment ${state.rankings.candidateSet === "sparse" ? "active" : ""}" data-ranking-set="sparse">Under-tested</button>
+      </div>`;
     }
 
     function renderBenchmarkSelect() {
@@ -1983,27 +2006,29 @@
           ]
         : [
             `Use case: ${(useCase && useCase.label) || state.rankings.useCaseId || "-"}`,
+            `View: ${state.rankings.candidateSet === "sparse" ? "under-tested candidates" : "production ranked"}`,
             `Roles: ${((useCase && useCase.model_roles) || ["generator"]).join(", ")}`,
+            `Minimum coverage: ${formatPercent((useCase && useCase.min_coverage) || 0)}`,
             `Required: ${((useCase && useCase.required_benchmarks) || []).join(", ") || "none"}`
           ];
       if (state.rankings.mode === "use_case" && state.rankings.loadingUseCaseId) details.push("Loading ranking...");
       if (state.rankings.error) details.push(`Error: ${state.rankings.error}`);
-      details.push(`${rows.length} ranked rows after filters`);
+      details.push(`${rows.length} ${state.rankings.candidateSet === "sparse" && state.rankings.mode === "use_case" ? "candidate" : "ranked"} rows after filters`);
       return `<div class="ranking-summary">${details.map((item) => badge(item, state.rankings.error ? "red" : "gray")).join("")}</div>`;
     }
 
     function renderRankingTable(rows) {
       return `
-        <table>
+        <table class="ranking-table">
           <colgroup>
-            <col style="width: 48px">
-            <col style="width: 172px">
-            <col style="width: 86px">
-            <col style="width: 74px">
+            <col style="width: 44px">
+            <col style="width: 148px">
+            <col style="width: 76px">
+            <col style="width: 62px">
             <col style="width: 92px">
+            <col style="width: 64px">
             <col style="width: 82px">
-            <col style="width: 86px">
-            <col style="width: 210px">
+            <col style="width: 152px">
           </colgroup>
           <thead>
             <tr>
@@ -2011,7 +2036,7 @@
               <th>Model</th>
               <th>Provider</th>
               <th>Roles</th>
-              <th>Score</th>
+              <th>${state.rankings.mode === "use_case" && state.rankings.candidateSet === "sparse" ? "Evidence score" : "Score"}</th>
               <th>${state.rankings.mode === "benchmark" ? "Metric" : "Coverage"}</th>
               <th>Release</th>
               <th>Evidence</th>
@@ -2024,17 +2049,21 @@
     function renderRankingRow(row) {
       const model = row.localModel || row.model || {};
       const releaseInfo = modelReleaseInfo(model);
+      const isSparseCandidate = row.type !== "benchmark" && row.ranking_status && row.ranking_status !== "ranked";
+      const scoredCount = (row.breakdown || []).length;
+      const missingCount = (row.missing_benchmarks || []).length;
       const evidence = row.type === "benchmark"
         ? `${benchmarkLabel(row.benchmark_id)} ${row.verified ? "verified" : "unverified"}`
-        : `${(row.breakdown || []).length} benchmarks${row.missing_benchmarks && row.missing_benchmarks.length ? `, ${row.missing_benchmarks.length} missing` : ""}`;
-      const scoreLabel = row.type === "benchmark" ? formatNumber(row.raw_value) : formatNumber(row.score);
+        : `${scoredCount} scored${missingCount ? ` / ${missingCount} missing` : ""}`;
+      const displayScore = row.type === "benchmark" ? row.normalised : (isSparseCandidate ? row.available_evidence_score : row.score);
+      const scoreLabel = row.type === "benchmark" ? formatNumber(row.raw_value) : formatNumber(displayScore);
       const secondaryLabel = row.type === "benchmark" ? (row.metric || "-") : formatPercent(row.coverage);
       return `<tr class="${state.activeModelId === model.id ? "selected" : ""}" data-model-id="${escapeAttr(model.id)}">
         <td><strong>${escapeHtml(row.rank)}</strong></td>
         <td><div class="model-name">${escapeHtml(model.name || row.model.name || "")}</div><div class="subtle">${escapeHtml(model.id || row.model.id || "")}</div></td>
         <td>${escapeHtml(model.provider || row.model.provider || "")}</td>
         <td><span class="subtle">${escapeHtml((model.model_roles || row.model.model_roles || []).join(", "))}</span></td>
-        <td>${scoreBar(scoreLabel, row.type === "benchmark" ? row.normalised : row.score)}</td>
+        <td>${scoreBar(scoreLabel, displayScore)}</td>
         <td><span class="subtle">${escapeHtml(secondaryLabel)}</span></td>
         <td><div class="release-cell" title="${escapeAttr(releaseInfo.title)}"><span class="release-date">${escapeHtml(releaseInfo.label)}</span><span class="release-basis">${escapeHtml(releaseInfo.basisLabel)}</span></div></td>
         <td><span class="subtle" title="${escapeAttr(evidence)}">${escapeHtml(evidence)}</span></td>
@@ -2043,6 +2072,9 @@
 
     function renderRankingEmpty() {
       if (state.rankings.loadingUseCaseId) return `<div class="empty">Loading ranking evidence...</div>`;
+      if (state.rankings.mode === "use_case" && state.rankings.candidateSet === "sparse") {
+        return `<div class="empty">No under-tested candidates match the current ranking and filters.</div>`;
+      }
       return `<div class="empty">No ranked models match the current ranking and filters.</div>`;
     }
 
@@ -2058,9 +2090,10 @@
     function useCaseRankingRows() {
       const useCaseId = state.rankings.useCaseId;
       const payload = useCaseId ? state.rankings.cache[useCaseId] : null;
-      if (!payload || !Array.isArray(payload.rankings)) return [];
+      const payloadRows = state.rankings.candidateSet === "sparse" ? payload && payload.sparse_rankings : payload && payload.rankings;
+      if (!payload || !Array.isArray(payloadRows)) return [];
       const allowedIds = new Set(rankingFilteredModels().flatMap(rankingModelKeys));
-      return payload.rankings
+      return payloadRows
         .map((row) => {
           const localModel = modelByRankingId((row.model || {}).id);
           return { ...row, type: "use_case", localModel: localModel || row.model };
@@ -2429,15 +2462,19 @@
 
     function renderUseCaseRankingInspector(row) {
       const useCase = activeRankingUseCase() || {};
+      const isSparseCandidate = row.ranking_status && row.ranking_status !== "ranked";
       return `
         <div class="inspector-panel">
           <h3>${escapeHtml(useCase.label || state.rankings.useCaseId || "Use-case ranking")}</h3>
           <div class="meta-grid">
             <div><span>Rank</span>${escapeHtml(row.rank)}</div>
             <div><span>Weighted score</span>${escapeHtml(formatNumber(row.score))}</div>
+            <div><span>Evidence score</span>${escapeHtml(formatNumber(row.available_evidence_score))}</div>
             <div><span>Coverage</span>${escapeHtml(formatPercent(row.coverage))}</div>
+            <div><span>Status</span>${escapeHtml(rankingStatusLabel(row.ranking_status || "ranked"))}</div>
             <div><span>Roles</span>${escapeHtml(((useCase.model_roles || ["generator"]).join(", ")))}</div>
           </div>
+          ${isSparseCandidate ? `<div class="list-stack">${(row.eligibility_notes || []).map((note) => `<div class="callout">${escapeHtml(note)}</div>`).join("")}</div>` : ""}
         </div>
         <div class="inspector-panel">
           <h3>Benchmark breakdown</h3>
@@ -2449,6 +2486,12 @@
           <h3>Missing evidence</h3>
           <div class="subtle">${escapeHtml((row.missing_benchmarks || []).map(benchmarkLabel).join(", ") || "None")}</div>
         </div>`;
+    }
+
+    function rankingStatusLabel(status) {
+      if (status === "insufficient_coverage") return "Insufficient coverage";
+      if (status === "missing_required_benchmark") return "Missing required benchmark";
+      return "Ranked";
     }
 
     function renderBenchmarkRankingInspector(row) {
@@ -3193,6 +3236,15 @@
         const rankingMode = event.target.closest("[data-ranking-mode]");
         if (rankingMode) {
           state.rankings.mode = rankingMode.dataset.rankingMode;
+          if (state.rankings.mode === "benchmark") state.rankings.candidateSet = "ranked";
+          state.rankings.error = "";
+          state.page = 1;
+          render();
+          return;
+        }
+        const rankingSet = event.target.closest("[data-ranking-set]");
+        if (rankingSet) {
+          state.rankings.candidateSet = rankingSet.dataset.rankingSet;
           state.rankings.error = "";
           state.page = 1;
           render();

@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-060: P1 Add provider-card metadata propagation and sparse ranking candidates
+  - Source: Human request 2026-07-03 after validating that newer Claude Opus coding models had official cards but sparse independent benchmark coverage.
+  - Problem: production rankings correctly hide models below coverage/required-benchmark gates, but reviewers needed to see promising under-tested models and official provider-card metadata needed to persist across benchmark effort variants.
+  - Scope: add sparse use-case ranking candidates to `/api/rankings` and the review workbench `Rankings` view; add curated Anthropic Opus 4.7/4.8 system-card catalog metadata; extend catalog discovery to persist release/context/card fields; propagate missing card metadata across canonical variants without generating benchmark scores.
+  - Acceptance: production rankings remain coverage-gated, under-tested candidates are visible separately with available-evidence score and eligibility notes, and canonical benchmark variants can inherit official model-card/release/context metadata from curated provider-card donor rows.
+  - Validation: focused ranking and review-workbench tests, JavaScript syntax check, baseline JSON validation, rendered local browser smoke, docs/version checks.
+  - Completed: 2026-07-03. The review workbench now separates production-ranked models from under-tested candidates and official provider-card metadata propagates to canonical variants.
+
 - [x] LBM-058: P2 Add role-aware benchmark rankings to review workbench
   - Source: Human approval 2026-07-02 after planning benchmark ranking views for generative, embedding, and reranker models.
   - Problem: reviewers needed benchmark rankings somewhere in the interactive workbench, but a single mixed leaderboard would incorrectly compare embeddings, rerankers, and generative models.

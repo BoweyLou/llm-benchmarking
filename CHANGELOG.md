@@ -5,6 +5,8 @@
 - Added the FastAPI-served `/review` banking model review workbench with filterable model/use-case/family views, token-guarded review decision APIs, manual model creation, deprecation support, and review snapshot export/import.
 - Changed the review workbench model table to show the best available release-date indicator instead of the use-case approval update time, and added matching browser CSV columns for that best-date value.
 - Added a review workbench `Rankings` view for role-aware use-case rankings and raw benchmark leaderboards, including score breakdowns in the right inspector.
+- Added under-tested use-case candidates to the review workbench rankings and `/api/rankings` as a separate sparse-evidence lane, while keeping production rankings gated by benchmark coverage and required evidence.
+- Added curated Anthropic Opus 4.7/4.8 system-card catalog metadata and canonical-family propagation so benchmark effort variants can inherit official model-card, release, context-window, and capability metadata without creating benchmark scores.
 - Added a review workbench `Run updates` control that starts the full background update pipeline and shows live step progress from the update status API.
 - Added `Unreviewed` as an explicit general-approval triage state in the review workbench and review API.
 - Fixed the review workbench inspector tabs so `Controls`, `Activity`, and `Notes` switch to separate usable panels.
