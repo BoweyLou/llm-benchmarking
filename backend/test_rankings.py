@@ -432,6 +432,84 @@ class RankingTests(unittest.TestCase):
         refreshed_ranked_names = [row["model"]["name"] for row in refreshed_rankings["rankings"]]
         self.assertIn(e2b["name"], refreshed_ranked_names)
 
+    def test_huggingface_model_discovery_applies_configured_model_roles(self) -> None:
+        entry = {
+            "source": "huggingface",
+            "family": "nvidia-embedding",
+            "provider": "NVIDIA",
+            "author": "nvidia",
+            "queries": ["NV-Embed"],
+            "include_patterns": ["nvidia/NV-Embed*"],
+            "trusted_mirrors": [],
+            "model_roles": ["embedding"],
+        }
+        items = [
+            {
+                "modelId": "nvidia/NV-Embed-v2",
+                "pipeline_tag": "feature-extraction",
+                "tags": ["sentence-transformers", "retrieval"],
+            }
+        ]
+
+        with patch.object(update_engine.model_discovery, "huggingface_discovery_entries", return_value=[entry]), patch.object(
+            update_engine.model_discovery,
+            "fetch_huggingface_discovery_items",
+            return_value=items,
+        ):
+            summary = update_engine.refresh_model_discovery_metadata(source="huggingface", family="nvidia-embedding")
+
+        self.assertEqual(summary["records_found"], 1)
+        models = update_engine.list_models()
+        discovered = next(model for model in models if model.get("huggingface_repo_id") == "nvidia/NV-Embed-v2")
+        self.assertEqual(discovered["provider"], "NVIDIA")
+        self.assertEqual(discovered["model_roles"], ["embedding"])
+        self.assertEqual(discovered["metadata_source_name"], "huggingface_model_discovery")
+
+    def test_catalog_model_discovery_adds_provider_catalog_embedding_rows(self) -> None:
+        entry = {
+            "source": "catalog",
+            "family": "ibm-watsonx-retrieval",
+            "provider": "IBM",
+            "source_url": "https://example.test/ibm-embeddings",
+            "models": [
+                {
+                    "id": "ibm-slate-30m-english-rtrvr",
+                    "name": "Slate 30M English Retriever",
+                    "catalog_model_id": "ibm/slate-30m-english-rtrvr",
+                    "model_roles": ["embedding"],
+                    "parameter_count_b": 0.03,
+                    "model_card_url": "https://example.test/slate-card",
+                    "capabilities": ["embedding", "retrieval", "watsonx"],
+                }
+            ],
+        }
+
+        with patch.object(update_engine.model_discovery, "catalog_discovery_entries", return_value=[entry]):
+            summary = update_engine.refresh_model_discovery_metadata(source="catalog", family="ibm-watsonx-retrieval")
+
+        self.assertEqual(summary["records_found"], 1)
+        model = next(model for model in update_engine.list_models() if model["id"] == "ibm-slate-30m-english-rtrvr")
+        self.assertEqual(model["provider"], "IBM")
+        self.assertEqual(model["model_roles"], ["embedding"])
+        self.assertEqual(model["catalog_status"], "tracked")
+        self.assertEqual(model["metadata_source_name"], "catalog_model_discovery")
+        self.assertEqual(model["model_card_url"], "https://example.test/slate-card")
+        self.assertEqual(model["parameter_count_b"], 0.03)
+
+        with get_connection(self.engine) as conn:
+            score_rows = fetch_all(conn, select(scores_table))
+            source_runs = fetch_all(
+                conn,
+                select(source_runs_table).where(source_runs_table.c.source_name == "catalog_model_discovery"),
+            )
+            raw_records = fetch_all(
+                conn,
+                select(raw_source_records_table).where(raw_source_records_table.c.source_run_id == source_runs[0]["id"]),
+            )
+        self.assertEqual(score_rows, [])
+        self.assertEqual(len(source_runs), 1)
+        self.assertEqual(len(raw_records), 1)
+
     def test_internal_view_weight_boosts_scored_models_without_blocking_missing_models(self) -> None:
         self.add_model("internal-a", "Internal A")
         self.add_model("internal-b", "Internal B")

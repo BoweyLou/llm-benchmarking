@@ -136,13 +136,13 @@ flowchart LR
    release dates are promoted with precision, confidence, source URL, and
    verification timestamp.
 4. Post-source phases refresh identity/canonical model fields, reapply provider
-   origin baselines, pull all-modality OpenRouter model metadata, run curated
-   Hugging Face model discovery for full updates, refresh Hugging Face model
-   cards and licenses, collect optional OpenRouter market signals, and run the
+   origin baselines, pull all-modality OpenRouter model metadata, run configured
+   model discovery for full updates, refresh Hugging Face model cards and
+   licenses, collect optional OpenRouter market signals, and run the
    post-update audit. Benchmark-scoped updates skip model discovery unless
    `--refresh-model-discovery` is passed. Hugging Face repository creation,
-   OpenRouter addition, and local discovery timestamps are retained as age
-   proxies, not as official release dates.
+   OpenRouter addition, provider-catalog inclusion, and local discovery
+   timestamps are retained as age proxies, not as official release dates.
 5. `python -m backend inference-sync` is a separate sync for hyperscaler
    inference destinations. It writes availability, region, deployment-mode, and
    pricing evidence to the inference catalog tables.
@@ -171,7 +171,7 @@ flowchart LR
 | FaithJudge | `FaithJudgeAdapter` | Aggregate RAG hallucination rate plus task-level FaithBench/RAGTruth summarization, QA, and data-to-text rates. | Lower is better; task rows prevent one aggregate from carrying all RAG faithfulness meaning. |
 | Vectara Hallucination | `VectaraHallucinationAdapter` | Factual consistency plus hallucination-rate and answer-rate companion metrics. | This is grounded summarization evidence, not retrieval relevance. |
 | OpenRouter models | `_refresh_openrouter_model_metadata()` | All output modalities, model IDs/slugs, canonical OpenRouter identity, context and pricing fields, Hugging Face repo links, OpenRouter addition timestamp, newly discovered provisional models. | OpenRouter addition is an age proxy, not an official release date; source precedence prevents silent overrides. |
-| Hugging Face model discovery | `_refresh_huggingface_model_discovery()` | Curated official/provider-owned model repos, `huggingface_repo_id`, Hugging Face creation and modification timestamps, model size fields, small-model candidate flag, provisional catalog rows, and raw source records. | Repository creation is an age proxy, not an official release date; metadata-only discovery does not synthesize scores or relax `small_model_routing` cost/speed gates. v1 baseline covers official Google Gemma discovery and leaves trusted mirrors empty. |
+| Configured model discovery | `_refresh_configured_model_discovery()` | Static provider catalog rows plus curated official/provider-owned Hugging Face repos, model roles, `huggingface_repo_id`, model-card/docs links, creation and modification timestamps, model size fields, small-model candidate flag, provisional or tracked catalog rows, and raw source records. | Metadata-only discovery does not synthesize scores or relax ranking gates. The baseline covers Google Gemma, NVIDIA retrieval/NIM, IBM watsonx Slate, and IBM Granite retrieval entries while excluding community quantizations/fine-tunes unless a trusted mirror is configured. |
 | OpenRouter market | `_refresh_openrouter_market_signals()` | Global and programming rank, total tokens, share, change ratio, request count, volume snapshots. | Ranking page payloads are optional and can change shape; failures are nonfatal warnings and appear in freshness/degraded export context. |
 | Hugging Face model cards | `_refresh_model_card_metadata()` | Model-card URL/source, docs/repo/paper URLs, license, base models, languages, capabilities, intended use, limitations, training data, cutoff. | Only models with `huggingface_repo_id`; README extraction can be incomplete or noisy. |
 | Hyperscaler catalogs | `sync_inference_catalog()` | AWS Bedrock, Azure AI Foundry, and Google Vertex AI availability, regions, deployment modes, pricing, source links, sync status. | AWS/GCP richer catalog data needs credentials; Azure public pricing can rate-limit. |
@@ -222,13 +222,15 @@ use cases rank only embedding or reranker models.
 
 ### Catalog Discovery Boundary
 
-Curated Hugging Face model discovery is a catalog visibility lane, not a
-ranking shortcut. It imports official/provider-owned repos from
-`backend/model_discovery_baseline.json`, creates provisional active model rows,
-stores raw source records, links `huggingface_repo_id`, and parses size markers
-such as `270M`, `12B`, `26B-A4B`, `E2B`, and `E4B`. The exported size fields
-let downstream review find small-model candidates, while `small_model_routing`
-still ranks only models with the required `aa_cost` and `aa_speed` evidence.
+Configured model discovery is a catalog visibility lane, not a ranking shortcut.
+It imports static provider catalog rows and official/provider-owned Hugging Face
+repos from `backend/model_discovery_baseline.json`, creates active model rows,
+stores raw source records, links `huggingface_repo_id` where available, records
+model roles such as `embedding`, `reranker`, and `multimodal_embedding`, and
+parses size markers such as `270M`, `12B`, `26B-A4B`, `E2B`, and `E4B`. The
+exported fields let downstream review find provider-hosted retrieval models and
+small-model candidates, while rankings still require the configured benchmark
+evidence for the selected use case.
 
 ### Release-age Boundary
 

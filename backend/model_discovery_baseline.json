@@ -2,6 +2,93 @@
   "version": 1,
   "sources": [
     {
+      "source": "catalog",
+      "family": "nvidia-retrieval",
+      "provider": "NVIDIA",
+      "model_type": "proprietary",
+      "source_url": "https://docs.nvidia.com/rag/2.4.0/change-model.html",
+      "models": [
+        {
+          "id": "nvidia-llama-3-2-nv-embedqa-1b-v2",
+          "name": "Llama 3.2 NV EmbedQA 1B v2",
+          "catalog_model_id": "nvidia/llama-3.2-nv-embedqa-1b-v2",
+          "model_roles": ["embedding"],
+          "catalog_status": "tracked",
+          "parameter_count_b": 1.0,
+          "context_window_tokens": 8192,
+          "model_card_url": "https://build.nvidia.com/nvidia/llama-3_2-nv-embedqa-1b-v2",
+          "documentation_url": "https://docs.api.nvidia.com/nim/reference/nvidia-llama-3_2-nv-embedqa-1b-v2",
+          "capabilities": ["embedding", "retrieval", "nim", "multilingual"],
+          "intended_use_short": "NVIDIA NIM embedding model for multilingual and cross-lingual retrieval."
+        },
+        {
+          "id": "nvidia-nv-embedqa-e5-v5",
+          "name": "NV EmbedQA E5 v5",
+          "catalog_model_id": "nvidia/nv-embedqa-e5-v5",
+          "model_roles": ["embedding"],
+          "catalog_status": "tracked",
+          "documentation_url": "https://docs.nvidia.com/nemo/microservices/25.9.0/evaluate/api-key-authentication.html",
+          "capabilities": ["embedding", "retrieval", "nim"],
+          "intended_use_short": "NVIDIA embedding service used by NeMo retrieval and evaluation workflows."
+        },
+        {
+          "id": "nvidia-nv-rerankqa-mistral-4b-v3",
+          "name": "NV RerankQA Mistral 4B v3",
+          "catalog_model_id": "nvidia/nv-rerankqa-mistral-4b-v3",
+          "model_roles": ["reranker"],
+          "catalog_status": "tracked",
+          "parameter_count_b": 4.0,
+          "documentation_url": "https://docs.nvidia.com/nemo/microservices/25.9.0/evaluate/api-key-authentication.html",
+          "capabilities": ["reranking", "retrieval", "nim"],
+          "intended_use_short": "NVIDIA reranking service for retrieval pipelines."
+        },
+        {
+          "id": "nvidia-rerank-qa-mistral-4b",
+          "name": "Rerank QA Mistral 4B",
+          "catalog_model_id": "nvidia/rerank-qa-mistral-4b",
+          "model_roles": ["reranker"],
+          "catalog_status": "tracked",
+          "parameter_count_b": 4.0,
+          "model_card_url": "https://build.nvidia.com/nvidia/rerank-qa-mistral-4b",
+          "capabilities": ["reranking", "retrieval", "nim"],
+          "intended_use_short": "NVIDIA NIM reranking model for query-passage relevance scoring."
+        }
+      ]
+    },
+    {
+      "source": "catalog",
+      "family": "ibm-watsonx-retrieval",
+      "provider": "IBM",
+      "model_type": "proprietary",
+      "source_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-models-embed.html?context=wx",
+      "models": [
+        {
+          "id": "ibm-slate-30m-english-rtrvr",
+          "name": "Slate 30M English Retriever",
+          "catalog_model_id": "ibm/slate-30m-english-rtrvr",
+          "model_roles": ["embedding"],
+          "catalog_status": "tracked",
+          "parameter_count_b": 0.03,
+          "model_card_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-slate-30m-english-rtrvr-v2-model-card.html?context=wx",
+          "documentation_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-models-embed.html?context=wx",
+          "capabilities": ["embedding", "retrieval", "watsonx"],
+          "intended_use_short": "IBM watsonx English embedding model for retrieval-augmented generation."
+        },
+        {
+          "id": "ibm-slate-125m-english-rtrvr",
+          "name": "Slate 125M English Retriever",
+          "catalog_model_id": "ibm/slate-125m-english-rtrvr",
+          "model_roles": ["embedding"],
+          "catalog_status": "tracked",
+          "parameter_count_b": 0.125,
+          "model_card_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-slate-125m-english-rtrvr-v2-model-card.html?context=wx",
+          "documentation_url": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-models-embed.html?context=wx",
+          "capabilities": ["embedding", "retrieval", "watsonx"],
+          "intended_use_short": "IBM watsonx English embedding model for retrieval-augmented generation."
+        }
+      ]
+    },
+    {
       "source": "huggingface",
       "family": "gemma",
       "provider": "Google",
@@ -14,6 +101,133 @@
       ],
       "exclude_patterns": [],
       "trusted_mirrors": [],
+      "limit": 100
+    },
+    {
+      "source": "huggingface",
+      "family": "nvidia-embedding",
+      "provider": "NVIDIA",
+      "author": "nvidia",
+      "queries": [
+        "embed",
+        "retriever",
+        "NV-Embed",
+        "llama-nemotron-embed",
+        "llama-nv-embed"
+      ],
+      "include_patterns": [
+        "nvidia/NV-Embed*",
+        "nvidia/NV-Retriever*",
+        "nvidia/NV-EmbedCode*",
+        "nvidia/llama-*-embed*",
+        "nvidia/llama-nv-embed*"
+      ],
+      "exclude_patterns": [
+        "*rerank*",
+        "*Rerank*",
+        "*vl-*",
+        "*VL-*"
+      ],
+      "trusted_mirrors": [],
+      "model_roles": ["embedding"],
+      "limit": 100
+    },
+    {
+      "source": "huggingface",
+      "family": "nvidia-reranking",
+      "provider": "NVIDIA",
+      "author": "nvidia",
+      "queries": [
+        "rerank",
+        "reranker"
+      ],
+      "include_patterns": [
+        "nvidia/*rerank*",
+        "nvidia/*Rerank*"
+      ],
+      "exclude_patterns": [
+        "*vl-*",
+        "*VL-*"
+      ],
+      "trusted_mirrors": [],
+      "model_roles": ["reranker"],
+      "limit": 100
+    },
+    {
+      "source": "huggingface",
+      "family": "nvidia-multimodal-embedding",
+      "provider": "NVIDIA",
+      "author": "nvidia",
+      "queries": [
+        "embed",
+        "vl embed",
+        "omni embed",
+        "Cosmos Embed"
+      ],
+      "include_patterns": [
+        "nvidia/MM-Embed*",
+        "nvidia/Cosmos-Embed*",
+        "nvidia/omni-embed*",
+        "nvidia/*embed-vl*",
+        "nvidia/*Embed*VL*"
+      ],
+      "exclude_patterns": [
+        "*anomaly-detection"
+      ],
+      "trusted_mirrors": [],
+      "model_roles": ["multimodal_embedding"],
+      "limit": 100
+    },
+    {
+      "source": "huggingface",
+      "family": "ibm-granite-embedding",
+      "provider": "IBM",
+      "author": "ibm-granite",
+      "queries": [
+        "granite-embedding",
+        "embedding"
+      ],
+      "include_patterns": [
+        "ibm-granite/granite-embedding*"
+      ],
+      "exclude_patterns": [
+        "*reranker*",
+        "*vision*"
+      ],
+      "trusted_mirrors": [],
+      "model_roles": ["embedding"],
+      "limit": 100
+    },
+    {
+      "source": "huggingface",
+      "family": "ibm-granite-reranking",
+      "provider": "IBM",
+      "author": "ibm-granite",
+      "queries": [
+        "reranker"
+      ],
+      "include_patterns": [
+        "ibm-granite/*reranker*"
+      ],
+      "exclude_patterns": [],
+      "trusted_mirrors": [],
+      "model_roles": ["reranker"],
+      "limit": 100
+    },
+    {
+      "source": "huggingface",
+      "family": "ibm-granite-multimodal-embedding",
+      "provider": "IBM",
+      "author": "ibm-granite",
+      "queries": [
+        "vision embedding"
+      ],
+      "include_patterns": [
+        "ibm-granite/*vision*embedding*"
+      ],
+      "exclude_patterns": [],
+      "trusted_mirrors": [],
+      "model_roles": ["multimodal_embedding"],
       "limit": 100
     }
   ]

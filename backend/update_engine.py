@@ -90,6 +90,7 @@ OPENROUTER_PROGRAMMING_COLLECTION_URL = "https://openrouter.ai/collections/progr
 OPENROUTER_MARKET_SOURCE_NAME = "openrouter"
 OPENROUTER_NEW_RELEASE_LOOKBACK_DAYS = 60
 HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME = "huggingface_model_discovery"
+CATALOG_MODEL_DISCOVERY_SOURCE_NAME = "catalog_model_discovery"
 HUGGINGFACE_MODEL_API_URL_TEMPLATE = "https://huggingface.co/api/models/{repo_id}"
 HUGGINGFACE_RAW_README_URL_TEMPLATE = "https://huggingface.co/{repo_id}/raw/main/README.md"
 MODEL_CARD_REFRESH_STALE_DAYS = 30
@@ -266,10 +267,10 @@ def refresh_model_license_metadata(*, refresh_model_cards: bool = False, force_m
     return _refresh_model_license_metadata()
 
 
-def refresh_model_discovery_metadata(*, source: str = "huggingface", family: str | None = None) -> dict[str, Any]:
+def refresh_model_discovery_metadata(*, source: str = "configured", family: str | None = None) -> dict[str, Any]:
     bootstrap()
     normalized_source = str(source or "").strip().lower()
-    if normalized_source != "huggingface":
+    if normalized_source not in {"configured", "huggingface", "catalog"}:
         raise ValueError(f"Unsupported model discovery source: {source}")
 
     step_plan = [
@@ -282,7 +283,7 @@ def refresh_model_discovery_metadata(*, source: str = "huggingface", family: str
     summary: dict[str, Any] = {}
     try:
         _set_update_progress(log_id, step_plan[0], 1, total_steps)
-        summary = _refresh_huggingface_model_discovery(log_id=log_id, family=family)
+        summary = _refresh_configured_model_discovery(log_id=log_id, source=normalized_source, family=family)
         _refresh_model_identity_metadata()
         _canonicalize_model_catalog()
         _refresh_model_identity_metadata()
@@ -291,7 +292,7 @@ def refresh_model_discovery_metadata(*, source: str = "huggingface", family: str
         errors.append(
             {
                 "benchmark_id": "",
-                "source_id": HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME,
+                "source_id": "model_discovery",
                 "error_message": str(exc),
             }
         )
@@ -2783,7 +2784,7 @@ def _run_update_job(
             if refresh_model_discovery:
                 advance_phase("phase:model-discovery")
                 try:
-                    _refresh_huggingface_model_discovery(log_id=log_id)
+                    _refresh_configured_model_discovery(log_id=log_id)
                     _refresh_model_identity_metadata()
                     _canonicalize_model_catalog()
                     _refresh_model_identity_metadata()
@@ -3004,6 +3005,7 @@ def _refresh_huggingface_model_discovery(
     try:
         with httpx.Client(headers=HTTP_HEADERS, follow_redirects=True, timeout=30.0) as client:
             for entry in entries:
+                model_roles = _normalise_model_roles(entry.get("model_roles"), default=(MODEL_ROLE_GENERATOR,))
                 fetched_items = model_discovery.fetch_huggingface_discovery_items(client, entry)
                 items = model_discovery.filter_huggingface_discovery_items(fetched_items, entry)
                 for item in items:
@@ -3034,6 +3036,7 @@ def _refresh_huggingface_model_discovery(
                         source_url=source_url,
                         verified_at=verified_at,
                         discovered_update_log_id=log_id,
+                        model_roles=model_roles,
                         size_values=size_values,
                         timestamp_values=timestamp_values,
                     )
@@ -3051,7 +3054,7 @@ def _refresh_huggingface_model_discovery(
                             "family": _clean_text(entry.get("family")),
                             "provider": provider,
                             "huggingface_repo_id": repo_id,
-                            "model_roles": [MODEL_ROLE_GENERATOR],
+                            "model_roles": model_roles,
                             **timestamp_values,
                             **size_values,
                         },
@@ -3071,6 +3074,116 @@ def _refresh_huggingface_model_discovery(
                         summary["models_updated"] += 1
                     else:
                         summary["models_unchanged"] += 1
+    except Exception as exc:
+        _finish_source_run(source_run_id, status="failed", records_found=records_found, error_message=str(exc))
+        raise
+
+    summary["records_found"] = records_found
+    _finish_source_run(source_run_id, status="completed", records_found=records_found, error_message=None)
+    return summary
+
+
+def _refresh_configured_model_discovery(
+    *,
+    log_id: int,
+    source: str = "configured",
+    family: str | None = None,
+) -> dict[str, Any]:
+    normalized_source = str(source or "").strip().lower()
+    summaries: dict[str, dict[str, Any]] = {}
+    if normalized_source in {"configured", "catalog"}:
+        summaries["catalog"] = _refresh_catalog_model_discovery(log_id=log_id, family=family)
+    if normalized_source in {"configured", "huggingface"}:
+        summaries["huggingface"] = _refresh_huggingface_model_discovery(log_id=log_id, family=family)
+
+    totals = {
+        "entries": sum(int(summary.get("entries") or 0) for summary in summaries.values()),
+        "records_found": sum(int(summary.get("records_found") or 0) for summary in summaries.values()),
+        "models_created": sum(int(summary.get("models_created") or 0) for summary in summaries.values()),
+        "models_updated": sum(int(summary.get("models_updated") or 0) for summary in summaries.values()),
+        "models_unchanged": sum(int(summary.get("models_unchanged") or 0) for summary in summaries.values()),
+    }
+    return {
+        "family": _clean_text(family),
+        "sources": summaries,
+        **totals,
+    }
+
+
+def _refresh_catalog_model_discovery(
+    *,
+    log_id: int,
+    family: str | None = None,
+) -> dict[str, Any]:
+    entries = model_discovery.catalog_discovery_entries(family=family)
+    summary = {
+        "family": _clean_text(family),
+        "entries": len(entries),
+        "records_found": 0,
+        "models_created": 0,
+        "models_updated": 0,
+        "models_unchanged": 0,
+    }
+    if not entries:
+        return summary
+
+    verified_at = utc_now_iso()
+    source_run_id = _start_metadata_source_run(
+        log_id,
+        source_name=CATALOG_MODEL_DISCOVERY_SOURCE_NAME,
+        benchmark_id=_model_discovery_benchmark_id(family),
+    )
+    records_found = 0
+    try:
+        for entry in entries:
+            provider = _clean_text(entry.get("provider")) or "Unknown"
+            entry_source_url = _clean_text(entry.get("source_url"))
+            entry_roles = _normalise_model_roles(entry.get("model_roles"), default=(MODEL_ROLE_GENERATOR,))
+            for item in model_discovery.catalog_discovery_models(entry):
+                name = _clean_text(item.get("name"))
+                if not name:
+                    continue
+                item_source_url = _clean_text(item.get("source_url")) or entry_source_url or ""
+                model_id, outcome = _ensure_discovered_catalog_model(
+                    item=item,
+                    entry=entry,
+                    provider=provider,
+                    source_url=item_source_url,
+                    verified_at=verified_at,
+                    discovered_update_log_id=log_id,
+                    entry_roles=entry_roles,
+                )
+                raw_record = RawSourceRecord(
+                    source_id=CATALOG_MODEL_DISCOVERY_SOURCE_NAME,
+                    benchmark_id=_model_discovery_benchmark_id(entry.get("family") or family),
+                    raw_model_name=name,
+                    raw_value=_clean_text(item.get("catalog_model_id")) or _clean_text(item.get("id")) or name,
+                    source_url=item_source_url,
+                    collected_at=verified_at,
+                    raw_model_key=_clean_text(item.get("catalog_model_id")) or _clean_text(item.get("id")),
+                    payload=item,
+                    metadata={
+                        "source": "catalog",
+                        "family": _clean_text(entry.get("family")),
+                        "provider": provider,
+                        "model_roles": _normalise_model_roles(item.get("model_roles"), default=entry_roles),
+                    },
+                )
+                _insert_raw_source_record(
+                    source_run_id,
+                    raw_record,
+                    normalized_model_id=model_id,
+                    source_type="primary",
+                    verified=True,
+                    resolution_status="resolved",
+                )
+                records_found += 1
+                if outcome == "created":
+                    summary["models_created"] += 1
+                elif outcome == "updated":
+                    summary["models_updated"] += 1
+                else:
+                    summary["models_unchanged"] += 1
     except Exception as exc:
         _finish_source_run(source_run_id, status="failed", records_found=records_found, error_message=str(exc))
         raise
@@ -3801,6 +3914,176 @@ def _ensure_model(
     return model_id
 
 
+def _ensure_discovered_catalog_model(
+    *,
+    item: dict[str, Any],
+    entry: dict[str, Any],
+    provider: str,
+    source_url: str,
+    verified_at: str,
+    discovered_update_log_id: int | None,
+    entry_roles: list[str],
+) -> tuple[str, str]:
+    name = _clean_text(item.get("name"))
+    if not name:
+        raise ValueError("Catalog discovery item is missing a name.")
+
+    model_id = _clean_text(item.get("id")) or _choose_model_id(name, _clean_text(item.get("catalog_model_id")))
+    roles = _normalise_model_roles(item.get("model_roles"), default=entry_roles or (MODEL_ROLE_GENERATOR,))
+    model_type = _clean_text(item.get("model_type")) or _clean_text(entry.get("model_type")) or "proprietary"
+    catalog_status = _clean_text(item.get("catalog_status")) or CATALOG_STATUS_TRACKED
+    if catalog_status not in {CATALOG_STATUS_TRACKED, CATALOG_STATUS_PROVISIONAL, "deprecated"}:
+        catalog_status = CATALOG_STATUS_TRACKED
+    source_name = _clean_text(item.get("metadata_source_name")) or CATALOG_MODEL_DISCOVERY_SOURCE_NAME
+    documentation_url = _clean_text(item.get("documentation_url"))
+    model_card_url = _clean_text(item.get("model_card_url")) or documentation_url
+    repo_url = _clean_text(item.get("repo_url"))
+    paper_url = _clean_text(item.get("paper_url"))
+    license_id = _clean_text(item.get("license_id"))
+    license_name = _clean_text(item.get("license_name"))
+    license_url = _clean_text(item.get("license_url"))
+    capabilities = _decode_json_string_list(item.get("capabilities"))
+    intended_use = _clean_text(item.get("intended_use_short")) or _clean_text(item.get("description"))
+    context_window_tokens = _safe_int(item.get("context_window_tokens"))
+    parameter_count_b = _safe_float(item.get("parameter_count_b"))
+    active_parameter_count_b = _safe_float(item.get("active_parameter_count_b"))
+    model_size_class = _clean_text(item.get("model_size_class"))
+    small_model_candidate = item.get("small_model_candidate")
+    if small_model_candidate is None and parameter_count_b is not None:
+        small_model_candidate = parameter_count_b <= 15.0
+    huggingface_repo_id = _clean_text(item.get("huggingface_repo_id"))
+    identity = infer_model_identity(name, provider, model_id)
+
+    with ENGINE.begin() as conn:
+        provider_id = _ensure_provider_row(provider, conn=conn)
+        existing = fetch_one(conn, select(models_table).where(models_table.c.id == model_id))
+        if existing is None:
+            resolved = _resolve_model_id(name)
+            if resolved:
+                existing = fetch_one(conn, select(models_table).where(models_table.c.id == resolved))
+                if existing is not None:
+                    model_id = str(existing["id"])
+
+        if existing is not None:
+            values: dict[str, Any] = {}
+            current_provider = _clean_text(existing.get("provider"))
+            if not current_provider or current_provider.lower() == "unknown" or normalize_text(current_provider) == normalize_text(provider):
+                values["provider"] = provider
+                values["provider_id"] = provider_id
+
+            current_roles = _normalise_model_roles(existing.get("model_roles_json"), default=())
+            merged_roles = sorted(dict.fromkeys([*current_roles, *roles]))
+            if merged_roles and merged_roles != current_roles:
+                values["model_roles_json"] = json.dumps(merged_roles, ensure_ascii=True)
+
+            if catalog_status == CATALOG_STATUS_TRACKED and existing.get("catalog_status") == CATALOG_STATUS_PROVISIONAL:
+                values["catalog_status"] = catalog_status
+            if _model_field_missing(existing, "metadata_source_name") or existing.get("metadata_source_name") == CATALOG_MODEL_DISCOVERY_SOURCE_NAME:
+                values["metadata_source_name"] = source_name
+                values["metadata_source_url"] = source_url
+                values["metadata_verified_at"] = verified_at
+            if huggingface_repo_id and _model_field_missing(existing, "huggingface_repo_id"):
+                values["huggingface_repo_id"] = huggingface_repo_id
+            if model_card_url and _model_field_missing(existing, "model_card_url"):
+                values["model_card_url"] = model_card_url
+                values["model_card_source"] = source_name
+                values["model_card_verified_at"] = verified_at
+            if documentation_url and _model_field_missing(existing, "documentation_url"):
+                values["documentation_url"] = documentation_url
+            if repo_url and _model_field_missing(existing, "repo_url"):
+                values["repo_url"] = repo_url
+            if paper_url and _model_field_missing(existing, "paper_url"):
+                values["paper_url"] = paper_url
+            if license_id and _model_field_missing(existing, "license_id"):
+                values["license_id"] = license_id
+                values["license_name"] = license_name
+                values["license_url"] = license_url
+            if context_window_tokens and _model_field_missing(existing, "context_window_tokens"):
+                values["context_window_tokens"] = context_window_tokens
+            if parameter_count_b is not None and _model_field_missing(existing, "parameter_count_b"):
+                values["parameter_count_b"] = parameter_count_b
+            if active_parameter_count_b is not None and _model_field_missing(existing, "active_parameter_count_b"):
+                values["active_parameter_count_b"] = active_parameter_count_b
+            if model_size_class and _model_field_missing(existing, "model_size_class"):
+                values["model_size_class"] = model_size_class
+            if small_model_candidate is not None and not existing.get("small_model_candidate"):
+                values["small_model_candidate"] = 1 if bool(small_model_candidate) else 0
+            if values.keys() & {"parameter_count_b", "active_parameter_count_b", "model_size_class", "small_model_candidate"}:
+                values["model_size_source_name"] = source_name
+                values["model_size_source_url"] = source_url
+                values["model_size_verified_at"] = verified_at
+            if capabilities:
+                current_capabilities = _decode_json_string_list(existing.get("capabilities_json"))
+                merged_capabilities = sorted(dict.fromkeys([*current_capabilities, *capabilities]))
+                if merged_capabilities != current_capabilities:
+                    values["capabilities_json"] = json.dumps(merged_capabilities, ensure_ascii=True)
+            if intended_use and _model_field_missing(existing, "intended_use_short"):
+                values["intended_use_short"] = intended_use
+            if _model_field_missing(existing, "discovered_at"):
+                values["discovered_at"] = verified_at
+            if _model_field_missing(existing, "discovered_update_log_id"):
+                values["discovered_update_log_id"] = discovered_update_log_id
+
+            if not values:
+                return model_id, "unchanged"
+            conn.execute(update(models_table).where(models_table.c.id == model_id).values(**values))
+            return model_id, "updated"
+
+        values = {
+            "id": model_id,
+            "name": name,
+            "provider_id": provider_id,
+            "provider": provider,
+            "type": model_type,
+            "model_roles_json": json.dumps(roles or [MODEL_ROLE_GENERATOR], ensure_ascii=True),
+            "catalog_status": catalog_status,
+            "family_id": identity.family_id,
+            "family_name": identity.family_name,
+            "canonical_model_id": identity.canonical_model_id,
+            "canonical_model_name": identity.canonical_model_name,
+            "variant_label": identity.variant_label,
+            "discovered_at": verified_at,
+            "discovered_update_log_id": discovered_update_log_id,
+            "metadata_source_name": source_name,
+            "metadata_source_url": source_url,
+            "metadata_verified_at": verified_at,
+            "model_card_url": model_card_url,
+            "model_card_source": source_name if model_card_url else None,
+            "model_card_verified_at": verified_at if model_card_url else None,
+            "documentation_url": documentation_url,
+            "repo_url": repo_url,
+            "paper_url": paper_url,
+            "license_id": license_id,
+            "license_name": license_name,
+            "license_url": license_url,
+            "context_window_tokens": context_window_tokens,
+            "parameter_count_b": parameter_count_b,
+            "active_parameter_count_b": active_parameter_count_b,
+            "model_size_class": model_size_class,
+            "small_model_candidate": 1 if bool(small_model_candidate) else 0,
+            "model_size_source_name": source_name if any(
+                value is not None for value in (parameter_count_b, active_parameter_count_b, model_size_class, small_model_candidate)
+            ) else None,
+            "model_size_source_url": source_url if any(
+                value is not None for value in (parameter_count_b, active_parameter_count_b, model_size_class, small_model_candidate)
+            ) else None,
+            "model_size_verified_at": verified_at if any(
+                value is not None for value in (parameter_count_b, active_parameter_count_b, model_size_class, small_model_candidate)
+            ) else None,
+            "huggingface_repo_id": huggingface_repo_id,
+            "capabilities_json": json.dumps(capabilities, ensure_ascii=True),
+            "intended_use_short": intended_use,
+            "active": 1,
+        }
+        stmt = sqlite_insert(models_table).values(**values)
+        stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
+        result = conn.execute(stmt)
+        if result.rowcount:
+            return model_id, "created"
+
+    return model_id, "unchanged"
+
+
 def _ensure_discovered_huggingface_model(
     *,
     repo_id: str,
@@ -3809,6 +4092,7 @@ def _ensure_discovered_huggingface_model(
     source_url: str,
     verified_at: str,
     discovered_update_log_id: int | None,
+    model_roles: list[str],
     size_values: dict[str, Any],
     timestamp_values: dict[str, Any],
 ) -> tuple[str, str]:
@@ -3825,6 +4109,7 @@ def _ensure_discovered_huggingface_model(
                 source_url=source_url,
                 verified_at=verified_at,
                 discovered_update_log_id=discovered_update_log_id,
+                model_roles=model_roles,
                 size_values=size_values,
                 timestamp_values=timestamp_values,
                 conn=conn,
@@ -3849,7 +4134,7 @@ def _ensure_discovered_huggingface_model(
             "provider_id": provider_id,
             "provider": provider,
             "type": "open_weights",
-            "model_roles_json": json.dumps([MODEL_ROLE_GENERATOR], ensure_ascii=True),
+            "model_roles_json": json.dumps(model_roles or [MODEL_ROLE_GENERATOR], ensure_ascii=True),
             "catalog_status": CATALOG_STATUS_PROVISIONAL,
             "release_date": None,
             "release_date_precision": None,
@@ -3928,6 +4213,7 @@ def _huggingface_discovery_existing_model_values(
     source_url: str,
     verified_at: str,
     discovered_update_log_id: int | None,
+    model_roles: list[str],
     size_values: dict[str, Any],
     timestamp_values: dict[str, Any],
     conn: Any,
@@ -3940,6 +4226,11 @@ def _huggingface_discovery_existing_model_values(
     if not current_provider or current_provider.lower() == "unknown":
         values["provider"] = provider
         values["provider_id"] = _ensure_provider_row(provider, conn=conn)
+
+    current_roles = _normalise_model_roles(row.get("model_roles_json"), default=())
+    merged_roles = sorted(dict.fromkeys([*current_roles, *model_roles]))
+    if merged_roles and merged_roles != current_roles:
+        values["model_roles_json"] = json.dumps(merged_roles, ensure_ascii=True)
 
     if _model_field_missing(row, "metadata_source_name"):
         values["metadata_source_name"] = HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME

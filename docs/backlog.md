@@ -9,12 +9,20 @@ the row is older than 14 days or the backend/API shape has changed.
 
 - [ ] LBM-034: P2 Add authoritative retrieval-model taxonomy and enterprise-default signals
   - Source: Codex request 2026-07-02 after reviewing embedding/reranker export coverage.
-  - Problem: the catalog now includes embedding and reranking models through MTEB, but downstream users still have to infer "sentence transformers", provider-hosted embeddings, rerankers, TEI-deployable models, and corporate-mainstay retrieval defaults from names, providers, and benchmark IDs.
-  - Scope: authoritative retrieval-source config, model taxonomy/export fields, MTEB enrichment, official provider catalogs for OpenAI/Cohere/Voyage/Jina, official Hugging Face org discovery for Sentence Transformers/BAAI/intfloat/Alibaba-NLP/Jina/Nomic/Snowflake, and deployment-support signals from Hugging Face Text Embeddings Inference where stable.
+  - Problem: the catalog now includes embedding and reranking models through MTEB and provider-owned discovery lanes, but downstream users still have to infer "sentence transformers", TEI-deployable models, and corporate-mainstay retrieval defaults from names, providers, and benchmark IDs.
+  - Scope: authoritative retrieval-source config, model taxonomy/export fields, MTEB enrichment, official provider catalogs for OpenAI/Cohere/Voyage/Jina, official Hugging Face org discovery for Sentence Transformers/BAAI/intfloat/Alibaba-NLP/Jina/Nomic/Snowflake, deployment-support signals from Hugging Face Text Embeddings Inference where stable, and default-candidate rationale across already-discovered NVIDIA/IBM retrieval rows.
   - Acceptance: exported models expose explicit retrieval taxonomy fields such as retrieval role, retrieval family, official/provider-owned status, hosted API availability, self-hostability, TEI support, dimensions/context where available, and an evidence-backed enterprise retrieval default candidate flag with source URL and rationale.
   - Validation: fixture-backed source tests for provider catalogs and official HF org discovery; export/API tests for new fields; ranking regression proving generator, embedding, and reranker use cases remain separated; `PYTHON=python ./scripts/test_inference_suite.sh`; `make docs-check`; `make version-check` if schema/API output changes.
 
 ## Done
+
+- [x] LBM-047: P1 Add NVIDIA and IBM retrieval catalog discovery
+  - Source: Human request 2026-07-02 after noticing NVIDIA and IBM embedding catalog gaps in the banking review workbench.
+  - Problem: MTEB surfaced only some NVIDIA/IBM retrieval rows and did not cover provider-hosted catalog models such as NVIDIA NIM EmbedQA/RerankQA or IBM watsonx Slate; Hugging Face discovery also forced discovered rows into generator roles.
+  - Scope: add role-aware Hugging Face discovery, add static provider catalog discovery rows, expand the tracked discovery baseline for NVIDIA retrieval/NIM and IBM watsonx/Granite retrieval models, update CLI/docs/tests, and verify discovery plus recommendation-sync.
+  - Acceptance: `model-discovery-sync --source configured` imports provider-owned NVIDIA and IBM embedding/reranker/multimodal embedding rows with correct model roles and raw source records, without creating benchmark scores.
+  - Validation: focused discovery/ranking tests, live configured discovery, model-card sync, and `recommendation-sync --profile australian_bank`.
+  - Completed: 2026-07-02. Configured discovery added NVIDIA and IBM retrieval catalog coverage while leaving ranking evidence gates intact.
 
 - [x] LBM-046: P2 Add country filtering to review workbench
   - Source: Human request 2026-07-02 while using the Proxmox-hosted banking review workbench.

@@ -215,9 +215,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     model_discovery_parser.add_argument(
         "--source",
-        default="huggingface",
-        choices=("huggingface",),
-        help="Discovery source to refresh. Defaults to huggingface.",
+        default="configured",
+        choices=("configured", "huggingface", "catalog"),
+        help="Discovery source to refresh. Defaults to all configured discovery sources.",
     )
     model_discovery_parser.add_argument(
         "--family",

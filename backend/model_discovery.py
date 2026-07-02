@@ -60,6 +60,28 @@ def huggingface_discovery_entries(*, family: str | None = None, path: Path | Non
     return entries
 
 
+def catalog_discovery_entries(*, family: str | None = None, path: Path | None = None) -> list[dict[str, Any]]:
+    baseline = load_model_discovery_baseline(path)
+    family_filter = _clean_text(family).lower()
+    entries: list[dict[str, Any]] = []
+    for item in baseline.get("sources", []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("source") or "").strip().lower() != "catalog":
+            continue
+        if family_filter and str(item.get("family") or "").strip().lower() != family_filter:
+            continue
+        entries.append(dict(item))
+    return entries
+
+
+def catalog_discovery_models(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    models = entry.get("models")
+    if not isinstance(models, list):
+        return []
+    return [dict(item) for item in models if isinstance(item, dict)]
+
+
 def fetch_huggingface_discovery_items(
     client: httpx.Client,
     entry: dict[str, Any],
@@ -258,6 +280,8 @@ __all__ = [
     "ModelSizeMetadata",
     "fetch_huggingface_discovery_items",
     "filter_huggingface_discovery_items",
+    "catalog_discovery_entries",
+    "catalog_discovery_models",
     "huggingface_discovery_entries",
     "huggingface_timestamp_values_from_item",
     "infer_model_size_metadata",

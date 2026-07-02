@@ -109,6 +109,23 @@ class ModelDiscoveryTests(unittest.TestCase):
 
         self.assertEqual(values, {})
 
+    def test_baseline_includes_nvidia_and_ibm_retrieval_catalog_sources(self) -> None:
+        catalog_families = {
+            entry["family"]
+            for entry in model_discovery.catalog_discovery_entries()
+        }
+        huggingface_families = {
+            entry["family"]
+            for entry in model_discovery.huggingface_discovery_entries()
+        }
+
+        self.assertIn("nvidia-retrieval", catalog_families)
+        self.assertIn("ibm-watsonx-retrieval", catalog_families)
+        self.assertIn("nvidia-embedding", huggingface_families)
+        self.assertIn("nvidia-reranking", huggingface_families)
+        self.assertIn("ibm-granite-embedding", huggingface_families)
+        self.assertIn("ibm-granite-reranking", huggingface_families)
+
 
 if __name__ == "__main__":
     unittest.main()

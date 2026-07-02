@@ -40,7 +40,7 @@ What those commands do:
 - `python -m backend bootstrap`
   Creates the schema, repairs local runtime state, seeds reference data, and applies repo-backed provider-origin, model-curation, and model-license baselines. It does not call external metadata services.
 - `python -m backend update`
-  Runs the benchmark ingestion/update pipeline, refreshes external OpenRouter/catalog-discovery/model-card/market metadata, and writes update history plus audit results. Full updates run curated model discovery; benchmark-scoped updates skip it unless `--refresh-model-discovery` is passed.
+  Runs the benchmark ingestion/update pipeline, refreshes external OpenRouter/catalog-discovery/model-card/market metadata, and writes update history plus audit results. Full updates run configured model discovery; benchmark-scoped updates skip it unless `--refresh-model-discovery` is passed.
 - `python -m backend list-models`
   Prints or exports the complete active model metadata list and writes a default clean CSV bundle.
 
@@ -360,7 +360,9 @@ python -m backend bootstrap
 python -m backend update
 python -m backend update --benchmarks terminal_bench swebench_verified
 python -m backend update --benchmarks aa_cost aa_speed --refresh-model-discovery
-python -m backend model-discovery-sync --source huggingface --family gemma
+python -m backend model-discovery-sync --source configured
+python -m backend model-discovery-sync --source huggingface --family nvidia-embedding
+python -m backend model-discovery-sync --source catalog --family ibm-watsonx-retrieval
 python -m backend list-models
 python -m backend list-models --format jsonl --output output/model-metadata.jsonl
 python -m backend list-models --format csv --output output/model-metadata.csv
@@ -383,8 +385,8 @@ python -m backend model-curation-export
 
 Notes:
 
-- Full `update` runs curated Hugging Face model discovery before model-card refresh. `update --benchmarks ...` skips that discovery phase unless `--refresh-model-discovery` is passed.
-- `model-discovery-sync` runs only the curated metadata discovery lane. The v1 repo-backed baseline covers official Google Gemma discovery and intentionally excludes community quantizations/fine-tunes unless a trusted mirror is configured.
+- Full `update` runs configured model discovery before model-card refresh. `update --benchmarks ...` skips that discovery phase unless `--refresh-model-discovery` is passed.
+- `model-discovery-sync` runs only the curated metadata discovery lane. `--source configured` runs both static provider catalog rows and provider-owned Hugging Face discovery; use `--source huggingface` or `--source catalog` to narrow the run. The repo-backed baseline covers Google Gemma, NVIDIA retrieval, IBM watsonx Slate, and IBM Granite retrieval entries, and intentionally excludes community quantizations/fine-tunes unless a trusted mirror is configured.
 - OpenRouter model refresh requests all output modalities so non-text-capable catalog rows are not hidden by the provider default.
 - `inference-sync` supports destination subsets.
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
