@@ -17,6 +17,7 @@ AuditSeverity = Literal["blocker", "warning", "info"]
 FamilyApprovalScope = Literal["family", "delta"]
 RecommendationStatusIn = Literal["unrated", "recommended", "not_recommended", "discouraged"]
 RecommendationStatusOut = Literal["unrated", "recommended", "not_recommended", "discouraged", "mixed"]
+CatalogStatusIn = Literal["tracked", "provisional", "deprecated"]
 UpdateProgressStatus = Literal["pending", "running", "completed", "failed"]
 LicensePolicyClass = Literal["commercial_clear", "potential_legal_review", "commercial_blocked"]
 ProvenancePolicyClass = Literal["standard", "derivative_review", "derivative_unverified"]
@@ -468,6 +469,34 @@ class ProviderUpdateIn(APIModel):
 class ModelApprovalUpdateIn(APIModel):
     approved_for_use: bool = False
     approval_notes: str | None = None
+
+
+class ReviewDecisionIn(APIModel):
+    model_ids: list[str] = Field(default_factory=list)
+    use_case_ids: list[str] = Field(default_factory=list)
+    approved_for_use: bool | None = None
+    approval_notes: str | None = None
+    recommendation_status: RecommendationStatusIn | None = None
+    recommendation_notes: str | None = None
+    catalog_status: CatalogStatusIn | None = None
+
+
+class ReviewModelCreateIn(APIModel):
+    name: str
+    provider: str
+    model_id: str | None = None
+    type: str = "proprietary"
+    model_roles: list[ModelRole] = Field(default_factory=lambda: ["generator"])
+    catalog_status: CatalogStatusIn = "tracked"
+    notes: str | None = None
+
+
+class ReviewSnapshotIn(APIModel):
+    schema_version: int
+    exported_at: str | None = None
+    catalog_statuses: list[dict[str, Any]] = Field(default_factory=list)
+    manual_models: list[dict[str, Any]] = Field(default_factory=list)
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class UseCaseOut(APIModel):

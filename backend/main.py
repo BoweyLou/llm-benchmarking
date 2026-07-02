@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from secrets import compare_digest
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
 from .catalog_export import build_model_metadata_list
 from .models import (
@@ -29,6 +32,9 @@ from .models import (
     ProviderUpdateIn,
     RawSourceRecordOut,
     RankingsResponseOut,
+    ReviewDecisionIn,
+    ReviewModelCreateIn,
+    ReviewSnapshotIn,
     SourceRunOut,
     UpdateLogOut,
     UpdateStartIn,
@@ -63,9 +69,17 @@ from .update_engine import (
     update_provider_origin,
     update_use_case_internal_weight,
 )
+from .review_workbench import (
+    add_review_model,
+    apply_review_decisions,
+    build_review_catalog,
+    export_review_snapshot,
+    import_review_snapshot,
+)
 
 ADMIN_TOKEN_ENV_VAR = "LLM_BENCHMARKING_ADMIN_TOKEN"
 ADMIN_TOKEN_HEADER = "x-llm-benchmarking-admin-token"
+REVIEW_APP_PATH = Path(__file__).resolve().parent / "static" / "review.html"
 
 
 def _bearer_token(value: str | None) -> str | None:
@@ -111,6 +125,11 @@ def root_model_metadata_list() -> list[dict]:
     return build_model_metadata_list()
 
 
+@app.get("/review", response_class=HTMLResponse, include_in_schema=False)
+def review_workbench_app() -> str:
+    return REVIEW_APP_PATH.read_text(encoding="utf-8")
+
+
 @app.get("/api/benchmarks", response_model=list[BenchmarkOut])
 def api_benchmarks() -> list[dict]:
     return list_benchmarks()
@@ -129,6 +148,56 @@ def api_models() -> list[dict]:
 @app.get("/api/providers", response_model=list[ProviderOut])
 def api_providers() -> list[dict]:
     return list_providers()
+
+
+@app.get("/api/review/catalog", response_model=dict[str, Any])
+def api_review_catalog() -> dict[str, Any]:
+    return build_review_catalog()
+
+
+@app.post("/api/review/decisions", response_model=dict[str, Any], dependencies=[Depends(require_local_admin)])
+def api_apply_review_decisions(payload: ReviewDecisionIn) -> dict[str, Any]:
+    try:
+        return apply_review_decisions(
+            model_ids=payload.model_ids,
+            use_case_ids=payload.use_case_ids,
+            approved_for_use=payload.approved_for_use,
+            approval_notes=payload.approval_notes,
+            recommendation_status=payload.recommendation_status,
+            recommendation_notes=payload.recommendation_notes,
+            catalog_status=payload.catalog_status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/review/models", response_model=dict[str, Any], dependencies=[Depends(require_local_admin)])
+def api_add_review_model(payload: ReviewModelCreateIn) -> dict[str, Any]:
+    try:
+        return add_review_model(
+            name=payload.name,
+            provider=payload.provider,
+            model_id=payload.model_id,
+            model_type=payload.type,
+            model_roles=payload.model_roles,
+            catalog_status=payload.catalog_status,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/review/snapshots/export", response_model=dict[str, Any], dependencies=[Depends(require_local_admin)])
+def api_export_review_snapshot() -> dict[str, Any]:
+    return export_review_snapshot()
+
+
+@app.post("/api/review/snapshots/import", response_model=dict[str, Any], dependencies=[Depends(require_local_admin)])
+def api_import_review_snapshot(payload: ReviewSnapshotIn) -> dict[str, Any]:
+    try:
+        return import_review_snapshot(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.patch("/api/providers/{provider_id}", response_model=ProviderOut, dependencies=[Depends(require_local_admin)])

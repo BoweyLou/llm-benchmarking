@@ -1,0 +1,1623 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Banking Model Review</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --panel-muted: #f9fafb;
+      --text: #111827;
+      --muted: #5b6472;
+      --faint: #8a94a3;
+      --line: #d9dee7;
+      --line-strong: #c6cedb;
+      --blue: #0b63ce;
+      --blue-soft: #e8f1ff;
+      --green: #197a3a;
+      --green-soft: #eaf7ee;
+      --orange: #c75f00;
+      --orange-soft: #fff3e5;
+      --red: #c81e1e;
+      --red-soft: #fff0f0;
+      --purple: #7650c7;
+      --shadow: 0 1px 2px rgba(17, 24, 39, 0.08);
+      --header-h: 58px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 1120px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+      letter-spacing: 0;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.56;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: var(--header-h) 1fr 46px;
+      min-height: 100vh;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 244px minmax(0, 1fr) 396px;
+      align-items: center;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 0 18px;
+      height: 100%;
+      border-right: 1px solid var(--line);
+    }
+
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      color: #fff;
+      background: #17355e;
+      border-radius: 4px;
+      font-weight: 800;
+      font-size: 15px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.1;
+      font-weight: 720;
+      white-space: nowrap;
+    }
+
+    .brand p {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .sync-strip {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 18px;
+      padding: 0 20px;
+      color: var(--muted);
+      min-width: 0;
+    }
+
+    .status-ok {
+      color: var(--green);
+      font-weight: 650;
+    }
+
+    .header-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      border-left: 1px solid var(--line);
+    }
+
+    .token-input {
+      width: 154px;
+      height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0 9px;
+      color: var(--text);
+      background: #fff;
+    }
+
+    .main {
+      display: grid;
+      grid-template-columns: 244px minmax(580px, 1fr) 396px;
+      min-height: 0;
+    }
+
+    .filters {
+      background: var(--panel);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .filters-head,
+    .filter-scroll,
+    .filter-foot {
+      padding: 14px 16px;
+    }
+
+    .filters-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 720;
+    }
+
+    .filter-scroll {
+      overflow: auto;
+      padding-top: 2px;
+      flex: 1;
+    }
+
+    .filter-group {
+      margin-bottom: 15px;
+    }
+
+    .filter-group label {
+      display: block;
+      margin-bottom: 7px;
+      font-weight: 680;
+      color: #202a37;
+    }
+
+    .field,
+    .select,
+    .textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 5px;
+      color: var(--text);
+      box-shadow: inset 0 1px 0 rgba(17, 24, 39, 0.02);
+    }
+
+    .field,
+    .select {
+      height: 34px;
+      padding: 0 10px;
+    }
+
+    .textarea {
+      min-height: 78px;
+      padding: 10px;
+      resize: vertical;
+    }
+
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+    }
+
+    .filter-foot {
+      border-top: 1px solid var(--line);
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+    }
+
+    .content {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 48px auto 1fr 48px;
+      background: #fff;
+    }
+
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+
+    .tab {
+      height: 48px;
+      padding: 0 12px;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      background: transparent;
+      color: #252f3d;
+      font-weight: 620;
+    }
+
+    .tab.active {
+      border-bottom-color: var(--blue);
+      color: var(--blue);
+    }
+
+    .count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 24px;
+      height: 22px;
+      margin-left: 6px;
+      padding: 0 7px;
+      border-radius: 999px;
+      background: #eef2f7;
+      color: #394354;
+      font-weight: 650;
+    }
+
+    .tab.active .count {
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+
+    .table-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .table-title {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      font-weight: 720;
+    }
+
+    .table-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bulkbar {
+      margin: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-muted);
+      box-shadow: var(--shadow);
+    }
+
+    .bulk-actions {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .bulk-note {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 8px 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .table-wrap {
+      overflow: auto;
+      min-height: 0;
+      border-top: 1px solid var(--line);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 894px;
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid #e9edf3;
+      border-right: 1px solid #eef1f5;
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: middle;
+      height: 52px;
+      overflow: hidden;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #f6f8fb;
+      color: #2f3947;
+      font-size: 12px;
+      font-weight: 720;
+      white-space: nowrap;
+    }
+
+    th.sortable {
+      cursor: pointer;
+    }
+
+    tr.selected td {
+      background: #f0f6ff;
+    }
+
+    tr:hover td {
+      background: #f8fbff;
+    }
+
+    .model-name {
+      font-weight: 720;
+      color: #121a27;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .subtle {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .linkish {
+      color: var(--blue);
+      text-decoration: none;
+      font-weight: 650;
+      background: transparent;
+      border: 0;
+      padding: 0;
+    }
+
+    .btn {
+      height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: #273244;
+      padding: 0 12px;
+      font-weight: 650;
+      box-shadow: 0 1px 0 rgba(17, 24, 39, 0.02);
+    }
+
+    .btn.primary {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+
+    .btn.green {
+      color: var(--green);
+      border-color: #a9d8b6;
+      background: var(--green-soft);
+    }
+
+    .btn.orange {
+      color: var(--orange);
+      border-color: #ffc987;
+      background: var(--orange-soft);
+    }
+
+    .btn.red {
+      color: var(--red);
+      border-color: #f2b3b3;
+      background: var(--red-soft);
+    }
+
+    .btn.purple {
+      color: var(--purple);
+      border-color: #d7c8f5;
+      background: #f4efff;
+    }
+
+    .btn.small {
+      height: 28px;
+      padding: 0 9px;
+      font-size: 12px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      min-height: 22px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .badge.green {
+      color: var(--green);
+      background: var(--green-soft);
+      border-color: #b8dfc1;
+    }
+
+    .badge.orange {
+      color: var(--orange);
+      background: var(--orange-soft);
+      border-color: #ffc987;
+    }
+
+    .badge.red {
+      color: var(--red);
+      background: var(--red-soft);
+      border-color: #f2b3b3;
+    }
+
+    .badge.blue {
+      color: var(--blue);
+      background: var(--blue-soft);
+      border-color: #b9d4ff;
+    }
+
+    .badge.gray {
+      color: #455063;
+      background: #f3f5f8;
+    }
+
+    .pager {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      background: #fff;
+    }
+
+    .inspector {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 0;
+      background: #fff;
+      border-left: 1px solid var(--line);
+    }
+
+    .inspector-head {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .inspector-head h2 {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.2;
+    }
+
+    .meta-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 9px 22px;
+      margin-top: 14px;
+      color: #293443;
+      font-size: 12px;
+    }
+
+    .meta-grid span {
+      display: block;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+
+    .inspector-tabs {
+      display: flex;
+      gap: 16px;
+      padding: 0 18px;
+      height: 42px;
+      align-items: end;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .inspector-tabs button {
+      height: 42px;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    .inspector-tabs button.active {
+      color: var(--blue);
+      border-bottom-color: var(--blue);
+    }
+
+    .inspector-body {
+      min-height: 0;
+      overflow: auto;
+      padding: 14px 12px 18px;
+    }
+
+    .usecase-card,
+    .control-card,
+    .family-row {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      margin-bottom: 8px;
+    }
+
+    .usecase-card {
+      padding: 10px;
+    }
+
+    .usecase-card.active {
+      border-color: #9fc4ff;
+      box-shadow: 0 0 0 1px #d9e8ff inset;
+    }
+
+    .usecase-card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .usecase-card h3,
+    .control-card h3 {
+      margin: 0 0 4px;
+      font-size: 13px;
+    }
+
+    .control-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .control-card {
+      padding: 10px;
+      min-height: 104px;
+    }
+
+    .control-card ul {
+      margin: 7px 0 0;
+      padding-left: 17px;
+      color: #263140;
+      font-size: 12px;
+    }
+
+    .decision-form {
+      display: grid;
+      gap: 10px;
+      padding-top: 12px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .inspector-foot {
+      border-top: 1px solid var(--line);
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+      background: #fbfcfe;
+    }
+
+    .bottom-hint {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 28px;
+      background: #fbfcfe;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+    }
+
+    .family-list {
+      overflow: auto;
+      padding: 14px;
+    }
+
+    .family-row {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) 90px 110px 120px 220px;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+    }
+
+    dialog {
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      box-shadow: 0 16px 40px rgba(17, 24, 39, 0.24);
+      width: 420px;
+      padding: 0;
+    }
+
+    dialog::backdrop {
+      background: rgba(17, 24, 39, 0.18);
+    }
+
+    .dialog-head,
+    .dialog-body,
+    .dialog-foot {
+      padding: 14px 16px;
+    }
+
+    .dialog-head {
+      border-bottom: 1px solid var(--line);
+      font-weight: 720;
+      font-size: 15px;
+    }
+
+    .dialog-body {
+      display: grid;
+      gap: 10px;
+    }
+
+    .dialog-foot {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      border-top: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 58px;
+      max-width: 360px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111827;
+      color: #fff;
+      box-shadow: 0 10px 26px rgba(17, 24, 39, 0.24);
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .empty {
+      padding: 42px;
+      color: var(--muted);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">BR</div>
+        <div>
+          <h1>Banking Model Review</h1>
+          <p>Internal Data Review Workbench</p>
+        </div>
+      </div>
+      <div class="sync-strip">
+        <span id="lastSynced">Loading catalog...</span>
+        <button class="linkish" id="syncNow">Sync now</button>
+        <span>Auto-save: <span class="status-ok">On</span></span>
+      </div>
+      <div class="header-actions">
+        <input id="adminToken" class="token-input" type="password" placeholder="Admin token">
+        <button class="btn small" id="saveToken">Save token</button>
+        <button class="btn small" id="addModelButton">Add model</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <aside class="filters">
+        <div class="filters-head">
+          <span>Filters</span>
+          <button class="linkish" id="resetFilters">Reset all</button>
+        </div>
+        <div class="filter-scroll">
+          <div class="filter-group">
+            <input id="search" class="field" placeholder="Search models...">
+          </div>
+          <div class="filter-group">
+            <label for="providerFilter">Provider</label>
+            <select id="providerFilter" class="select"></select>
+          </div>
+          <div class="filter-group">
+            <label for="useCaseFilter">Use case</label>
+            <select id="useCaseFilter" class="select"></select>
+          </div>
+          <div class="filter-group">
+            <label for="recommendationFilter">Recommendation</label>
+            <select id="recommendationFilter" class="select">
+              <option value="">All recommendations</option>
+              <option value="recommended">Recommended</option>
+              <option value="not_recommended">Not recommended</option>
+              <option value="discouraged">Discouraged</option>
+              <option value="unrated">Unrated</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="approvalFilter">Approval</label>
+            <select id="approvalFilter" class="select">
+              <option value="">All approvals</option>
+              <option value="approved">Approved</option>
+              <option value="not_approved">Not approved</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="familyFilter">Family</label>
+            <select id="familyFilter" class="select"></select>
+          </div>
+          <div class="filter-group">
+            <label for="catalogFilter">Catalog status</label>
+            <select id="catalogFilter" class="select">
+              <option value="">All catalog statuses</option>
+              <option value="tracked">Tracked</option>
+              <option value="provisional">Provisional</option>
+              <option value="deprecated">Deprecated</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="roleFilter">Model role</label>
+            <select id="roleFilter" class="select">
+              <option value="">All roles</option>
+              <option value="generator">Generator</option>
+              <option value="embedding">Embedding</option>
+              <option value="reranker">Reranker</option>
+              <option value="multimodal_embedding">Multimodal embedding</option>
+            </select>
+          </div>
+          <div class="filter-group check-row">
+            <input id="smallOnly" type="checkbox">
+            <label for="smallOnly">Small model candidates only</label>
+          </div>
+        </div>
+        <div class="filter-foot">
+          <button class="btn" id="exportSnapshot">Export snapshot</button>
+          <button class="btn" id="importSnapshot">Import snapshot</button>
+          <input id="snapshotFile" type="file" accept="application/json" hidden>
+          <span id="showingCount">Showing 0 models</span>
+        </div>
+      </aside>
+
+      <section class="content">
+        <nav class="tabs" id="tabs"></nav>
+        <div>
+          <div class="table-head">
+            <div class="table-title">
+              <span id="modelCount">0 models</span>
+              <span id="selectedCount">0 selected</span>
+              <button class="linkish" id="clearSelection">Clear selection</button>
+            </div>
+            <div class="table-actions">
+              <select class="select" id="groupBy" style="width: 150px">
+                <option value="">Group by: None</option>
+                <option value="family">Group by: Family</option>
+                <option value="provider">Group by: Provider</option>
+              </select>
+              <button class="btn small" id="columnsButton">Columns</button>
+            </div>
+          </div>
+          <div class="bulkbar">
+            <div class="bulk-actions">
+              <strong id="bulkTarget">0 selected</strong>
+              <button class="btn green" data-action="approve">Approve</button>
+              <button class="btn green" data-action="recommended">Recommended</button>
+              <button class="btn orange" data-action="not_recommended">Not recommended</button>
+              <button class="btn red" data-action="discouraged">Discouraged</button>
+              <button class="btn purple" data-action="deprecated">Deprecate</button>
+              <button class="btn" data-action="clear">Clear</button>
+            </div>
+            <div class="bulk-note">
+              <span id="bulkScope">Actions apply to selected rows. If none are selected, they apply to the filtered list.</span>
+              <button class="linkish" id="selectFiltered">Select filtered list</button>
+            </div>
+          </div>
+        </div>
+        <div id="mainTable" class="table-wrap"></div>
+        <footer class="pager">
+          <button class="btn small" id="prevPage">Previous</button>
+          <span id="pageLabel">Page 1</span>
+          <button class="btn small" id="nextPage">Next</button>
+        </footer>
+      </section>
+
+      <aside class="inspector">
+        <div class="inspector-head" id="inspectorHead"></div>
+        <div>
+          <div class="inspector-tabs">
+            <button class="active">Use cases</button>
+            <button>Controls</button>
+            <button>Activity</button>
+            <button>Notes</button>
+          </div>
+          <div class="inspector-body" id="inspectorBody"></div>
+        </div>
+        <div class="inspector-foot">
+          <button class="btn primary" id="saveDecision">Save decision</button>
+          <button class="btn" id="saveNext">Save and next</button>
+          <span class="subtle" id="saveStatus">Changes apply to this model and selected use case.</span>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="bottom-hint">
+      <span><strong>Family view hint:</strong> Switch to Families to review model-family groups and apply decisions to all visible family members.</span>
+      <button class="btn" id="applyFiltered">Apply to filtered list</button>
+    </footer>
+  </div>
+
+  <dialog id="addModelDialog">
+    <form method="dialog" id="addModelForm">
+      <div class="dialog-head">Add model</div>
+      <div class="dialog-body">
+        <input class="field" name="name" placeholder="Model name" required>
+        <input class="field" name="provider" placeholder="Provider" required>
+        <input class="field" name="model_id" placeholder="Optional model id">
+        <select class="select" name="catalog_status">
+          <option value="tracked">Tracked</option>
+          <option value="provisional">Provisional</option>
+          <option value="deprecated">Deprecated</option>
+        </select>
+        <textarea class="textarea" name="notes" placeholder="Notes"></textarea>
+      </div>
+      <div class="dialog-foot">
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn primary" value="save">Save model</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const state = {
+      catalog: null,
+      tab: "all",
+      filters: {
+        search: "",
+        provider: "",
+        useCase: "",
+        recommendation: "",
+        approval: "",
+        family: "",
+        catalogStatus: "",
+        role: "",
+        smallOnly: false
+      },
+      selected: new Set(),
+      activeModelId: null,
+      activeUseCaseId: null,
+      sort: { key: "name", direction: "asc" },
+      page: 1,
+      pageSize: 50
+    };
+
+    const tabs = [
+      ["all", "All models"],
+      ["usecase", "Use-case review"],
+      ["families", "Families"],
+      ["needs", "Needs decision"],
+      ["deprecated", "Deprecated"]
+    ];
+
+    const els = {
+      adminToken: document.getElementById("adminToken"),
+      saveToken: document.getElementById("saveToken"),
+      search: document.getElementById("search"),
+      providerFilter: document.getElementById("providerFilter"),
+      useCaseFilter: document.getElementById("useCaseFilter"),
+      recommendationFilter: document.getElementById("recommendationFilter"),
+      approvalFilter: document.getElementById("approvalFilter"),
+      familyFilter: document.getElementById("familyFilter"),
+      catalogFilter: document.getElementById("catalogFilter"),
+      roleFilter: document.getElementById("roleFilter"),
+      smallOnly: document.getElementById("smallOnly"),
+      tabs: document.getElementById("tabs"),
+      mainTable: document.getElementById("mainTable"),
+      inspectorHead: document.getElementById("inspectorHead"),
+      inspectorBody: document.getElementById("inspectorBody"),
+      modelCount: document.getElementById("modelCount"),
+      selectedCount: document.getElementById("selectedCount"),
+      bulkTarget: document.getElementById("bulkTarget"),
+      bulkScope: document.getElementById("bulkScope"),
+      showingCount: document.getElementById("showingCount"),
+      pageLabel: document.getElementById("pageLabel"),
+      lastSynced: document.getElementById("lastSynced"),
+      saveStatus: document.getElementById("saveStatus"),
+      toast: document.getElementById("toast"),
+      addModelDialog: document.getElementById("addModelDialog"),
+      addModelForm: document.getElementById("addModelForm"),
+      snapshotFile: document.getElementById("snapshotFile")
+    };
+
+    function adminHeaders() {
+      const token = sessionStorage.getItem("llm_benchmarking_admin_token") || "";
+      return token ? { "X-LLM-Benchmarking-Admin-Token": token } : {};
+    }
+
+    async function request(path, options = {}) {
+      const headers = {
+        "Content-Type": "application/json",
+        ...adminHeaders(),
+        ...(options.headers || {})
+      };
+      const response = await fetch(path, { ...options, headers });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.detail || `Request failed: ${response.status}`);
+      }
+      return payload;
+    }
+
+    async function loadCatalog() {
+      els.lastSynced.textContent = "Loading catalog...";
+      state.catalog = await request("/api/review/catalog", { method: "GET" });
+      if (!state.activeUseCaseId) {
+        state.activeUseCaseId = (state.catalog.use_cases[0] || {}).id || "";
+      }
+      populateFilters();
+      ensureActiveModel();
+      render();
+      els.lastSynced.textContent = `Last synced: ${new Date(state.catalog.generated_at).toLocaleTimeString()}`;
+    }
+
+    function populateFilters() {
+      fillSelect(els.providerFilter, "All providers", state.catalog.providers.map((item) => [item.name, item.name]));
+      fillSelect(els.useCaseFilter, "All use cases", state.catalog.use_cases.map((item) => [item.id, item.label]));
+      fillSelect(els.familyFilter, "All families", state.catalog.families.map((item) => [item.family_id, item.family_name]));
+      els.useCaseFilter.value = state.filters.useCase;
+      els.providerFilter.value = state.filters.provider;
+      els.familyFilter.value = state.filters.family;
+    }
+
+    function fillSelect(select, firstLabel, options) {
+      const current = select.value;
+      select.innerHTML = `<option value="">${escapeHtml(firstLabel)}</option>` + options
+        .map(([value, label]) => `<option value="${escapeAttr(value)}">${escapeHtml(label)}</option>`)
+        .join("");
+      select.value = current;
+    }
+
+    function filteredModels() {
+      if (!state.catalog) return [];
+      let models = state.catalog.models.slice();
+      if (state.tab === "needs") models = models.filter(modelNeedsDecision);
+      if (state.tab === "deprecated") models = models.filter((model) => model.catalog_status === "deprecated");
+      if (state.tab === "usecase" && !state.filters.useCase && state.activeUseCaseId) {
+        state.filters.useCase = state.activeUseCaseId;
+        els.useCaseFilter.value = state.activeUseCaseId;
+      }
+
+      const q = state.filters.search.toLowerCase();
+      models = models.filter((model) => {
+        const approvals = model.use_case_approvals || {};
+        const useCaseId = state.filters.useCase;
+        const approval = useCaseId ? approvals[useCaseId] : firstApproval(model);
+        const haystack = [model.name, model.id, model.provider, model.family_name, model.family_id].join(" ").toLowerCase();
+        if (q && !haystack.includes(q)) return false;
+        if (state.filters.provider && model.provider !== state.filters.provider) return false;
+        if (state.filters.family && model.family_id !== state.filters.family) return false;
+        if (state.filters.catalogStatus && model.catalog_status !== state.filters.catalogStatus) return false;
+        if (state.filters.role && !(model.model_roles || []).includes(state.filters.role)) return false;
+        if (state.filters.smallOnly && !model.small_model_candidate) return false;
+        if (useCaseId && !approvals[useCaseId]) return false;
+        if (state.filters.recommendation) {
+          const status = approval ? approval.effective_recommendation_status || "unrated" : "unrated";
+          if (status !== state.filters.recommendation) return false;
+        }
+        if (state.filters.approval) {
+          const approved = approval && approval.approved_for_use ? "approved" : "not_approved";
+          if (approved !== state.filters.approval) return false;
+        }
+        return true;
+      });
+      models.sort(compareModels);
+      return models;
+    }
+
+    function compareModels(a, b) {
+      const key = state.sort.key;
+      const av = valueForSort(a, key);
+      const bv = valueForSort(b, key);
+      const result = String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" });
+      return state.sort.direction === "asc" ? result : -result;
+    }
+
+    function valueForSort(model, key) {
+      if (key === "effective") return statusFor(model).effective;
+      if (key === "manual") return statusFor(model).manual;
+      if (key === "proposed") return statusFor(model).proposed;
+      if (key === "approval") return statusFor(model).approved ? "approved" : "not";
+      return model[key] || "";
+    }
+
+    function firstApproval(model) {
+      const approvals = model.use_case_approvals || {};
+      const selected = state.filters.useCase || state.activeUseCaseId;
+      if (selected && approvals[selected]) return approvals[selected];
+      return Object.values(approvals)[0] || null;
+    }
+
+    function statusFor(model) {
+      const approval = firstApproval(model) || {};
+      return {
+        proposed: approval.proposed_recommendation_status || "unrated",
+        manual: approval.recommendation_status || "unrated",
+        effective: approval.effective_recommendation_status || "unrated",
+        approved: Boolean(approval.approved_for_use),
+        controls: (approval.proposed_recommendation_required_controls || []).length,
+        blockers: (approval.proposed_recommendation_blockers || []).length,
+        warnings: (approval.proposed_recommendation_warnings || []).length
+      };
+    }
+
+    function modelNeedsDecision(model) {
+      return Object.values(model.use_case_approvals || {}).some((approval) => {
+        return (approval.recommendation_status || "unrated") === "unrated" &&
+          (approval.proposed_recommendation_status || "unrated") !== "unrated";
+      });
+    }
+
+    function render() {
+      const models = filteredModels();
+      renderTabs(models);
+      renderCounts(models);
+      if (state.tab === "families") {
+        renderFamilies(models);
+      } else {
+        renderTable(models);
+      }
+      ensureActiveModel(models);
+      renderInspector();
+    }
+
+    function renderTabs(models) {
+      const counts = {
+        all: state.catalog.summary.model_count,
+        usecase: models.length,
+        families: state.catalog.summary.family_count,
+        needs: state.catalog.summary.needs_decision_count,
+        deprecated: state.catalog.summary.deprecated_count
+      };
+      els.tabs.innerHTML = tabs.map(([id, label]) => {
+        return `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${label}<span class="count">${counts[id] || 0}</span></button>`;
+      }).join("");
+    }
+
+    function renderCounts(models) {
+      const selectedCount = state.selected.size;
+      const targetCount = selectedCount || models.length;
+      els.modelCount.textContent = `${models.length} models`;
+      els.selectedCount.textContent = `${selectedCount} selected`;
+      els.bulkTarget.textContent = selectedCount ? `${selectedCount} selected` : `${models.length} filtered`;
+      els.bulkScope.textContent = selectedCount
+        ? "Actions apply to selected rows."
+        : "No rows are selected. Actions apply to the filtered list.";
+      els.showingCount.textContent = `Showing ${models.length} of ${state.catalog.summary.model_count} models`;
+      document.getElementById("applyFiltered").textContent = `Select filtered list (${targetCount})`;
+    }
+
+    function renderTable(models) {
+      const totalPages = Math.max(1, Math.ceil(models.length / state.pageSize));
+      if (state.page > totalPages) state.page = totalPages;
+      const start = (state.page - 1) * state.pageSize;
+      const pageModels = models.slice(start, start + state.pageSize);
+      els.pageLabel.textContent = `${start + 1}-${Math.min(start + state.pageSize, models.length)} of ${models.length}`;
+      if (!pageModels.length) {
+        els.mainTable.innerHTML = `<div class="empty">No models match the current view.</div>`;
+        return;
+      }
+      els.mainTable.innerHTML = `
+        <table>
+          <colgroup>
+            <col style="width: 34px">
+            <col style="width: 150px">
+            <col style="width: 74px">
+            <col style="width: 84px">
+            <col style="width: 64px">
+            <col style="width: 68px">
+            <col style="width: 84px">
+            <col style="width: 64px">
+            <col style="width: 76px">
+            <col style="width: 74px">
+            <col style="width: 54px">
+            <col style="width: 68px">
+          </colgroup>
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="selectPage" ${pageModels.every((model) => state.selected.has(model.id)) ? "checked" : ""}></th>
+              ${header("name", "Model")}
+              ${header("provider", "Provider")}
+              ${header("family_name", "Family")}
+              <th>Roles</th>
+              ${header("catalog_status", "Catalog")}
+              ${header("proposed", "Proposed")}
+              ${header("manual", "Manual")}
+              ${header("effective", "Effective")}
+              ${header("approval", "Approval")}
+              <th>Controls</th>
+              ${header("approval_updated_at", "Updated")}
+            </tr>
+          </thead>
+          <tbody>
+            ${pageModels.map(renderRow).join("")}
+          </tbody>
+        </table>`;
+    }
+
+    function header(key, label) {
+      const marker = state.sort.key === key ? (state.sort.direction === "asc" ? " ^" : " v") : "";
+      return `<th class="sortable" data-sort="${key}">${label}${marker}</th>`;
+    }
+
+    function renderRow(model) {
+      const status = statusFor(model);
+      const selected = state.selected.has(model.id);
+      return `<tr class="${selected ? "selected" : ""}" data-model-id="${escapeAttr(model.id)}">
+        <td><input type="checkbox" class="row-select" data-model-id="${escapeAttr(model.id)}" ${selected ? "checked" : ""}></td>
+        <td><div class="model-name">${escapeHtml(model.name)}</div><div class="subtle">${escapeHtml(model.id)}</div></td>
+        <td>${escapeHtml(model.provider || "")}</td>
+        <td><button class="linkish family-link" data-family-id="${escapeAttr(model.family_id || "")}">${escapeHtml(model.family_name || model.family_id || "")}</button></td>
+        <td><span class="subtle">${escapeHtml((model.model_roles || []).join(", "))}</span></td>
+        <td>${compactCatalogBadge(model.catalog_status || "tracked", catalogClass(model.catalog_status))}</td>
+        <td>${compactBadge(status.proposed, recommendationClass(status.proposed))}</td>
+        <td>${status.manual === "unrated" ? '<span class="subtle">-</span>' : compactBadge(status.manual, recommendationClass(status.manual))}</td>
+        <td>${compactBadge(status.effective, recommendationClass(status.effective))}</td>
+        <td>${badge(status.approved ? "Approved" : "Pending", status.approved ? "green" : "orange")}</td>
+        <td><span class="${status.controls ? "status-ok" : "subtle"}">${status.controls} / ${status.blockers + status.warnings + status.controls}</span></td>
+        <td><span class="subtle">${escapeHtml(formatUpdated(firstApproval(model)))}</span></td>
+      </tr>`;
+    }
+
+    function renderFamilies(models) {
+      const visibleIds = new Set(models.map((model) => model.id));
+      const families = state.catalog.families
+        .map((family) => ({ ...family, visible_model_ids: family.model_ids.filter((id) => visibleIds.has(id)) }))
+        .filter((family) => family.visible_model_ids.length);
+      els.pageLabel.textContent = `${families.length} visible families`;
+      els.mainTable.innerHTML = `<div class="family-list">${families.map((family) => `
+        <div class="family-row">
+          <div>
+            <div class="model-name">${escapeHtml(family.family_name)}</div>
+            <div class="subtle">${escapeHtml(family.family_id)}</div>
+          </div>
+          <span>${family.visible_model_ids.length} models</span>
+          <span>${family.needs_decision_count || 0} need decision</span>
+          <span>${family.deprecated_count || 0} deprecated</span>
+          <span>
+            <button class="btn small green family-action" data-family="${escapeAttr(family.family_id)}" data-action="approve">Approve family</button>
+            <button class="btn small orange family-action" data-family="${escapeAttr(family.family_id)}" data-action="not_recommended">Not rec.</button>
+          </span>
+        </div>`).join("") || '<div class="empty">No families match the current view.</div>'}</div>`;
+    }
+
+    function ensureActiveModel(models = filteredModels()) {
+      if (!models.length) {
+        state.activeModelId = null;
+        return;
+      }
+      if (!state.activeModelId || !models.some((model) => model.id === state.activeModelId)) {
+        state.activeModelId = models[0].id;
+      }
+    }
+
+    function activeModel() {
+      return (state.catalog.models || []).find((model) => model.id === state.activeModelId) || null;
+    }
+
+    function renderInspector() {
+      const model = activeModel();
+      if (!model) {
+        els.inspectorHead.innerHTML = `<h2>No model selected</h2><p class="subtle">Adjust filters to show models.</p>`;
+        els.inspectorBody.innerHTML = "";
+        return;
+      }
+      const approvals = model.use_case_approvals || {};
+      const activeUseCaseId = state.activeUseCaseId || Object.keys(approvals)[0] || "";
+      const activeApproval = approvals[activeUseCaseId] || {};
+      els.inspectorHead.innerHTML = `
+        <h2>${escapeHtml(model.name)}</h2>
+        <div class="subtle">${escapeHtml(model.id)}</div>
+        <div class="meta-row">
+          ${badge(model.provider || "Unknown", "gray")}
+          ${badge(`Family: ${model.family_name || model.family_id || "Unknown"}`, "blue")}
+          ${badge(`Catalog: ${model.catalog_status || "tracked"}`, catalogClass(model.catalog_status))}
+        </div>
+        <div class="meta-grid">
+          <div><span>Model type</span>${escapeHtml(model.type || "")}</div>
+          <div><span>Roles</span>${escapeHtml((model.model_roles || []).join(", "))}</div>
+          <div><span>Context window</span>${escapeHtml(model.context_window || model.context_window_tokens || "-")}</div>
+          <div><span>Data residency</span>${escapeHtml((model.inference_summary && (model.inference_summary.platform_names || []).join(", ")) || "-")}</div>
+        </div>`;
+      els.inspectorBody.innerHTML = `
+        <div>
+          ${state.catalog.use_cases.map((useCase) => renderUseCaseCard(useCase, approvals[useCase.id] || {}, useCase.id === activeUseCaseId)).join("")}
+        </div>
+        <div class="control-grid">
+          ${controlCard("Blockers", activeApproval.proposed_recommendation_blockers || [], "red")}
+          ${controlCard("Warnings", activeApproval.proposed_recommendation_warnings || [], "orange")}
+          ${controlCard("Required controls", activeApproval.proposed_recommendation_required_controls || [], "blue")}
+        </div>
+        <div class="decision-form">
+          <div class="form-grid">
+            <label>Manual rating
+              <select class="select" id="decisionRecommendation">
+                ${["unrated", "recommended", "not_recommended", "discouraged"].map((status) => `<option value="${status}" ${status === (activeApproval.recommendation_status || "unrated") ? "selected" : ""}>${labelStatus(status)}</option>`).join("")}
+              </select>
+            </label>
+            <label>Approval
+              <select class="select" id="decisionApproval">
+                <option value="approved" ${activeApproval.approved_for_use ? "selected" : ""}>Approved</option>
+                <option value="not_approved" ${!activeApproval.approved_for_use ? "selected" : ""}>Not approved</option>
+              </select>
+            </label>
+          </div>
+          <label>Decision notes
+            <textarea class="textarea" id="decisionNotes" placeholder="Add notes to explain this decision...">${escapeHtml(activeApproval.recommendation_notes || activeApproval.approval_notes || "")}</textarea>
+          </label>
+        </div>`;
+    }
+
+    function renderUseCaseCard(useCase, approval, active) {
+      const status = approval.effective_recommendation_status || "unrated";
+      return `<button class="usecase-card ${active ? "active" : ""}" data-use-case="${escapeAttr(useCase.id)}" style="width:100%; text-align:left">
+        <div class="usecase-card-head">
+          <div>
+            <h3>${escapeHtml(useCase.label)}</h3>
+            <div class="subtle">${escapeHtml((useCase.model_roles || []).join(", "))}</div>
+          </div>
+          ${badge(status, recommendationClass(status))}
+        </div>
+        <div class="meta-row">
+          <span class="subtle">${(approval.proposed_recommendation_blockers || []).length} blockers</span>
+          <span class="subtle">${(approval.proposed_recommendation_warnings || []).length} warnings</span>
+          <span class="linkish">${(approval.proposed_recommendation_required_controls || []).length} required controls</span>
+        </div>
+      </button>`;
+    }
+
+    function controlCard(title, items, tone) {
+      const display = items.length ? items.slice(0, 3) : ["No items"];
+      return `<div class="control-card">
+        <h3>${escapeHtml(title)} ${badge(String(items.length), tone)}</h3>
+        <ul>${display.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </div>`;
+    }
+
+    async function saveDecision(nextAfterSave = false) {
+      const model = activeModel();
+      if (!model || !state.activeUseCaseId) return;
+      const approved = document.getElementById("decisionApproval").value === "approved";
+      const recommendation = document.getElementById("decisionRecommendation").value;
+      const notes = document.getElementById("decisionNotes").value;
+      await request("/api/review/decisions", {
+        method: "POST",
+        body: JSON.stringify({
+          model_ids: [model.id],
+          use_case_ids: [state.activeUseCaseId],
+          approved_for_use: approved,
+          recommendation_status: recommendation,
+          approval_notes: notes,
+          recommendation_notes: notes
+        })
+      });
+      toast("Decision saved");
+      await loadCatalog();
+      if (nextAfterSave) selectNextModel();
+    }
+
+    async function applyBulk(action, explicitModelIds = null) {
+      const models = filteredModels();
+      const modelIds = explicitModelIds || (state.selected.size ? Array.from(state.selected) : models.map((model) => model.id));
+      if (!modelIds.length) return toast("No models to update");
+      const useCaseId = state.filters.useCase || state.activeUseCaseId || (state.catalog.use_cases[0] || {}).id;
+      const payload = { model_ids: modelIds, use_case_ids: useCaseId ? [useCaseId] : [] };
+      if (action === "approve") payload.approved_for_use = true;
+      if (action === "recommended") payload.recommendation_status = "recommended";
+      if (action === "not_recommended") payload.recommendation_status = "not_recommended";
+      if (action === "discouraged") payload.recommendation_status = "discouraged";
+      if (action === "clear") payload.recommendation_status = "unrated";
+      if (action === "deprecated") payload.catalog_status = "deprecated";
+      await request("/api/review/decisions", { method: "POST", body: JSON.stringify(payload) });
+      toast(`Saved ${action.replace("_", " ")} for ${modelIds.length} models`);
+      state.selected.clear();
+      await loadCatalog();
+    }
+
+    async function addModel(form) {
+      const body = Object.fromEntries(new FormData(form).entries());
+      if (!body.model_id) delete body.model_id;
+      await request("/api/review/models", { method: "POST", body: JSON.stringify(body) });
+      els.addModelDialog.close();
+      form.reset();
+      toast("Model added");
+      await loadCatalog();
+    }
+
+    async function exportSnapshot() {
+      const snapshot = await request("/api/review/snapshots/export", { method: "POST", body: "{}" });
+      const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `banking-review-snapshot-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast("Snapshot exported");
+    }
+
+    async function importSnapshot(file) {
+      const text = await file.text();
+      const snapshot = JSON.parse(text);
+      const result = await request("/api/review/snapshots/import", { method: "POST", body: JSON.stringify(snapshot) });
+      toast(`Imported ${result.decision_import_count} decisions`);
+      await loadCatalog();
+    }
+
+    function selectNextModel() {
+      const models = filteredModels();
+      const currentIndex = models.findIndex((model) => model.id === state.activeModelId);
+      if (currentIndex >= 0 && models[currentIndex + 1]) {
+        state.activeModelId = models[currentIndex + 1].id;
+      }
+      render();
+    }
+
+    function badge(value, tone = "gray") {
+      return `<span class="badge ${tone}">${escapeHtml(labelStatus(value))}</span>`;
+    }
+
+    function compactBadge(value, tone = "gray") {
+      const compact = {
+        recommended: "Rec.",
+        not_recommended: "Not rec.",
+        discouraged: "Disc.",
+        unrated: "Unrated",
+        mixed: "Mixed"
+      };
+      return `<span class="badge ${tone}">${escapeHtml(compact[value] || labelStatus(value))}</span>`;
+    }
+
+    function compactCatalogBadge(value, tone = "gray") {
+      const compact = {
+        tracked: "Tracked",
+        provisional: "Prov.",
+        deprecated: "Depr."
+      };
+      return `<span class="badge ${tone}">${escapeHtml(compact[value] || labelStatus(value))}</span>`;
+    }
+
+    function labelStatus(value) {
+      return String(value || "unrated")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (match) => match.toUpperCase());
+    }
+
+    function recommendationClass(value) {
+      if (value === "recommended") return "green";
+      if (value === "not_recommended") return "orange";
+      if (value === "discouraged") return "red";
+      if (value === "mixed") return "blue";
+      return "gray";
+    }
+
+    function catalogClass(value) {
+      if (value === "tracked") return "green";
+      if (value === "provisional") return "blue";
+      if (value === "deprecated") return "red";
+      return "gray";
+    }
+
+    function formatUpdated(approval) {
+      const value = approval && (approval.recommendation_updated_at || approval.approval_updated_at);
+      return value ? new Date(value).toLocaleString() : "-";
+    }
+
+    function toast(message) {
+      els.toast.textContent = message;
+      els.toast.classList.add("show");
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => els.toast.classList.remove("show"), 2600);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      }[char]));
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value);
+    }
+
+    function bindEvents() {
+      const filterBindings = [
+        [els.search, "search"],
+        [els.providerFilter, "provider"],
+        [els.useCaseFilter, "useCase"],
+        [els.recommendationFilter, "recommendation"],
+        [els.approvalFilter, "approval"],
+        [els.familyFilter, "family"],
+        [els.catalogFilter, "catalogStatus"],
+        [els.roleFilter, "role"]
+      ];
+      filterBindings.forEach(([element, key]) => {
+        element.addEventListener("input", () => {
+          state.filters[key] = element.value;
+          if (key === "useCase" && element.value) state.activeUseCaseId = element.value;
+          state.page = 1;
+          render();
+        });
+      });
+      els.smallOnly.addEventListener("change", () => {
+        state.filters.smallOnly = els.smallOnly.checked;
+        render();
+      });
+      document.getElementById("resetFilters").addEventListener("click", () => {
+        Object.assign(state.filters, {
+          search: "",
+          provider: "",
+          useCase: "",
+          recommendation: "",
+          approval: "",
+          family: "",
+          catalogStatus: "",
+          role: "",
+          smallOnly: false
+        });
+        els.search.value = "";
+        els.recommendationFilter.value = "";
+        els.approvalFilter.value = "";
+        els.catalogFilter.value = "";
+        els.roleFilter.value = "";
+        els.smallOnly.checked = false;
+        populateFilters();
+        render();
+      });
+      els.tabs.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-tab]");
+        if (!button) return;
+        state.tab = button.dataset.tab;
+        state.page = 1;
+        render();
+      });
+      els.mainTable.addEventListener("click", (event) => {
+        const sort = event.target.closest("[data-sort]");
+        if (sort) {
+          const key = sort.dataset.sort;
+          if (state.sort.key === key) {
+            state.sort.direction = state.sort.direction === "asc" ? "desc" : "asc";
+          } else {
+            state.sort = { key, direction: "asc" };
+          }
+          return render();
+        }
+        const rowSelect = event.target.closest(".row-select");
+        if (rowSelect) {
+          const modelId = rowSelect.dataset.modelId;
+          rowSelect.checked ? state.selected.add(modelId) : state.selected.delete(modelId);
+          return render();
+        }
+        const selectPage = event.target.closest("#selectPage");
+        if (selectPage) {
+          const models = filteredModels().slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
+          models.forEach((model) => selectPage.checked ? state.selected.add(model.id) : state.selected.delete(model.id));
+          return render();
+        }
+        const familyAction = event.target.closest(".family-action");
+        if (familyAction) {
+          const family = state.catalog.families.find((item) => item.family_id === familyAction.dataset.family);
+          if (family) applyBulk(familyAction.dataset.action, family.model_ids);
+          return;
+        }
+        const row = event.target.closest("tr[data-model-id]");
+        if (row) {
+          state.activeModelId = row.dataset.modelId;
+          render();
+        }
+      });
+      els.inspectorBody.addEventListener("click", (event) => {
+        const card = event.target.closest("[data-use-case]");
+        if (!card) return;
+        state.activeUseCaseId = card.dataset.useCase;
+        renderInspector();
+      });
+      document.querySelectorAll("[data-action]").forEach((button) => {
+        button.addEventListener("click", () => applyBulk(button.dataset.action));
+      });
+      document.getElementById("selectFiltered").addEventListener("click", () => {
+        filteredModels().forEach((model) => state.selected.add(model.id));
+        render();
+      });
+      document.getElementById("clearSelection").addEventListener("click", () => {
+        state.selected.clear();
+        render();
+      });
+      document.getElementById("prevPage").addEventListener("click", () => {
+        state.page = Math.max(1, state.page - 1);
+        render();
+      });
+      document.getElementById("nextPage").addEventListener("click", () => {
+        state.page += 1;
+        render();
+      });
+      document.getElementById("syncNow").addEventListener("click", loadCatalog);
+      document.getElementById("saveDecision").addEventListener("click", () => saveDecision(false).catch((error) => toast(error.message)));
+      document.getElementById("saveNext").addEventListener("click", () => saveDecision(true).catch((error) => toast(error.message)));
+      document.getElementById("applyFiltered").addEventListener("click", () => {
+        filteredModels().forEach((model) => state.selected.add(model.id));
+        render();
+        toast("Filtered rows selected. Choose a bulk action to save.");
+      });
+      document.getElementById("addModelButton").addEventListener("click", () => els.addModelDialog.showModal());
+      els.addModelForm.addEventListener("submit", (event) => {
+        if (event.submitter && event.submitter.value === "save") {
+          event.preventDefault();
+          addModel(els.addModelForm).catch((error) => toast(error.message));
+        }
+      });
+      els.saveToken.addEventListener("click", () => {
+        sessionStorage.setItem("llm_benchmarking_admin_token", els.adminToken.value);
+        toast("Admin token saved for this tab");
+      });
+      document.getElementById("exportSnapshot").addEventListener("click", () => exportSnapshot().catch((error) => toast(error.message)));
+      document.getElementById("importSnapshot").addEventListener("click", () => els.snapshotFile.click());
+      els.snapshotFile.addEventListener("change", () => {
+        const file = els.snapshotFile.files[0];
+        if (file) importSnapshot(file).catch((error) => toast(error.message));
+      });
+      document.getElementById("columnsButton").addEventListener("click", () => toast("Core review columns are fixed in this version"));
+    }
+
+    els.adminToken.value = sessionStorage.getItem("llm_benchmarking_admin_token") || "";
+    bindEvents();
+    loadCatalog().catch((error) => {
+      els.lastSynced.textContent = "Catalog load failed";
+      toast(error.message);
+    });
+  </script>
+</body>
+</html>

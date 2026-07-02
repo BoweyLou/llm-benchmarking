@@ -16,6 +16,22 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-038: P1 Deploy banking review workbench on the Proxmox tailnet host
+  - Source: Human request 2026-07-02 after validating the local interactive review workbench.
+  - Problem: the workbench needed to be available from any device on the Tailscale network without depending on a local development server.
+  - Scope: Proxmox deploy script, systemd service unit, dedicated runtime user, tailnet-only bind address, persistent remote SQLite path, token-preserving environment file, README link, deployment runbook, and live service verification.
+  - Acceptance: `scripts/deploy_proxmox_review_workbench.sh` deploys the current app to `proxmox`, seeds the remote DB only when missing, preserves `/var/lib/llm-benchmarking/db.sqlite` and `/etc/llm-benchmarking.env` across code updates, restarts `llm-benchmarking.service`, and verifies `/api/review/catalog` over the Proxmox Tailscale IP.
+  - Validation: deploy script live run against Proxmox, systemd active check, tailnet HTTP catalog check, docs checks, backend tests, and version check before closeout.
+  - Completed: 2026-07-02. The banking review workbench now has a repeatable Proxmox/Tailscale deployment path with durable remote state.
+
+- [x] LBM-037: P1 Add interactive banking model review workbench
+  - Source: Human request 2026-07-02 after the backend-only banking review utility proved insufficient for interactive model review.
+  - Problem: reviewers needed to see the live model catalog, switch between filtered views, make decisions on individual models or concrete filtered lists, and persist determinations back to SQLite across normal catalog and recommendation updates.
+  - Scope: FastAPI-served `/review` workbench, review catalog/read API, token-guarded decision/model/snapshot write APIs, explicit bulk model-id decisions, manual model creation, deprecation markers, snapshot export/import, README docs, and focused API/persistence tests.
+  - Acceptance: `/review` shows filterable model, use-case, family, needs-decision, and deprecated views; selected or filtered actions write exact `model_use_case_approvals` and `models.catalog_status` rows; snapshot export/import restores manual listings and decisions after DB rebuild; write routes remain disabled unless `LLM_BENCHMARKING_ADMIN_TOKEN` is configured.
+  - Validation: `python -m unittest backend.test_review_workbench backend.test_banking_review backend.test_api_auth backend.test_recommendation_engine`; browser smoke and full docs/version checks before closeout.
+  - Completed: 2026-07-02. The local FastAPI app now includes an interactive banking model review workbench backed by durable SQLite decision rows and review snapshots.
+
 - [x] LBM-035: P1 Add banking review export and manual curation utility
   - Source: Human request 2026-07-02.
   - Problem: the banking model review workflow could export generated recommendation proposals, but applying manual approvals, recommendation ratings, whole-family decisions, and deprecation markers still required low-level API calls or direct SQLite edits.

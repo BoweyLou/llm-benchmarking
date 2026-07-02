@@ -106,12 +106,52 @@ Each use-case approval can then carry:
 - `effective_recommendation_status`: manual rating when present, otherwise automatic hard blocker, otherwise proposal.
 - proposal blockers, warnings, reasons, required controls, score, confidence, policy version, and computed timestamp.
 
-## Banking Review Utility
+## Banking Review Workbench
 
-For spreadsheet review, use the local banking-review utility. It regenerates
-the `australian_bank` recommendation proposals by default, then writes a
-combined `model x use case` CSV with the normalized model-list columns and the
-manual/proposed/effective recommendation fields:
+For interactive banking review, run the FastAPI app locally and open
+`/review`. The workbench shows the model catalog with provider, use-case,
+recommendation, approval, family, catalog-status, model-role, and small-model
+filters; a sortable model table; family and needs-decision views; and a detail
+inspector for per-use-case approval notes, manual ratings, generated blockers,
+warnings, and required controls.
+
+```bash
+uvicorn backend.main:app --reload --port 8000
+open http://127.0.0.1:8000/review
+```
+
+Review writes use the same local admin guard as the other mutation routes. Set
+`LLM_BENCHMARKING_ADMIN_TOKEN` before starting the server, then paste that value
+into the workbench token field. Without the token, the workbench can read the
+catalog but cannot save decisions. Saved decisions write to SQLite:
+
+- `model_use_case_approvals` stores use-case approval, manual recommendation
+  status, and notes.
+- `models.catalog_status` stores listing state such as `tracked`,
+  `provisional`, or `deprecated`.
+- `model_use_case_recommendation_proposals` remains generated policy output and
+  can be regenerated without overwriting manual decisions.
+
+The workbench can export and import a JSON review snapshot. Use that snapshot
+when rebuilding a database so manual listings, deprecation markers, and
+approval/recommendation rows can be restored.
+
+To run the workbench on the Proxmox tailnet host, use the deploy script:
+
+```bash
+scripts/deploy_proxmox_review_workbench.sh
+```
+
+The deploy binds the service to the host's Tailscale IPv4 address, preserves
+the remote SQLite database at `/var/lib/llm-benchmarking/db.sqlite`, and keeps
+the admin token in `/etc/llm-benchmarking.env`. See
+[docs/deploy/proxmox-review-workbench.md](docs/deploy/proxmox-review-workbench.md)
+for service operations, token retrieval, and backup notes.
+
+For spreadsheet review, the local `banking-review` utility remains available. It
+regenerates the `australian_bank` recommendation proposals by default, then
+writes a combined `model x use case` CSV with the normalized model-list columns
+and the manual/proposed/effective recommendation fields:
 
 ```bash
 python -m backend banking-review export
@@ -151,6 +191,7 @@ uvicorn backend.main:app --reload --port 8000
 
 Useful local URLs:
 
+- Banking review workbench: `http://127.0.0.1:8000/review`
 - Root model list: `http://127.0.0.1:8000/`
 - Model list API: `http://127.0.0.1:8000/api/models`
 - API docs: `http://127.0.0.1:8000/docs`
@@ -248,6 +289,11 @@ SQLite is the runtime store, but important manual metadata is also kept in track
 
 Those baselines are applied during bootstrap and can be re-exported from the live DB. Network-backed metadata refreshes are intentionally kept out of bootstrap so API startup stays local and predictable.
 
+Banking review decisions are runtime SQLite state by default. Export a review
+snapshot from `/review` or `POST /api/review/snapshots/export` before rebuilding
+a DB; import it with `/review` or `POST /api/review/snapshots/import` after
+bootstrap.
+
 ## CLI Reference
 
 Common commands:
@@ -287,7 +333,7 @@ Notes:
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.
 - `recommendation-audit` previews generated use-case recommendation proposals. `recommendation-sync` persists them so `list-models`, CSV export, and the API include proposed/effective recommendation fields.
-- `banking-review export` writes the review-friendly combined CSV. `banking-review set` and `banking-review deprecate` apply model- or family-scoped manual approval and recommendation decisions.
+- `/review` is the interactive banking model review workbench. `banking-review export` writes the review-friendly combined CSV. `banking-review set` and `banking-review deprecate` apply model- or family-scoped manual approval and recommendation decisions from the CLI.
 - `model-license-sync` fills missing licenses using safe open-weight family propagation, a `Proprietary` fallback for missing proprietary licenses, and tracked exact/family overrides from [backend/model_license_baseline.json](backend/model_license_baseline.json).
 - `list-models` writes a clean CSV bundle to `output/model-list*.csv` by default in addition to the requested stdout/file format; pass `--no-csv` when you do not want the bundle, or `--no-csv-sidecars` when you only want the main model CSV.
 - `provider-origin-export` and `model-curation-export` push live curation back into the tracked baseline JSON files.
@@ -299,6 +345,7 @@ The core API is in [backend/main.py](backend/main.py). High-level groups:
 - model list: `/` and `/api/models`
 - catalog metadata: `/api/providers`, `/api/benchmarks`, `/api/use-cases`
 - rankings: `/api/rankings`
+- review workbench: `/review`, `/api/review/catalog`, `/api/review/decisions`, `/api/review/models`, `/api/review/snapshots/export`, and `/api/review/snapshots/import`
 - admin edits for provider metadata, approvals, inference-route approvals, manual benchmark scores, and model curation
 - update operations: `/api/update`, `/api/update/status/{log_id}`, `/api/update/history`, source-run detail, raw source records, and audit output
 - market snapshots: `/api/market-snapshots`
