@@ -7,6 +7,7 @@
 - Added explicit all-filtered selection in the review workbench so bulk actions can target more than the visible page.
 - Split review workbench bulk `Not approved` from `Clear rating` so clearing manual recommendations no longer looks like it clears approval state.
 - Improved review workbench tablet layouts and active use-case context so iPad-width review sessions keep filters, tables, inspector details, and save targets reachable.
+- Added a separate manual recommendation filter to the review workbench left rail while keeping effective recommendation filtering available.
 - Added a Proxmox/Tailscale deployment path for the banking review workbench, including a systemd unit, deploy script, persistent remote SQLite location, and deployment runbook.
 - Added trusted tailnet write mode so the Proxmox-hosted review workbench can save from Tailscale clients without pasting an admin token.
 - Added release-date provenance, computed model-age evidence, Hugging Face repository timestamps, and all-modality OpenRouter discovery coverage to model exports.

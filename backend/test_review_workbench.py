@@ -60,6 +60,9 @@ class ReviewWorkbenchTests(unittest.TestCase):
 
         self.assertEqual(app_response.status_code, 200)
         self.assertIn("Banking Model Review", app_response.text)
+        self.assertIn("Effective recommendation", app_response.text)
+        self.assertIn("Manual recommendation", app_response.text)
+        self.assertIn("manualRecommendationFilter", app_response.text)
         self.assertEqual(catalog_response.status_code, 200)
         payload = catalog_response.json()
         self.assertGreaterEqual(payload["summary"]["model_count"], 1)

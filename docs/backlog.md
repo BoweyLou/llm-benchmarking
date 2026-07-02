@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-044: P2 Add manual recommendation filtering to review workbench
+  - Source: Human request 2026-07-02 after clarifying that `Clear rating` affects manual recommendation but not approval state.
+  - Problem: the left-rail recommendation filter only targeted effective recommendation status, so reviewers could not directly find rows by saved manual override or cleared manual rating.
+  - Scope: rename the existing recommendation filter to `Effective recommendation`, add a separate `Manual recommendation` filter, wire frontend filtering to `model_use_case_approvals.recommendation_status`, add static review-app coverage, update README/changelog/backlog, redeploy Proxmox workbench, and verify in browser.
+  - Acceptance: reviewers can filter by manual `recommended`, `not_recommended`, `discouraged`, and `unrated` independently of effective recommendation and approval state.
+  - Validation: inline script parse, review workbench tests, docs/version checks, browser smoke, live Proxmox HTML check, and service health check.
+  - Completed: 2026-07-02. Manual recommendation filtering is available in the review workbench left rail.
+
 - [x] LBM-043: P2 Improve review workbench iPad layout and use-case context
   - Source: Human request 2026-07-02 after using the deployed workbench on an iPad-resolution device and asking how use-case recommendations should be used.
   - Problem: the review workbench retained desktop column assumptions at tablet widths, making filters, table actions, inspector controls, and save context hard to fit or understand on iPad-sized screens.

@@ -110,10 +110,11 @@ Each use-case approval can then carry:
 
 For interactive banking review, run the FastAPI app locally and open
 `/review`. The workbench shows the model catalog with provider, use-case,
-recommendation, approval, family, catalog-status, model-role, and small-model
-filters; a sortable model table; family and needs-decision views; and a detail
-inspector for per-use-case approval notes, manual ratings, generated blockers,
-warnings, and required controls.
+effective-recommendation, manual-recommendation, approval, family,
+catalog-status, model-role, and small-model filters; a sortable model table;
+family and needs-decision views; and a detail inspector for per-use-case
+approval notes, manual ratings, generated blockers, warnings, and required
+controls.
 
 On tablet-width screens, the workbench keeps the filters and table usable first
 and moves the inspector below the table so review controls remain reachable.
@@ -151,6 +152,9 @@ Select a model to review blockers, warnings, required controls, and notes in the
 right inspector. Change `Manual rating` and `Approval`, then save. For many
 models, filter first, use `Select all filtered` when needed, and apply the bulk
 recommendation or approval action to the exact selected model IDs.
+Use `Effective recommendation` to filter the final status shown in exports and
+use `Manual recommendation` to filter only reviewer-saved overrides, including
+rows where the manual rating has been cleared to `Unrated`.
 
 The workbench can export and import a JSON review snapshot. Use that snapshot
 when rebuilding a database so manual listings, deprecation markers, and

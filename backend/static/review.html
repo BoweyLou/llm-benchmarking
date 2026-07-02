@@ -944,9 +944,19 @@
             <select id="useCaseFilter" class="select"></select>
           </div>
           <div class="filter-group">
-            <label for="recommendationFilter">Recommendation</label>
+            <label for="recommendationFilter">Effective recommendation</label>
             <select id="recommendationFilter" class="select">
-              <option value="">All recommendations</option>
+              <option value="">All effective recommendations</option>
+              <option value="recommended">Recommended</option>
+              <option value="not_recommended">Not recommended</option>
+              <option value="discouraged">Discouraged</option>
+              <option value="unrated">Unrated</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="manualRecommendationFilter">Manual recommendation</label>
+            <select id="manualRecommendationFilter" class="select">
+              <option value="">All manual ratings</option>
               <option value="recommended">Recommended</option>
               <option value="not_recommended">Not recommended</option>
               <option value="discouraged">Discouraged</option>
@@ -1105,6 +1115,7 @@
         provider: "",
         useCase: "",
         recommendation: "",
+        manualRecommendation: "",
         approval: "",
         family: "",
         catalogStatus: "",
@@ -1134,6 +1145,7 @@
       providerFilter: document.getElementById("providerFilter"),
       useCaseFilter: document.getElementById("useCaseFilter"),
       recommendationFilter: document.getElementById("recommendationFilter"),
+      manualRecommendationFilter: document.getElementById("manualRecommendationFilter"),
       approvalFilter: document.getElementById("approvalFilter"),
       familyFilter: document.getElementById("familyFilter"),
       catalogFilter: document.getElementById("catalogFilter"),
@@ -1235,6 +1247,10 @@
         if (state.filters.recommendation) {
           const status = approval ? approval.effective_recommendation_status || "unrated" : "unrated";
           if (status !== state.filters.recommendation) return false;
+        }
+        if (state.filters.manualRecommendation) {
+          const manualStatus = approval ? approval.recommendation_status || "unrated" : "unrated";
+          if (manualStatus !== state.filters.manualRecommendation) return false;
         }
         if (state.filters.approval) {
           const approved = approval && approval.approved_for_use ? "approved" : "not_approved";
@@ -1806,6 +1822,7 @@
         [els.providerFilter, "provider"],
         [els.useCaseFilter, "useCase"],
         [els.recommendationFilter, "recommendation"],
+        [els.manualRecommendationFilter, "manualRecommendation"],
         [els.approvalFilter, "approval"],
         [els.familyFilter, "family"],
         [els.catalogFilter, "catalogStatus"],
@@ -1829,6 +1846,7 @@
           provider: "",
           useCase: "",
           recommendation: "",
+          manualRecommendation: "",
           approval: "",
           family: "",
           catalogStatus: "",
@@ -1837,6 +1855,7 @@
         });
         els.search.value = "";
         els.recommendationFilter.value = "";
+        els.manualRecommendationFilter.value = "";
         els.approvalFilter.value = "";
         els.catalogFilter.value = "";
         els.roleFilter.value = "";
