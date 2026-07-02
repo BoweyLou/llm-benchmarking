@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0 - 2026-07-03
+
+- Expanded Artificial Analysis model leaderboard ingestion to normalize coding, agentic, task-level evaluation, pricing, latency, and Intelligence Index cost metrics, while preserving richer raw metadata such as context windows, parameters, modalities, license, Hugging Face links, and OpenRouter IDs.
+- Fixed Artificial Analysis blended-cost extraction for the current page payload field names.
+
 ## 0.2.0 - Unreleased
 
 - Added the FastAPI-served `/review` banking model review workbench with filterable model/use-case/family views, token-guarded review decision APIs, manual model creation, deprecation support, and review snapshot export/import.

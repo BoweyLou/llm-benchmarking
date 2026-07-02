@@ -337,7 +337,9 @@ recommended ingest gaps, see [docs/data-ingest-map.md](docs/data-ingest-map.md).
 
 Benchmark adapters:
 
-- Artificial Analysis
+- Artificial Analysis models leaderboard, including headline indices, task-level
+  AA evaluation fields, pricing, latency, cost-per-task, release-date, and raw
+  model metadata evidence
 - Artificial Analysis IFBench
 - Chatbot Arena
 - AILuminate

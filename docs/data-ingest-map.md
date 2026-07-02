@@ -19,7 +19,7 @@ flowchart LR
     end
 
     subgraph Benchmarks["Benchmark adapters"]
-        AA["Artificial Analysis models and release dates"]
+        AA["Artificial Analysis models, evaluations, costs, latency, metadata"]
         AAIF["Artificial Analysis IFBench"]
         Arena["Chatbot Arena"]
         AIL["AILuminate"]
@@ -152,8 +152,8 @@ flowchart LR
 
 | Source | Current adapter or phase | Provides now | Caveats or next step |
 | --- | --- | --- | --- |
-| Artificial Analysis models | `ArtificialAnalysisAdapter` | Intelligence, speed, blended cost, creator/family metadata, release date. | Release dates are promoted as high-confidence model release evidence; additional AA evaluation pages should be added as separate adapters when stable. |
-| Artificial Analysis IFBench | `ArtificialAnalysisIfbenchAdapter` | IFBench score plus cost, output-token, and latency metrics. | One AA evaluation page is integrated; other AA pages remain future candidates. |
+| Artificial Analysis models | `ArtificialAnalysisAdapter` | Intelligence, coding, agentic, task-level AA evaluation fields, speed/latency distributions, blended and component pricing, Intelligence Index cost/time metrics, creator/family metadata, release date, context window, parameter, modality, license, Hugging Face, and OpenRouter raw metadata. | Release dates are promoted as high-confidence model release evidence. AA-provenance task scores stay under `aa_*` benchmark IDs when they overlap official-source adapters such as GPQA, MMMU, or Terminal-Bench. |
+| Artificial Analysis IFBench | `ArtificialAnalysisIfbenchAdapter` | IFBench score plus cost, output-token, and latency metrics from the dedicated IFBench page. | The models leaderboard can also fill `aa_ifbench` coverage; the dedicated page remains the richer token/cost/time source when present. |
 | Chatbot Arena | `ChatbotArenaAdapter` | Arena ELO, rank bands, votes, organization, model URL, license, price, context metadata. | Metadata promotion uses source-precedence rules and does not override higher-trust sources silently. |
 | AILuminate | `AILuminateAdapter` | Public grade plus locale and system-class companion evidence. | Risk-category detail should wait for a stable detail-page surface. |
 | Berkeley Function Calling Leaderboard | `BfclAdapter` | Overall function-calling accuracy, component scores, cost, latency, organization, license, evaluation mode. | Current catalog score is overall BFCL; component scores remain raw metadata. |
@@ -250,8 +250,11 @@ proxy."
 - LiveBench documents contamination-resistant monthly/newer questions, objective
   ground-truth scoring, 18 tasks across 6 categories, and Hugging Face data
   downloads: <https://github.com/livebench/livebench>
-- Artificial Analysis evaluation pages expose IFBench, LiveCodeBench details,
-  token usage/cost panels, and links to other evaluation leaderboards:
+- Artificial Analysis model and evaluation pages expose headline indices,
+  task-level evaluation fields, model metadata, pricing, latency distributions,
+  IFBench details, token usage/cost panels, and links to other evaluation
+  leaderboards:
+  <https://artificialanalysis.ai/leaderboards/models>,
   <https://artificialanalysis.ai/evaluations/ifbench>
 - BFCL describes an executable function-calling evaluation and states that
   leaderboard statistics/data are Apache 2.0:

@@ -247,46 +247,74 @@ class SourceSpotCheckTests(unittest.TestCase):
 
     def test_artificial_analysis_spot_check_persists_multimetric_scores(self) -> None:
             adapter = ArtificialAnalysisAdapter()
-            metrics = {
-                "intelligence_index": 61.2,
-                "median_output_speed": 144.8,
-                "price_1m_blended_3_to_1": 18.75,
-            }
-            raw_record = RawSourceRecord(
-                source_id=adapter.source_id,
-                benchmark_id="aa_intelligence",
-                raw_model_name="Claude Opus 4.6",
-                raw_value=json.dumps(metrics, ensure_ascii=True, sort_keys=True),
-                source_url=adapter.source_url,
-                collected_at=FUTURE_COLLECTED_AT,
-                raw_model_key="anthropic/claude-opus-4.6",
-                payload={"slug": "anthropic/claude-opus-4.6", **metrics},
-                metadata={
-                    "model_creator": "Anthropic",
-                    "metrics": metrics,
-                    "release_date": "2026-02-05",
+            raw_record = adapter._build_raw_record(
+                {
+                    "shortName": "Claude Opus 4.6",
+                    "slug": "anthropic/claude-opus-4.6",
+                    "modelCreatorName": "Anthropic",
+                    "modelCreatorCountry": "us",
+                    "releaseDate": "2026-02-05",
+                    "intelligenceIndex": 61.2,
+                    "codingIndex": 74.25,
+                    "agenticIndex": 47.17,
+                    "gpqa": 0.9202,
+                    "ifbench": 0.8125,
+                    "terminalbenchV21": 0.8464,
+                    "gdpvalNormalized": 0.5479,
+                    "price1mBlended0To3To1": 18.75,
+                    "price1mInputTokens": 5.0,
+                    "price1mOutputTokens": 25.0,
+                    "medianOutputTokensPerSecond": 144.8,
+                    "medianTimeToFirstTokenSeconds": 1.25,
+                    "medianEndToEndResponseTimeSeconds": 9.5,
+                    "contextWindowTokens": 1000000,
+                    "totalParameters": 2000,
+                    "inputModalityText": True,
+                    "inputModalityImage": True,
+                    "outputModalityText": True,
+                    "isOpenWeights": False,
+                    "licenseName": "proprietary",
+                    "huggingfaceUrl": "https://huggingface.co/anthropic/claude-opus-4.6",
+                    "openrouterApiId": "anthropic/claude-opus-4.6",
+                    "opennessBreakdown": {"opennessIndex": 12.5},
                 },
+                fetched_at=FUTURE_COLLECTED_AT,
             )
 
             _, source_run_id, candidates, _ = self._persist_records(adapter, [raw_record])
 
             candidate_values = {candidate.benchmark_id: candidate.value for candidate in candidates}
-            self.assertEqual(
-                candidate_values,
-                {
-                    "aa_intelligence": 61.2,
-                    "aa_speed": 144.8,
-                    "aa_cost": 18.75,
-                },
-            )
+            expected_values = {
+                "aa_intelligence": 61.2,
+                "aa_coding_index": 74.25,
+                "aa_agentic_index": 47.17,
+                "aa_gpqa_diamond": 92.02,
+                "aa_ifbench": 81.25,
+                "aa_terminalbench_v2_1": 84.64,
+                "aa_gdpval_normalized": 54.79,
+                "aa_cost": 18.75,
+                "aa_price_input": 5.0,
+                "aa_price_output": 25.0,
+                "aa_speed": 144.8,
+                "aa_time_to_first_token": 1.25,
+                "aa_end_to_end_response_time": 9.5,
+                "aa_openness_index": 12.5,
+            }
+            for benchmark_id, expected_value in expected_values.items():
+                self.assertIn(benchmark_id, candidate_values)
+                self.assertAlmostEqual(candidate_values[benchmark_id], expected_value)
 
             intelligence = self._latest_score("claude-opus-4-6", "aa_intelligence")
+            coding = self._latest_score("claude-opus-4-6", "aa_coding_index")
             speed = self._latest_score("claude-opus-4-6", "aa_speed")
             cost = self._latest_score("claude-opus-4-6", "aa_cost")
+            gpqa = self._latest_score("claude-opus-4-6", "aa_gpqa_diamond")
 
             self.assertAlmostEqual(float(intelligence["value"]), 61.2)
+            self.assertAlmostEqual(float(coding["value"]), 74.25)
             self.assertAlmostEqual(float(speed["value"]), 144.8)
             self.assertAlmostEqual(float(cost["value"]), 18.75)
+            self.assertAlmostEqual(float(gpqa["value"]), 92.02)
             self.assertEqual(intelligence["source_type"], "primary")
             self.assertEqual(intelligence["verified"], 1)
             self.assertIn("Artificial Analysis field", str(intelligence["notes"]))
@@ -302,6 +330,10 @@ class SourceSpotCheckTests(unittest.TestCase):
             self.assertEqual(model_row["release_date_confidence"], "high")
             self.assertEqual(model_row["release_date_source_name"], "Artificial Analysis")
             self.assertEqual(model_row["release_date_source_url"], adapter.source_url)
+            self.assertEqual(raw_record.metadata["model_creator_country"], "us")
+            self.assertEqual(raw_record.metadata["context_window_tokens"], 1000000)
+            self.assertEqual(raw_record.metadata["license_name"], "proprietary")
+            self.assertEqual(raw_record.metadata["openrouter_api_id"], "anthropic/claude-opus-4.6")
 
             raw_rows = update_engine.list_raw_source_records(source_run_id)
             self.assertEqual(len(raw_rows), 1)

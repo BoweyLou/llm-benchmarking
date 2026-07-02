@@ -3315,16 +3315,22 @@ def _persist_source_result(
         }
 
     resolved_candidates: dict[tuple[str, str], tuple[str, ScoreCandidate]] = {}
+    role_merge_keys: set[tuple[str, tuple[str, ...]]] = set()
     for candidate in result.candidates:
-        model_id = _ensure_model(
-            candidate.raw_model_name,
-            candidate.metadata,
-            candidate.raw_model_key,
-            discovered_update_log_id=discovered_update_log_id,
-        )
-        _merge_model_roles(model_id, candidate.metadata)
         identity = _record_identity(candidate.raw_model_name, candidate.raw_model_key)
-        model_ids_by_identity[identity] = model_id
+        model_id = model_ids_by_identity.get(identity)
+        if model_id is None:
+            model_id = _ensure_model(
+                candidate.raw_model_name,
+                candidate.metadata,
+                candidate.raw_model_key,
+                discovered_update_log_id=discovered_update_log_id,
+            )
+            model_ids_by_identity[identity] = model_id
+        role_key = (model_id, tuple(_model_roles_from_metadata(candidate.metadata)))
+        if role_key[1] and role_key not in role_merge_keys:
+            _merge_model_roles(model_id, candidate.metadata)
+            role_merge_keys.add(role_key)
         source_meta_by_identity[identity] = (candidate.source_type, candidate.verified)
 
         candidate_key = (model_id, candidate.benchmark_id)
