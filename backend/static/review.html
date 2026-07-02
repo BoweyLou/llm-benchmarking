@@ -945,6 +945,10 @@
             <select id="providerFilter" class="select"></select>
           </div>
           <div class="filter-group">
+            <label for="countryFilter">Country</label>
+            <select id="countryFilter" class="select"></select>
+          </div>
+          <div class="filter-group">
             <label for="useCaseFilter">Use case</label>
             <select id="useCaseFilter" class="select"></select>
           </div>
@@ -1128,6 +1132,7 @@
       filters: {
         search: "",
         provider: "",
+        country: "",
         useCase: "",
         generalApproval: "",
         recommendation: "",
@@ -1159,6 +1164,7 @@
       saveToken: document.getElementById("saveToken"),
       search: document.getElementById("search"),
       providerFilter: document.getElementById("providerFilter"),
+      countryFilter: document.getElementById("countryFilter"),
       useCaseFilter: document.getElementById("useCaseFilter"),
       generalApprovalFilter: document.getElementById("generalApprovalFilter"),
       recommendationFilter: document.getElementById("recommendationFilter"),
@@ -1223,10 +1229,16 @@
 
     function populateFilters() {
       fillSelect(els.providerFilter, "All providers", state.catalog.providers.map((item) => [item.name, item.name]));
+      fillSelect(
+        els.countryFilter,
+        "All countries",
+        ((state.catalog.facets || {}).countries || []).map((item) => [item.id, `${item.name} (${item.count})`])
+      );
       fillSelect(els.useCaseFilter, "All use cases", state.catalog.use_cases.map((item) => [item.id, item.label]));
       fillSelect(els.familyFilter, "All families", state.catalog.families.map((item) => [item.family_id, item.family_name]));
       els.useCaseFilter.value = state.filters.useCase;
       els.providerFilter.value = state.filters.provider;
+      els.countryFilter.value = state.filters.country;
       els.familyFilter.value = state.filters.family;
     }
 
@@ -1253,9 +1265,17 @@
         const approvals = model.use_case_approvals || {};
         const useCaseId = state.filters.useCase;
         const approval = useCaseId ? approvals[useCaseId] : firstApproval(model);
-        const haystack = [model.name, model.id, model.provider, model.family_name, model.family_id].join(" ").toLowerCase();
+        const haystack = [
+          model.name,
+          model.id,
+          model.provider,
+          model.family_name,
+          model.family_id,
+          ...countryLabelsFor(model)
+        ].join(" ").toLowerCase();
         if (q && !haystack.includes(q)) return false;
         if (state.filters.provider && model.provider !== state.filters.provider) return false;
+        if (state.filters.country && !countryValuesFor(model).includes(state.filters.country)) return false;
         if (state.filters.family && model.family_id !== state.filters.family) return false;
         if (state.filters.catalogStatus && model.catalog_status !== state.filters.catalogStatus) return false;
         if (state.filters.role && !(model.model_roles || []).includes(state.filters.role)) return false;
@@ -1305,6 +1325,34 @@
       const selected = state.filters.useCase || state.activeUseCaseId;
       if (selected && approvals[selected]) return approvals[selected];
       return Object.values(approvals)[0] || null;
+    }
+
+    function countryEntriesFor(model) {
+      const entries = [];
+      const origins = Array.isArray(model.provider_origin_countries) ? model.provider_origin_countries : [];
+      origins.forEach((origin) => {
+        if (!origin || typeof origin !== "object") return;
+        const id = origin.code || origin.name || "";
+        const name = origin.name || origin.code || "";
+        if (id && name) entries.push({ id, name });
+      });
+      if (!entries.length && (model.provider_country_code || model.provider_country_name)) {
+        entries.push({
+          id: model.provider_country_code || model.provider_country_name,
+          name: model.provider_country_name || model.provider_country_code
+        });
+      }
+      return entries.filter((entry, index) => {
+        return entry.id && entries.findIndex((candidate) => candidate.id === entry.id) === index;
+      });
+    }
+
+    function countryValuesFor(model) {
+      return countryEntriesFor(model).map((entry) => entry.id);
+    }
+
+    function countryLabelsFor(model) {
+      return countryEntriesFor(model).flatMap((entry) => [entry.id, entry.name]);
     }
 
     function statusFor(model) {
@@ -1908,6 +1956,7 @@
       const filterBindings = [
         [els.search, "search"],
         [els.providerFilter, "provider"],
+        [els.countryFilter, "country"],
         [els.useCaseFilter, "useCase"],
         [els.generalApprovalFilter, "generalApproval"],
         [els.recommendationFilter, "recommendation"],
@@ -1933,6 +1982,7 @@
         Object.assign(state.filters, {
           search: "",
           provider: "",
+          country: "",
           useCase: "",
           generalApproval: "",
           recommendation: "",
@@ -1944,6 +1994,7 @@
           smallOnly: false
         });
         els.search.value = "";
+        els.countryFilter.value = "";
         els.generalApprovalFilter.value = "";
         els.recommendationFilter.value = "";
         els.manualRecommendationFilter.value = "";

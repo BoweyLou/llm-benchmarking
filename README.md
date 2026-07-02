@@ -109,12 +109,12 @@ Each use-case approval can then carry:
 ## Banking Review Workbench
 
 For interactive banking review, run the FastAPI app locally and open
-`/review`. The workbench shows the model catalog with provider, use-case,
-general-approval, effective-recommendation, manual-recommendation, use-case
-approval, family, catalog-status, model-role, and small-model filters; a
-sortable model table; family and needs-decision views; and a detail inspector
-for model approval plus per-use-case approval notes, manual ratings, generated
-blockers, warnings, and required controls.
+`/review`. The workbench shows the model catalog with provider, provider-origin
+country, use-case, general-approval, effective-recommendation,
+manual-recommendation, use-case approval, family, catalog-status, model-role,
+and small-model filters; a sortable model table; family and needs-decision
+views; and a detail inspector for model approval plus per-use-case approval
+notes, manual ratings, generated blockers, warnings, and required controls.
 
 On tablet-width screens, the workbench keeps the filters and table usable first
 and moves the inspector below the table so review controls remain reachable.
@@ -155,6 +155,10 @@ General model approval is reviewed separately in the top panel of the right
 inspector. Use `Approve model` or `Reject model` for model-level decisions.
 Use `Approve use case` or `Not approved use case` only for the active use-case
 approval.
+
+Use `Country` to filter by provider-origin country across providers. When a
+provider has multiple origin countries, the model appears under each listed
+country.
 
 Select a model to review blockers, warnings, required controls, and notes in the
 right inspector. Change `Manual rating` and use-case `Approval`, then save. For

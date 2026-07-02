@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-046: P2 Add country filtering to review workbench
+  - Source: Human request 2026-07-02 while using the Proxmox-hosted banking review workbench.
+  - Problem: reviewers could filter by provider but not by provider-origin country, making country-specific review passes too manual.
+  - Scope: add provider-origin country facets to `/api/review/catalog`, add a left-rail `Country` filter, filter loaded models by `provider_origin_countries` with provider country fallback, update static coverage and user docs, redeploy Proxmox workbench, and verify in browser.
+  - Acceptance: reviewers can select a country in the left rail and the table narrows to models whose provider origin includes that country.
+  - Validation: inline script parse, review workbench tests, full backend suite, docs/version checks, browser smoke, live Proxmox HTML/API checks, and service health check.
+  - Completed: 2026-07-02. Provider-origin country filtering is available in the banking review workbench.
+
 - [x] LBM-045: P1 Separate general model approval from use-case approval in review workbench
   - Source: Human request 2026-07-02 after clarifying that reviewers need to approve a model in general and then approve individual use cases separately.
   - Problem: the review workbench exposed use-case approval clearly, but model-level approval was still ambiguous and the legacy `models.approved_for_use` column is synchronized from use-case rows.

@@ -63,6 +63,8 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Effective recommendation", app_response.text)
         self.assertIn("Manual recommendation", app_response.text)
         self.assertIn("manualRecommendationFilter", app_response.text)
+        self.assertIn("countryFilter", app_response.text)
+        self.assertIn("Country", app_response.text)
         self.assertIn("General approval", app_response.text)
         self.assertIn("approve_model", app_response.text)
         self.assertEqual(catalog_response.status_code, 200)
@@ -71,6 +73,8 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("models", payload)
         self.assertIn("families", payload)
         self.assertIn("facets", payload)
+        self.assertIn("countries", payload["facets"])
+        self.assertTrue(payload["facets"]["countries"])
         model = next(model for model in payload["models"] if model["id"] == "catalog-model")
         self.assertFalse(model["general_approved_for_use"])
 

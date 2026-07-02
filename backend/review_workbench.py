@@ -310,6 +310,8 @@ def _build_facets(
 ) -> dict[str, Any]:
     provider_counts = _count_values(model.get("provider") for model in models)
     catalog_counts = _count_values(model.get("catalog_status") for model in models)
+    country_counts: dict[str, int] = {}
+    country_names: dict[str, str] = {}
     role_counts: dict[str, int] = {}
     recommendation_counts: dict[str, int] = {}
     general_approval_counts = {"approved": 0, "not_approved": 0}
@@ -319,6 +321,10 @@ def _build_facets(
             general_approval_counts["approved"] += 1
         else:
             general_approval_counts["not_approved"] += 1
+        for country in _model_country_entries(model):
+            country_id = country["id"]
+            country_counts[country_id] = country_counts.get(country_id, 0) + 1
+            country_names.setdefault(country_id, country["name"])
         for role in model.get("model_roles") or []:
             role_counts[str(role)] = role_counts.get(str(role), 0) + 1
         approvals = model.get("use_case_approvals")
@@ -339,6 +345,13 @@ def _build_facets(
             {"id": provider.get("id"), "name": provider.get("name"), "count": provider_counts.get(str(provider.get("name")), 0)}
             for provider in providers
         ],
+        "countries": [
+            {"id": country_id, "name": country_names.get(country_id, country_id), "count": count}
+            for country_id, count in sorted(
+                country_counts.items(),
+                key=lambda item: (country_names.get(item[0], item[0]), item[0]),
+            )
+        ],
         "families": [
             {"id": family["family_id"], "name": family["family_name"], "count": family["model_count"]}
             for family in families
@@ -349,6 +362,33 @@ def _build_facets(
         "recommendations": _counts_to_list(recommendation_counts),
         "approvals": _counts_to_list(approval_counts),
     }
+
+
+def _model_country_entries(model: dict[str, Any]) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    origins = model.get("provider_origin_countries") or []
+    if isinstance(origins, list):
+        for origin in origins:
+            if not isinstance(origin, dict):
+                continue
+            code = _clean_text(origin.get("code"))
+            name = _clean_text(origin.get("name"))
+            if code or name:
+                entries.append({"id": code or name or "", "name": name or code or ""})
+
+    if not entries:
+        code = _clean_text(model.get("provider_country_code"))
+        name = _clean_text(model.get("provider_country_name"))
+        if code or name:
+            entries.append({"id": code or name or "", "name": name or code or ""})
+
+    unique: dict[str, str] = {}
+    for entry in entries:
+        country_id = _clean_text(entry.get("id"))
+        name = _clean_text(entry.get("name"))
+        if country_id and name:
+            unique.setdefault(country_id, name)
+    return [{"id": country_id, "name": name} for country_id, name in unique.items()]
 
 
 def _model_needs_decision(model: dict[str, Any]) -> bool:
