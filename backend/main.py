@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ipaddress import ip_address, ip_network
 import os
 from pathlib import Path
 from secrets import compare_digest
@@ -79,6 +80,9 @@ from .review_workbench import (
 
 ADMIN_TOKEN_ENV_VAR = "LLM_BENCHMARKING_ADMIN_TOKEN"
 ADMIN_TOKEN_HEADER = "x-llm-benchmarking-admin-token"
+TRUSTED_TAILNET_WRITES_ENV_VAR = "LLM_BENCHMARKING_TRUSTED_TAILNET_WRITES"
+TAILSCALE_IPV4_NETWORK = ip_network("100.64.0.0/10")
+TAILSCALE_IPV6_NETWORK = ip_network("fd7a:115c:a1e0::/48")
 REVIEW_APP_PATH = Path(__file__).resolve().parent / "static" / "review.html"
 
 
@@ -91,12 +95,38 @@ def _bearer_token(value: str | None) -> str | None:
     return token.strip()
 
 
+def _env_truthy(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _request_client_host(request: Request) -> str:
+    return request.client.host if request.client else ""
+
+
+def _is_trusted_tailnet_client(host: str) -> bool:
+    try:
+        address = ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address in TAILSCALE_IPV4_NETWORK or address in TAILSCALE_IPV6_NETWORK
+
+
+def _trusted_tailnet_write_allowed(request: Request) -> bool:
+    return _env_truthy(TRUSTED_TAILNET_WRITES_ENV_VAR) and _is_trusted_tailnet_client(_request_client_host(request))
+
+
 def require_local_admin(request: Request) -> None:
+    if _trusted_tailnet_write_allowed(request):
+        return
+
     expected_token = os.getenv(ADMIN_TOKEN_ENV_VAR, "").strip()
     if not expected_token:
         raise HTTPException(
             status_code=403,
-            detail=f"Admin mutations are disabled. Set {ADMIN_TOKEN_ENV_VAR} to enable local write routes.",
+            detail=(
+                f"Admin mutations are disabled. Set {ADMIN_TOKEN_ENV_VAR} to enable local write routes, "
+                f"or set {TRUSTED_TAILNET_WRITES_ENV_VAR}=1 for trusted Tailscale/loopback clients."
+            ),
         )
 
     provided_token = (

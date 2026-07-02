@@ -4,6 +4,7 @@
 
 - Added the FastAPI-served `/review` banking model review workbench with filterable model/use-case/family views, token-guarded review decision APIs, manual model creation, deprecation support, and review snapshot export/import.
 - Added a Proxmox/Tailscale deployment path for the banking review workbench, including a systemd unit, deploy script, persistent remote SQLite location, and deployment runbook.
+- Added trusted tailnet write mode so the Proxmox-hosted review workbench can save from Tailscale clients without pasting an admin token.
 - Added release-date provenance, computed model-age evidence, Hugging Face repository timestamps, and all-modality OpenRouter discovery coverage to model exports.
 - Added curated Hugging Face model discovery for official/provider-owned model families, starting with Google Gemma, so small-model candidates appear in catalog exports even without leaderboard coverage.
 - Added model size metadata fields to the SQLite schema, API/list-models payloads, and clean CSV export.

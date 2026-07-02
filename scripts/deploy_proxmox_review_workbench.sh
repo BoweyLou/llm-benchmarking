@@ -9,6 +9,7 @@ REMOTE_ENV_FILE="/etc/llm-benchmarking.env"
 REMOTE_SERVICE="llm-benchmarking.service"
 REMOTE_USER="llm-benchmarking"
 REMOTE_PORT="${REMOTE_PORT:-8766}"
+TAILNET_TRUSTED_WRITES="${TAILNET_TRUSTED_WRITES:-1}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -61,7 +62,7 @@ rsync -az --delete \
   "$ROOT_DIR/" "$REMOTE_HOST:$REMOTE_APP_DIR/"
 
 ssh -o BatchMode=yes "$REMOTE_HOST" \
-  "REMOTE_APP_DIR='$REMOTE_APP_DIR' REMOTE_STATE_DIR='$REMOTE_STATE_DIR' REMOTE_DB_PATH='$REMOTE_DB_PATH' REMOTE_ENV_FILE='$REMOTE_ENV_FILE' REMOTE_SERVICE='$REMOTE_SERVICE' REMOTE_USER='$REMOTE_USER' REMOTE_PORT='$REMOTE_PORT' TAILSCALE_IP='$TAILSCALE_IP' ADMIN_TOKEN='${ADMIN_TOKEN:-}' bash -s" <<'REMOTE'
+  "REMOTE_APP_DIR='$REMOTE_APP_DIR' REMOTE_STATE_DIR='$REMOTE_STATE_DIR' REMOTE_DB_PATH='$REMOTE_DB_PATH' REMOTE_ENV_FILE='$REMOTE_ENV_FILE' REMOTE_SERVICE='$REMOTE_SERVICE' REMOTE_USER='$REMOTE_USER' REMOTE_PORT='$REMOTE_PORT' TAILSCALE_IP='$TAILSCALE_IP' TAILNET_TRUSTED_WRITES='$TAILNET_TRUSTED_WRITES' ADMIN_TOKEN='${ADMIN_TOKEN:-}' bash -s" <<'REMOTE'
 set -euo pipefail
 
 if ! getent passwd "$REMOTE_USER" >/dev/null; then
@@ -92,7 +93,7 @@ fi
 
 tmp_env="$(mktemp)"
 if [[ -f "$REMOTE_ENV_FILE" ]]; then
-  grep -Ev '^(DATABASE_URL|LLM_BENCHMARKING_ADMIN_TOKEN|LLM_BENCHMARKING_HOST|LLM_BENCHMARKING_PORT)=' "$REMOTE_ENV_FILE" > "$tmp_env" || true
+  grep -Ev '^(DATABASE_URL|LLM_BENCHMARKING_ADMIN_TOKEN|LLM_BENCHMARKING_HOST|LLM_BENCHMARKING_PORT|LLM_BENCHMARKING_TRUSTED_TAILNET_WRITES)=' "$REMOTE_ENV_FILE" > "$tmp_env" || true
 fi
 {
   cat "$tmp_env"
@@ -100,6 +101,7 @@ fi
   printf 'LLM_BENCHMARKING_ADMIN_TOKEN=%s\n' "$token"
   printf 'LLM_BENCHMARKING_HOST=%s\n' "$TAILSCALE_IP"
   printf 'LLM_BENCHMARKING_PORT=%s\n' "$REMOTE_PORT"
+  printf 'LLM_BENCHMARKING_TRUSTED_TAILNET_WRITES=%s\n' "$TAILNET_TRUSTED_WRITES"
 } > "$REMOTE_ENV_FILE"
 rm -f "$tmp_env"
 chown "root:$REMOTE_USER" "$REMOTE_ENV_FILE"
@@ -157,5 +159,6 @@ PY
 rm -f "$CATALOG_JSON"
 
 printf 'Deployed banking review workbench: http://%s:%s/review\n' "$TAILSCALE_IP" "$REMOTE_PORT"
-printf 'Admin token is stored on %s:%s\n' "$REMOTE_HOST" "$REMOTE_ENV_FILE"
+printf 'Trusted tailnet writes: %s\n' "$TAILNET_TRUSTED_WRITES"
+printf 'Admin token fallback is stored on %s:%s\n' "$REMOTE_HOST" "$REMOTE_ENV_FILE"
 printf 'Remote DB seed uploaded: %s\n' "$SEED_UPLOADED"

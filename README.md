@@ -120,10 +120,11 @@ uvicorn backend.main:app --reload --port 8000
 open http://127.0.0.1:8000/review
 ```
 
-Review writes use the same local admin guard as the other mutation routes. Set
-`LLM_BENCHMARKING_ADMIN_TOKEN` before starting the server, then paste that value
-into the workbench token field. Without the token, the workbench can read the
-catalog but cannot save decisions. Saved decisions write to SQLite:
+Review writes use the same admin guard as the other mutation routes. For local
+development, set `LLM_BENCHMARKING_ADMIN_TOKEN` before starting the server, then
+paste that value into the workbench token field. Without a token or trusted
+tailnet mode, the workbench can read the catalog but cannot save decisions.
+Saved decisions write to SQLite:
 
 - `model_use_case_approvals` stores use-case approval, manual recommendation
   status, and notes.
@@ -142,11 +143,13 @@ To run the workbench on the Proxmox tailnet host, use the deploy script:
 scripts/deploy_proxmox_review_workbench.sh
 ```
 
-The deploy binds the service to the host's Tailscale IPv4 address, preserves
-the remote SQLite database at `/var/lib/llm-benchmarking/db.sqlite`, and keeps
-the admin token in `/etc/llm-benchmarking.env`. See
+The deploy binds the service to the host's Tailscale IPv4 address, enables
+token-free writes for Tailscale clients with
+`LLM_BENCHMARKING_TRUSTED_TAILNET_WRITES=1`, preserves the remote SQLite
+database at `/var/lib/llm-benchmarking/db.sqlite`, and keeps an admin-token
+fallback in `/etc/llm-benchmarking.env`. See
 [docs/deploy/proxmox-review-workbench.md](docs/deploy/proxmox-review-workbench.md)
-for service operations, token retrieval, and backup notes.
+for service operations, fallback-token retrieval, and backup notes.
 
 For spreadsheet review, the local `banking-review` utility remains available. It
 regenerates the `australian_bank` recommendation proposals by default, then
@@ -199,8 +202,10 @@ Useful local URLs:
 The backend bootstraps local schema and repo-backed baselines on startup if needed. Startup does not perform network metadata refreshes; use the explicit CLI or API update paths for that work.
 
 Read-only routes do not require credentials. Write routes are disabled unless
-`LLM_BENCHMARKING_ADMIN_TOKEN` is set in the server environment. Send that value
-with local mutation requests by using either
+`LLM_BENCHMARKING_ADMIN_TOKEN` is set in the server environment or
+`LLM_BENCHMARKING_TRUSTED_TAILNET_WRITES=1` is set and the client source address
+is loopback or a Tailscale address. Send the admin-token fallback with local
+mutation requests by using either
 `X-LLM-Benchmarking-Admin-Token: <token>` or `Authorization: Bearer <token>`.
 For local operation, bind the server to loopback or another trusted private
 interface rather than exposing the admin token on a public network.
@@ -350,8 +355,9 @@ The core API is in [backend/main.py](backend/main.py). High-level groups:
 - update operations: `/api/update`, `/api/update/status/{log_id}`, `/api/update/history`, source-run detail, raw source records, and audit output
 - market snapshots: `/api/market-snapshots`
 
-All POST/PATCH/PUT mutation routes require the local admin token described in
-the run instructions above. GET routes remain read-only and unauthenticated.
+POST/PATCH/PUT mutation routes require either the local admin token described in
+the run instructions above, or trusted tailnet mode for loopback/Tailscale
+clients. GET routes remain read-only and unauthenticated.
 
 ## Contributor Workflow
 

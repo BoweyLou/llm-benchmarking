@@ -30,9 +30,11 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.original_engine = update_engine.ENGINE
         self.original_bootstrapped = update_engine.BOOTSTRAPPED
         self.original_token = os.environ.get(main.ADMIN_TOKEN_ENV_VAR)
+        self.original_trusted_tailnet_writes = os.environ.get(main.TRUSTED_TAILNET_WRITES_ENV_VAR)
         update_engine.ENGINE = self.engine
         update_engine.BOOTSTRAPPED = True
         os.environ.pop(main.ADMIN_TOKEN_ENV_VAR, None)
+        os.environ.pop(main.TRUSTED_TAILNET_WRITES_ENV_VAR, None)
 
     def tearDown(self) -> None:
         update_engine.ENGINE = self.original_engine
@@ -41,6 +43,10 @@ class ReviewWorkbenchTests(unittest.TestCase):
             os.environ.pop(main.ADMIN_TOKEN_ENV_VAR, None)
         else:
             os.environ[main.ADMIN_TOKEN_ENV_VAR] = self.original_token
+        if self.original_trusted_tailnet_writes is None:
+            os.environ.pop(main.TRUSTED_TAILNET_WRITES_ENV_VAR, None)
+        else:
+            os.environ[main.TRUSTED_TAILNET_WRITES_ENV_VAR] = self.original_trusted_tailnet_writes
         self.engine.dispose()
         self.tempdir.cleanup()
 

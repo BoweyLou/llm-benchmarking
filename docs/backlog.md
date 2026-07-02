@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-039: P1 Allow token-free review saves from trusted Tailscale clients
+  - Source: Human request 2026-07-02 after trying to save from the deployed workbench and hitting the admin-token prompt.
+  - Problem: the Proxmox workbench needed to be usable from any Tailscale device without manually copying an admin token into each browser session.
+  - Scope: explicit trusted-tailnet write mode, loopback/Tailscale source-IP guard, auth tests, deploy-script environment wiring, README and deployment docs, live Proxmox redeploy, and tokenless write-route verification.
+  - Acceptance: local/dev mutation routes remain token-protected by default; `LLM_BENCHMARKING_TRUSTED_TAILNET_WRITES=1` allows mutation requests from loopback or Tailscale clients without a token; the Proxmox deploy enables that mode by default while retaining the admin-token fallback.
+  - Validation: auth tests, review workbench tests, full backend test suite, docs/version checks, live no-token snapshot export from `http://100.82.249.6:8766`, and token fallback check before closeout.
+  - Completed: 2026-07-02. The Proxmox-hosted banking review workbench now supports token-free saves from trusted Tailscale clients.
+
 - [x] LBM-038: P1 Deploy banking review workbench on the Proxmox tailnet host
   - Source: Human request 2026-07-02 after validating the local interactive review workbench.
   - Problem: the workbench needed to be available from any device on the Tailscale network without depending on a local development server.

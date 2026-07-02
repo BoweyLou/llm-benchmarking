@@ -12,13 +12,19 @@ from backend import main
 class ApiAdminGuardTests(unittest.TestCase):
     def setUp(self) -> None:
         self.original_token = os.environ.get(main.ADMIN_TOKEN_ENV_VAR)
+        self.original_trusted_tailnet_writes = os.environ.get(main.TRUSTED_TAILNET_WRITES_ENV_VAR)
         os.environ.pop(main.ADMIN_TOKEN_ENV_VAR, None)
+        os.environ.pop(main.TRUSTED_TAILNET_WRITES_ENV_VAR, None)
 
     def tearDown(self) -> None:
         if self.original_token is None:
             os.environ.pop(main.ADMIN_TOKEN_ENV_VAR, None)
         else:
             os.environ[main.ADMIN_TOKEN_ENV_VAR] = self.original_token
+        if self.original_trusted_tailnet_writes is None:
+            os.environ.pop(main.TRUSTED_TAILNET_WRITES_ENV_VAR, None)
+        else:
+            os.environ[main.TRUSTED_TAILNET_WRITES_ENV_VAR] = self.original_trusted_tailnet_writes
 
     def test_read_route_remains_available_without_admin_token(self) -> None:
         with patch("backend.main.bootstrap"), patch("backend.main.list_benchmarks", return_value=[]):
@@ -78,6 +84,34 @@ class ApiAdminGuardTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"log_id": 43, "status": "running"})
         schedule_update.assert_called_once_with(benchmarks=None, triggered_by="api")
+
+    def test_mutating_route_accepts_trusted_tailnet_client_without_admin_token(self) -> None:
+        os.environ[main.TRUSTED_TAILNET_WRITES_ENV_VAR] = "1"
+
+        with (
+            patch("backend.main.bootstrap"),
+            patch("backend.main._request_client_host", return_value="100.98.175.63"),
+            patch("backend.main.schedule_update", return_value=44) as schedule_update,
+        ):
+            response = TestClient(main.app).post("/api/update", json={})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"log_id": 44, "status": "running"})
+        schedule_update.assert_called_once_with(benchmarks=None, triggered_by="api")
+
+    def test_trusted_tailnet_mode_does_not_accept_public_clients_without_token(self) -> None:
+        os.environ[main.TRUSTED_TAILNET_WRITES_ENV_VAR] = "1"
+
+        with (
+            patch("backend.main.bootstrap"),
+            patch("backend.main._request_client_host", return_value="203.0.113.10"),
+            patch("backend.main.schedule_update") as schedule_update,
+        ):
+            response = TestClient(main.app).post("/api/update", json={})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(main.TRUSTED_TAILNET_WRITES_ENV_VAR, response.json()["detail"])
+        schedule_update.assert_not_called()
 
 
 if __name__ == "__main__":

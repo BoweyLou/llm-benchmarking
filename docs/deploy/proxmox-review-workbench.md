@@ -20,10 +20,13 @@ Defaults:
 - Systemd unit: `/etc/systemd/system/llm-benchmarking.service`
 - Environment file: `/etc/llm-benchmarking.env`
 - Runtime user: `llm-benchmarking`
+- Trusted tailnet writes: enabled with
+  `LLM_BENCHMARKING_TRUSTED_TAILNET_WRITES=1`
 
-Set `REMOTE_HOST`, `REMOTE_PORT`, `TAILSCALE_IP`, or `ADMIN_TOKEN` in the local
-environment when a deploy needs different connection details or a preselected
-admin token:
+Set `REMOTE_HOST`, `REMOTE_PORT`, `TAILSCALE_IP`,
+`TAILNET_TRUSTED_WRITES`, or `ADMIN_TOKEN` in the local environment when a
+deploy needs different connection details, tokenless-write behavior, or a
+preselected admin token:
 
 ```bash
 ADMIN_TOKEN="$(python3 - <<'PY'
@@ -34,8 +37,8 @@ PY
 ```
 
 The first deploy seeds the remote persistent database from local `data/db.sqlite`
-when that file exists. Later deploys preserve the remote database and token so
-manual review decisions survive code updates.
+when that file exists. Later deploys preserve the remote database and token
+fallback so manual review decisions survive code updates.
 
 On Debian-based Proxmox hosts, the script installs `python3-venv` or the
 matching versioned package, such as `python3.11-venv`, if the base Python
@@ -49,8 +52,9 @@ Open the workbench from any device on the tailnet:
 http://<proxmox-tailscale-ip>:8766/review
 ```
 
-Read-only browsing does not need credentials. To save decisions, paste the admin
-token from the Proxmox environment file into the workbench token field:
+Devices on the Tailscale network can browse and save decisions without pasting
+an admin token. The service still keeps an admin-token fallback for non-tailnet
+operations or if trusted tailnet writes are disabled:
 
 ```bash
 ssh proxmox "sed -n 's/^LLM_BENCHMARKING_ADMIN_TOKEN=//p' /etc/llm-benchmarking.env"
