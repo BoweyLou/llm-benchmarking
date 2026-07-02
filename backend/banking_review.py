@@ -38,7 +38,7 @@ VALID_CATALOG_STATUSES = {
     CATALOG_STATUS_DEPRECATED,
 }
 VALID_MODEL_ROLES = {"generator", "embedding", "reranker", "multimodal_embedding"}
-VALID_RECOMMENDATION_STATUSES = {"unrated", "recommended", "not_recommended", "discouraged"}
+VALID_RECOMMENDATION_STATUSES = {"unrated", "recommended", "not_recommended", "discouraged", "restricted"}
 
 DEFAULT_BANKING_REVIEW_OUTPUT = Path("output/banking-model-list-with-recommendations.csv")
 

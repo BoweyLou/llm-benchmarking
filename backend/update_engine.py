@@ -103,6 +103,7 @@ RECOMMENDATION_STATUS_UNRATED = "unrated"
 RECOMMENDATION_STATUS_RECOMMENDED = "recommended"
 RECOMMENDATION_STATUS_NOT_RECOMMENDED = "not_recommended"
 RECOMMENDATION_STATUS_DISCOURAGED = "discouraged"
+RECOMMENDATION_STATUS_RESTRICTED = "restricted"
 RECOMMENDATION_STATUS_MIXED = "mixed"
 DEFAULT_RECOMMENDATION_PROFILE_ID = "australian_bank"
 VALID_RECOMMENDATION_STATUSES = {
@@ -110,6 +111,7 @@ VALID_RECOMMENDATION_STATUSES = {
     RECOMMENDATION_STATUS_RECOMMENDED,
     RECOMMENDATION_STATUS_NOT_RECOMMENDED,
     RECOMMENDATION_STATUS_DISCOURAGED,
+    RECOMMENDATION_STATUS_RESTRICTED,
 }
 SOURCE_METADATA_PROMOTION_LABELS = {
     "artificial_analysis": "Artificial Analysis",
@@ -559,6 +561,9 @@ def _serialize_use_case_approval(row: dict[str, Any]) -> dict[str, Any]:
         "discouraged_member_count": int(
             row.get("discouraged_member_count") or (1 if recommendation_status == RECOMMENDATION_STATUS_DISCOURAGED else 0)
         ),
+        "restricted_member_count": int(
+            row.get("restricted_member_count") or (1 if recommendation_status == RECOMMENDATION_STATUS_RESTRICTED else 0)
+        ),
         "proposed_recommendation_status": _normalize_recommendation_status(row.get("proposed_recommendation_status")),
         "proposed_recommendation_score": row.get("proposed_recommendation_score"),
         "proposed_recommendation_confidence": row.get("proposed_recommendation_confidence"),
@@ -595,6 +600,7 @@ def _default_use_case_approval_payload(use_case_id: str) -> dict[str, Any]:
         "recommended_member_count": 0,
         "not_recommended_member_count": 0,
         "discouraged_member_count": 0,
+        "restricted_member_count": 0,
         "proposed_recommendation_status": RECOMMENDATION_STATUS_UNRATED,
         "proposed_recommendation_score": None,
         "proposed_recommendation_confidence": None,
@@ -2346,6 +2352,9 @@ def _aggregate_use_case_approvals(members: list[dict[str, Any]]) -> dict[str, di
         discouraged_member_count = sum(
             1 for entry in entries if _normalize_recommendation_status(entry.get("recommendation_status")) == RECOMMENDATION_STATUS_DISCOURAGED
         )
+        restricted_member_count = sum(
+            1 for entry in entries if _normalize_recommendation_status(entry.get("recommendation_status")) == RECOMMENDATION_STATUS_RESTRICTED
+        )
         auto_not_recommended_member_count = sum(
             1 for entry in entries if _normalize_recommendation_status(entry.get("auto_recommendation_status")) == RECOMMENDATION_STATUS_NOT_RECOMMENDED
         )
@@ -2366,6 +2375,7 @@ def _aggregate_use_case_approvals(members: list[dict[str, Any]]) -> dict[str, di
                 RECOMMENDATION_STATUS_RECOMMENDED if recommended_member_count else "",
                 RECOMMENDATION_STATUS_NOT_RECOMMENDED if not_recommended_member_count else "",
                 RECOMMENDATION_STATUS_DISCOURAGED if discouraged_member_count else "",
+                RECOMMENDATION_STATUS_RESTRICTED if restricted_member_count else "",
             )
             if status
         }
@@ -2404,6 +2414,7 @@ def _aggregate_use_case_approvals(members: list[dict[str, Any]]) -> dict[str, di
             "recommended_member_count": recommended_member_count,
             "not_recommended_member_count": not_recommended_member_count,
             "discouraged_member_count": discouraged_member_count,
+            "restricted_member_count": restricted_member_count,
             "proposed_recommendation_status": aggregated_proposed_recommendation_status,
             "proposed_recommendation_score": _average_numeric(
                 entry.get("proposed_recommendation_score") for entry in entries

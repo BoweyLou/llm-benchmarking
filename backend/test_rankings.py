@@ -880,6 +880,14 @@ class RankingTests(unittest.TestCase):
             canonical_model_id="rec-canonical",
             canonical_model_name="Recommendation Canonical",
         )
+        self.add_model(
+            "family-restricted",
+            "Family Restricted",
+            family_id="rec-family",
+            family_name="Recommendation Family",
+            canonical_model_id="rec-canonical",
+            canonical_model_name="Recommendation Canonical",
+        )
 
         update_engine.update_model_use_case_approval(
             "family-recommended",
@@ -897,13 +905,23 @@ class RankingTests(unittest.TestCase):
             "not_recommended",
             "Legacy compatibility only",
         )
+        update_engine.update_model_use_case_approval(
+            "family-restricted",
+            "coding",
+            True,
+            "Allowed for cyber team",
+            "restricted",
+            "Restricted to approved cyber staff.",
+        )
 
         models = update_engine.list_models()
         recommended = next(model for model in models if model["id"] == "family-recommended")
         not_recommended = next(model for model in models if model["id"] == "family-not-recommended")
+        restricted = next(model for model in models if model["id"] == "family-restricted")
 
         self.assertEqual(recommended["use_case_approvals"]["coding"]["recommendation_status"], "recommended")
         self.assertEqual(not_recommended["use_case_approvals"]["coding"]["recommendation_status"], "not_recommended")
+        self.assertEqual(restricted["use_case_approvals"]["coding"]["recommendation_status"], "restricted")
 
         benchmarks = {benchmark["id"]: benchmark for benchmark in update_engine.list_benchmarks()}
         canonical_models = update_engine._build_canonical_models(models, benchmarks)
@@ -914,6 +932,7 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(family_approval["recommended_member_count"], 1)
         self.assertEqual(family_approval["not_recommended_member_count"], 1)
         self.assertEqual(family_approval["discouraged_member_count"], 0)
+        self.assertEqual(family_approval["restricted_member_count"], 1)
 
     def test_legacy_global_approval_migrates_to_use_case_rows(self) -> None:
         with self.engine.begin() as conn:

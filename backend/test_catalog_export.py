@@ -74,6 +74,11 @@ class CatalogExportTests(unittest.TestCase):
                         "recommendation_status": "recommended",
                         "proposed_recommendation_status": "not_recommended",
                         "effective_recommendation_status": "recommended",
+                    },
+                    "coding": {
+                        "approved_for_use": False,
+                        "recommendation_status": "restricted",
+                        "effective_recommendation_status": "restricted",
                     }
                 },
                 "inference_destinations": [
@@ -110,8 +115,10 @@ class CatalogExportTests(unittest.TestCase):
         self.assertEqual(rows[0]["inference_platform_names"], "AWS Bedrock")
         self.assertEqual(rows[0]["inference_region_names"], "us-east-1")
         self.assertEqual(rows[0]["approved_use_case_ids"], "customer_support")
+        self.assertEqual(rows[0]["restricted_use_case_ids"], "coding")
         self.assertEqual(rows[0]["proposed_not_recommended_use_case_ids"], "customer_support")
         self.assertEqual(rows[0]["effective_recommended_use_case_ids"], "customer_support")
+        self.assertEqual(rows[0]["effective_restricted_use_case_ids"], "coding")
 
     def test_render_raw_csv_preserves_nested_payloads(self) -> None:
         models = [

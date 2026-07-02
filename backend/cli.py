@@ -160,7 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     banking_set_parser.add_argument(
         "--recommendation",
-        choices=("unchanged", "unrated", "recommended", "not_recommended", "discouraged"),
+        choices=("unchanged", "unrated", "recommended", "not_recommended", "discouraged", "restricted"),
         default="unchanged",
         help="Manual recommendation rating to write. Defaults to unchanged.",
     )

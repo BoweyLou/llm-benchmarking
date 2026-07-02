@@ -168,7 +168,7 @@ class BankingReviewTests(unittest.TestCase):
                     "--approval",
                     "approved",
                     "--recommendation",
-                    "recommended",
+                    "restricted",
                     "--json",
                 ]
             )
@@ -176,6 +176,9 @@ class BankingReviewTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         summary = json.loads(stdout.getvalue())
         self.assertEqual(summary["updated_count"], 1)
+        model = next(model for model in update_engine.list_models() if model["id"] == "cli-review-model")
+        approval = model["use_case_approvals"].get("customer_support")
+        self.assertEqual(approval["recommendation_status"], "restricted")
 
     def _insert_review_model(
         self,

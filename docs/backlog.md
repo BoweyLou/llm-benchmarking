@@ -16,6 +16,22 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-050: P2 Add restricted recommendation status
+  - Source: Human request 2026-07-02 for limited-audience models such as cyber-specialist models that should only be available to certain people.
+  - Problem: manual recommendation state could distinguish recommended, not recommended, and discouraged models, but it could not mark a model as approved only for a restricted group.
+  - Scope: add `restricted` as an accepted manual/effective recommendation status across review APIs, CLI, CSV exports, family aggregation, and review-workbench filters/actions while keeping access details in recommendation notes.
+  - Acceptance: reviewers can mark selected, filtered, family, or individual use-case decisions as `restricted`; the state persists in `model_use_case_approvals`, appears in exports/API payloads, and can be filtered separately from recommended/not recommended/discouraged.
+  - Validation: focused API/CLI/export/ranking tests, full backend tests, and docs/version checks.
+  - Completed: 2026-07-02. Restricted recommendation status is available for limited-audience review decisions.
+
+- [x] LBM-049: P2 Make blank-use-case manual-rating triage usable
+  - Source: Human request 2026-07-02 after trying to run a first-cut pass over approved models that had not been manually rated.
+  - Problem: leaving `Use case` blank still let the workbench evaluate manual/effective/approval filters through the active use case, so reviewers could not reliably find generally approved models with no saved manual rating yet.
+  - Scope: adjust review-workbench filtering so blank-use-case manual `Unrated` means no manual recommendation is saved in any use case, keep selected-use-case filters unchanged, update browser CSV use-case fields for matching approvals, and document the first-cut filter combination.
+  - Acceptance: `General approval = Approved`, blank `Use case`, and `Manual recommendation = Unrated` returns approved models that still need a human manual recommendation pass.
+  - Validation: static workbench coverage, rendered workbench smoke, docs/version checks, and live catalog count comparison.
+  - Completed: 2026-07-02. Blank-use-case manual-rating triage now supports the first-cut review workflow.
+
 - [x] LBM-048: P1 Canonicalize provider product/platform aliases
   - Source: Human request 2026-07-02 after seeing Amazon and Amazon Nova, plus Microsoft and Azure, as separate provider filters in the review workbench.
   - Problem: product/platform labels from sources and the provider-origin baseline could become active provider rows, splitting provider facets and provider-origin review.
@@ -52,7 +68,7 @@ the row is older than 14 days or the backend/API shape has changed.
   - Source: Human request 2026-07-02 after clarifying that `Clear rating` affects manual recommendation but not approval state.
   - Problem: the left-rail recommendation filter only targeted effective recommendation status, so reviewers could not directly find rows by saved manual override or cleared manual rating.
   - Scope: rename the existing recommendation filter to `Effective recommendation`, add a separate `Manual recommendation` filter, wire frontend filtering to `model_use_case_approvals.recommendation_status`, add static review-app coverage, update README/changelog/backlog, redeploy Proxmox workbench, and verify in browser.
-  - Acceptance: reviewers can filter by manual `recommended`, `not_recommended`, `discouraged`, and `unrated` independently of effective recommendation and approval state.
+  - Acceptance: reviewers can filter by manual `recommended`, `restricted`, `not_recommended`, `discouraged`, and `unrated` independently of effective recommendation and approval state.
   - Validation: inline script parse, review workbench tests, docs/version checks, browser smoke, live Proxmox HTML check, and service health check.
   - Completed: 2026-07-02. Manual recommendation filtering is available in the review workbench left rail.
 

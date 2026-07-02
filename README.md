@@ -106,6 +106,10 @@ Each use-case approval can then carry:
 - `effective_recommendation_status`: manual rating when present, otherwise automatic hard blocker, otherwise proposal.
 - proposal blockers, warnings, reasons, required controls, score, confidence, policy version, and computed timestamp.
 
+Use manual `restricted` when a model is suitable only for a defined group, for
+example a cyber-specialist model that should be available only to approved cyber
+team members. Store the audience or access condition in recommendation notes.
+
 ## Banking Review Workbench
 
 For interactive banking review, run the FastAPI app locally and open
@@ -167,9 +171,15 @@ Select a model to review blockers, warnings, required controls, and notes in the
 right inspector. Change `Manual rating` and use-case `Approval`, then save. For
 many models, filter first, use `Select all filtered` when needed, and apply the
 bulk recommendation or approval action to the exact selected model IDs.
+Use `Restricted` for limited-audience access decisions and record who may use
+the model in the recommendation notes.
 Use `Effective recommendation` to filter the final status shown in exports and
 use `Manual recommendation` to filter only reviewer-saved overrides, including
 rows where the manual rating has been cleared to `Unrated`.
+When `Use case` is left blank, `Manual recommendation = Unrated` finds models
+with no saved manual recommendation in any use case. Combine it with
+`General approval = Approved` for first-cut triage of approved models that still
+need a human rating.
 
 The workbench can export and import a JSON review snapshot. Use that snapshot
 when rebuilding a database so manual listings, deprecation markers, and
@@ -224,6 +234,7 @@ Manual curation commands write local SQLite review state:
 ```bash
 python -m backend banking-review add-model --name "Vendor Model" --provider "Vendor"
 python -m backend banking-review set --model-id vendor-model --use-case customer_support --approval approved --recommendation recommended --notes "Approved for pilot."
+python -m backend banking-review set --model-id chatgpt-5-5-cyber --use-case safety_compliance --recommendation restricted --recommendation-notes "Approved cyber team only."
 python -m backend banking-review set --family-id openai::gpt-5 --use-case coding --approval approved --recommendation recommended
 python -m backend banking-review deprecate --model-id old-model --mark-not-recommended --all-use-cases --notes "Deprecated from banking review."
 ```

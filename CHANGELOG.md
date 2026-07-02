@@ -8,6 +8,8 @@
 - Split review workbench bulk `Not approved` from `Clear rating` so clearing manual recommendations no longer looks like it clears approval state.
 - Improved review workbench tablet layouts and active use-case context so iPad-width review sessions keep filters, tables, inspector details, and save targets reachable.
 - Added a separate manual recommendation filter to the review workbench left rail while keeping effective recommendation filtering available.
+- Refined blank-use-case manual recommendation filtering so first-cut triage can find generally approved models with no saved manual rating yet.
+- Added `restricted` as a manual/effective recommendation status for models limited to specific approved user groups or cohorts.
 - Added separate general model approval state and review workbench controls so model-level approval can be saved independently from use-case approval.
 - Added a provider-origin country filter to the review workbench left rail.
 - Canonicalized provider aliases so Amazon Nova/AWS/Bedrock roll up to Amazon and Azure/Microsoft Azure/Azure AI Foundry roll up to Microsoft in provider facets, exports, and inference matching.

@@ -62,7 +62,11 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Banking Model Review", app_response.text)
         self.assertIn("Effective recommendation", app_response.text)
         self.assertIn("Manual recommendation", app_response.text)
+        self.assertIn("Restricted", app_response.text)
+        self.assertIn('data-action="restricted"', app_response.text)
         self.assertIn("manualRecommendationFilter", app_response.text)
+        self.assertIn("hasSavedManualRecommendation", app_response.text)
+        self.assertIn("All matching use cases", app_response.text)
         self.assertIn("countryFilter", app_response.text)
         self.assertIn("Country", app_response.text)
         self.assertIn("General approval", app_response.text)
@@ -126,6 +130,29 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertEqual({row["recommendation_status"] for row in approval_rows}, {"recommended"})
         self.assertEqual({row["approved_for_use"] for row in approval_rows}, {1})
         self.assertEqual({row["catalog_status"] for row in model_rows}, {"deprecated"})
+
+    def test_review_decision_route_saves_restricted_recommendation(self) -> None:
+        os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
+        self._insert_review_model("restricted-model")
+
+        with patch("backend.main.bootstrap"):
+            response = TestClient(main.app).post(
+                "/api/review/decisions",
+                json={
+                    "model_ids": ["restricted-model"],
+                    "use_case_ids": ["safety_compliance"],
+                    "recommendation_status": "restricted",
+                    "recommendation_notes": "Cyber model limited to approved cyber team members.",
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        model = next(model for model in update_engine.list_models() if model["id"] == "restricted-model")
+        approval = model["use_case_approvals"]["safety_compliance"]
+        self.assertEqual(approval["recommendation_status"], "restricted")
+        self.assertEqual(approval["effective_recommendation_status"], "restricted")
+        self.assertEqual(approval["recommendation_notes"], "Cyber model limited to approved cyber team members.")
 
     def test_review_decision_route_can_clear_approval_boolean(self) -> None:
         os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"

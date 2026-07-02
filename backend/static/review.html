@@ -967,6 +967,7 @@
               <option value="recommended">Recommended</option>
               <option value="not_recommended">Not recommended</option>
               <option value="discouraged">Discouraged</option>
+              <option value="restricted">Restricted</option>
               <option value="unrated">Unrated</option>
             </select>
           </div>
@@ -977,6 +978,7 @@
               <option value="recommended">Recommended</option>
               <option value="not_recommended">Not recommended</option>
               <option value="discouraged">Discouraged</option>
+              <option value="restricted">Restricted</option>
               <option value="unrated">Unrated</option>
             </select>
           </div>
@@ -1060,6 +1062,7 @@
               <button class="btn green" data-action="recommended">Recommended</button>
               <button class="btn orange" data-action="not_recommended">Not recommended</button>
               <button class="btn red" data-action="discouraged">Discouraged</button>
+              <button class="btn purple" data-action="restricted">Restricted</button>
               <button class="btn purple" data-action="deprecated">Deprecate</button>
               <button class="btn" data-action="clear">Clear rating</button>
             </div>
@@ -1264,7 +1267,6 @@
       models = models.filter((model) => {
         const approvals = model.use_case_approvals || {};
         const useCaseId = state.filters.useCase;
-        const approval = useCaseId ? approvals[useCaseId] : firstApproval(model);
         const haystack = [
           model.name,
           model.id,
@@ -1285,17 +1287,15 @@
           const generalApproved = model.general_approved_for_use ? "approved" : "not_approved";
           if (generalApproved !== state.filters.generalApproval) return false;
         }
-        if (state.filters.recommendation) {
-          const status = approval ? approval.effective_recommendation_status || "unrated" : "unrated";
-          if (status !== state.filters.recommendation) return false;
-        }
-        if (state.filters.manualRecommendation) {
-          const manualStatus = approval ? approval.recommendation_status || "unrated" : "unrated";
-          if (manualStatus !== state.filters.manualRecommendation) return false;
-        }
-        if (state.filters.approval) {
-          const approved = approval && approval.approved_for_use ? "approved" : "not_approved";
-          if (approved !== state.filters.approval) return false;
+        if (useCaseId) {
+          if (!approvalMatchesUseCaseFilters(approvals[useCaseId])) return false;
+        } else if (useCaseScopedFiltersActive()) {
+          if (state.filters.manualRecommendation === "unrated") {
+            if (hasSavedManualRecommendation(model)) return false;
+            if ((state.filters.recommendation || state.filters.approval) && !matchingUseCaseApproval(model, { ignoreManual: true })) return false;
+          } else if (!matchingUseCaseApproval(model)) {
+            return false;
+          }
         }
         return true;
       });
@@ -1322,9 +1322,53 @@
 
     function firstApproval(model) {
       const approvals = model.use_case_approvals || {};
-      const selected = state.filters.useCase || state.activeUseCaseId;
+      const selected = state.filters.useCase;
       if (selected && approvals[selected]) return approvals[selected];
+      const matching = matchingUseCaseApproval(model, {
+        ignoreManual: state.filters.manualRecommendation === "unrated" && !state.filters.useCase
+      });
+      if (matching) return matching;
+      if (state.activeUseCaseId && approvals[state.activeUseCaseId]) return approvals[state.activeUseCaseId];
       return Object.values(approvals)[0] || null;
+    }
+
+    function useCaseApprovalValues(model) {
+      return Object.values(model.use_case_approvals || {}).filter((approval) => {
+        return approval && typeof approval === "object";
+      });
+    }
+
+    function useCaseScopedFiltersActive() {
+      return Boolean(state.filters.recommendation || state.filters.manualRecommendation || state.filters.approval);
+    }
+
+    function hasSavedManualRecommendation(model) {
+      return useCaseApprovalValues(model).some((approval) => {
+        return (approval.recommendation_status || "unrated") !== "unrated";
+      });
+    }
+
+    function matchingUseCaseApproval(model, options = {}) {
+      return useCaseApprovalValues(model).find((approval) => {
+        return approvalMatchesUseCaseFilters(approval, options);
+      }) || null;
+    }
+
+    function approvalMatchesUseCaseFilters(approval, options = {}) {
+      if (!approval || typeof approval !== "object") return false;
+      if (state.filters.recommendation) {
+        const status = approval.effective_recommendation_status || "unrated";
+        if (status !== state.filters.recommendation) return false;
+      }
+      if (!options.ignoreManual && state.filters.manualRecommendation) {
+        const manualStatus = approval.recommendation_status || "unrated";
+        if (manualStatus !== state.filters.manualRecommendation) return false;
+      }
+      if (state.filters.approval) {
+        const approved = approval.approved_for_use ? "approved" : "not_approved";
+        if (approved !== state.filters.approval) return false;
+      }
+      return true;
     }
 
     function countryEntriesFor(model) {
@@ -1412,7 +1456,9 @@
         : "No rows are selected. Actions apply to the filtered list.";
       els.selectAllFiltered.textContent = `Select all filtered (${models.length})`;
       els.showingCount.textContent = `Showing ${models.length} of ${state.catalog.summary.model_count} models`;
-      const useCase = state.catalog.use_cases.find((item) => item.id === (state.filters.useCase || state.activeUseCaseId));
+      const useCase = state.filters.useCase
+        ? state.catalog.use_cases.find((item) => item.id === state.filters.useCase)
+        : null;
       els.activeUseCaseLabel.textContent = useCase ? `Use case: ${useCase.label}` : "Use case: All";
       document.getElementById("applyFiltered").textContent = `Select all filtered (${models.length})`;
     }
@@ -1517,6 +1563,7 @@
             <button class="btn small orange family-action" data-family="${escapeAttr(family.family_id)}" data-action="reject_model">Reject models</button>
             <button class="btn small green family-action" data-family="${escapeAttr(family.family_id)}" data-action="approve">Use-case ok</button>
             <button class="btn small orange family-action" data-family="${escapeAttr(family.family_id)}" data-action="not_recommended">Not rec.</button>
+            <button class="btn small purple family-action" data-family="${escapeAttr(family.family_id)}" data-action="restricted">Restricted</button>
           </span>
         </div>`).join("") || '<div class="empty">No families match the current view.</div>'}</div>`;
     }
@@ -1592,7 +1639,7 @@
           <div class="form-grid">
             <label>Manual rating
               <select class="select" id="decisionRecommendation">
-                ${["unrated", "recommended", "not_recommended", "discouraged"].map((status) => `<option value="${status}" ${status === (activeApproval.recommendation_status || "unrated") ? "selected" : ""}>${labelStatus(status)}</option>`).join("")}
+                ${["unrated", "recommended", "not_recommended", "discouraged", "restricted"].map((status) => `<option value="${status}" ${status === (activeApproval.recommendation_status || "unrated") ? "selected" : ""}>${labelStatus(status)}</option>`).join("")}
               </select>
             </label>
             <label>Approval
@@ -1702,6 +1749,7 @@
       if (action === "recommended") payload.recommendation_status = "recommended";
       if (action === "not_recommended") payload.recommendation_status = "not_recommended";
       if (action === "discouraged") payload.recommendation_status = "discouraged";
+      if (action === "restricted") payload.recommendation_status = "restricted";
       if (action === "clear") payload.recommendation_status = "unrated";
       if (action === "deprecated") payload.catalog_status = "deprecated";
       await request("/api/review/decisions", { method: "POST", body: JSON.stringify(payload) });
@@ -1723,6 +1771,7 @@
         recommended: "recommended",
         not_recommended: "not recommended",
         discouraged: "discouraged",
+        restricted: "restricted",
         deprecated: "deprecated",
         clear: "clear rating"
       }[action] || action.replace(/_/g, " ");
@@ -1776,8 +1825,8 @@
       const columns = [
         ["export_scope", () => scope],
         ["exported_at", () => exportedAt],
-        ["review_use_case_id", () => activeUseCase.id],
-        ["review_use_case_label", () => activeUseCase.label],
+        ["review_use_case_id", (model) => approvalForExport(model).use_case_id || activeUseCase.id],
+        ["review_use_case_label", (model) => useCaseLabel(approvalForExport(model).use_case_id) || activeUseCase.label],
         ["model_id", (model) => model.id],
         ["model_name", (model) => model.name],
         ["provider", (model) => model.provider],
@@ -1830,12 +1879,21 @@
     function useCaseForExport() {
       const id = state.filters.useCase || state.activeUseCaseId || "";
       const useCase = (state.catalog.use_cases || []).find((item) => item.id === id) || {};
-      return { id, label: useCase.label || "" };
+      return state.filters.useCase
+        ? { id, label: useCase.label || "" }
+        : { id: "", label: "All matching use cases" };
     }
 
     function approvalForExport(model) {
-      const useCase = useCaseForExport();
-      return ((model.use_case_approvals || {})[useCase.id]) || firstApproval(model) || {};
+      if (state.filters.useCase) {
+        return ((model.use_case_approvals || {})[state.filters.useCase]) || {};
+      }
+      return firstApproval(model) || {};
+    }
+
+    function useCaseLabel(useCaseId) {
+      const useCase = (state.catalog.use_cases || []).find((item) => item.id === useCaseId) || {};
+      return useCase.label || useCaseId || "";
     }
 
     function joinList(value) {
@@ -1890,6 +1948,7 @@
         recommended: "Rec.",
         not_recommended: "Not rec.",
         discouraged: "Disc.",
+        restricted: "Restr.",
         unrated: "Unrated",
         mixed: "Mixed"
       };
@@ -1915,6 +1974,7 @@
       if (value === "recommended") return "green";
       if (value === "not_recommended") return "orange";
       if (value === "discouraged") return "red";
+      if (value === "restricted") return "purple";
       if (value === "mixed") return "blue";
       return "gray";
     }
