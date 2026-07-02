@@ -27,8 +27,14 @@ PROVIDER_CANONICAL_NAME_ALIASES = {
     "azure": "Microsoft",
     "azureaifoundry": "Microsoft",
     "azureopenai": "Microsoft",
+    "alibabacloud": "Alibaba",
+    "ibmgranite": "IBM",
     "microsoft": "Microsoft",
     "microsoftazure": "Microsoft",
+    "mistral": "Mistral AI",
+    "mistralai": "Mistral AI",
+    "qwen": "Alibaba",
+    "qwenteam": "Alibaba",
 }
 
 

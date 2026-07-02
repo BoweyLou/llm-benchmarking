@@ -396,20 +396,6 @@
     "active": true
   },
   {
-    "id": "mistral",
-    "name": "Mistral",
-    "origin_countries": [
-      {
-        "code": "FR",
-        "name": "France"
-      }
-    ],
-    "origin_basis": "Mistral AI describes itself as a French startup founded in April 2023.",
-    "source_url": "https://mistral.ai/about",
-    "verified_at": "2026-04-07T00:00:00Z",
-    "active": true
-  },
-  {
     "id": "mistral-ai",
     "name": "Mistral AI",
     "origin_countries": [
@@ -560,20 +546,6 @@
     ],
     "origin_basis": "The official imprint lists Prime Intellect, Inc. at 1111b South Governors Avenue, Dover, DE 19904, US.",
     "source_url": "https://www.primeintellect.ai/imprint",
-    "verified_at": "2026-04-07T00:00:00Z",
-    "active": true
-  },
-  {
-    "id": "qwen",
-    "name": "Qwen",
-    "origin_countries": [
-      {
-        "code": "CN",
-        "name": "China"
-      }
-    ],
-    "origin_basis": "Alibaba Cloud\u2019s official Qwen page identifies Qwen as an Alibaba Cloud product, and Alibaba Group\u2019s official locations page places Alibaba in Hangzhou, China.",
-    "source_url": "https://www.alibabacloud.com/solutions/generative-ai/qwen",
     "verified_at": "2026-04-07T00:00:00Z",
     "active": true
   },

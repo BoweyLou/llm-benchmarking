@@ -121,7 +121,9 @@ views; and a detail inspector for model approval plus per-use-case approval
 notes, manual ratings, generated blockers, warnings, and required controls.
 Provider filters use canonical parent providers: for example, Amazon Nova,
 AWS, and Amazon Bedrock are shown under Amazon, while Azure, Microsoft Azure,
-and Azure AI Foundry are shown under Microsoft.
+and Azure AI Foundry are shown under Microsoft. Qwen rows are shown under
+Alibaba, Mistral rows are shown under Mistral AI, and ibm-granite rows are
+shown under IBM.
 
 On tablet-width screens, the workbench keeps the filters and table usable first
 and moves the inspector below the table so review controls remain reachable.
@@ -400,7 +402,7 @@ python -m backend model-curation-export
 Notes:
 
 - Full `update` runs configured model discovery before model-card refresh. `update --benchmarks ...` skips that discovery phase unless `--refresh-model-discovery` is passed.
-- `model-discovery-sync` runs only the curated metadata discovery lane. `--source configured` runs both static provider catalog rows and provider-owned Hugging Face discovery; use `--source huggingface` or `--source catalog` to narrow the run. The repo-backed baseline covers Google Gemma, NVIDIA retrieval, IBM watsonx Slate, and IBM Granite retrieval entries, and intentionally excludes community quantizations/fine-tunes unless a trusted mirror is configured.
+- `model-discovery-sync` runs only the curated metadata discovery lane. `--source configured` runs both static provider catalog rows and provider-owned Hugging Face discovery; use `--source huggingface` or `--source catalog` to narrow the run. The repo-backed baseline covers small generator families such as Google Gemma, Microsoft Phi, Meta Llama 3.2 small models, Qwen small models, Mistral/Ministral small models, and IBM Granite generators, plus NVIDIA retrieval, IBM watsonx Slate, and IBM Granite retrieval entries. It intentionally excludes community quantizations/fine-tunes unless a trusted mirror is configured.
 - OpenRouter model refresh requests all output modalities so non-text-capable catalog rows are not hidden by the provider default.
 - `inference-sync` supports destination subsets.
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.

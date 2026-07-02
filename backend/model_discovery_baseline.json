@@ -105,6 +105,151 @@
     },
     {
       "source": "huggingface",
+      "family": "phi",
+      "provider": "Microsoft",
+      "author": "microsoft",
+      "queries": [
+        "Phi"
+      ],
+      "include_patterns": [
+        "microsoft/Phi-3*",
+        "microsoft/Phi-4*",
+        "microsoft/Phi-mini-MoE*",
+        "microsoft/Phi-tiny-MoE*",
+        "microsoft/phi-1*",
+        "microsoft/phi-2*",
+        "microsoft/phi-4*"
+      ],
+      "exclude_patterns": [
+        "microsoft/Phi-Ground*"
+      ],
+      "trusted_mirrors": [],
+      "model_roles": ["generator"],
+      "small_model_candidate_if_unknown": true,
+      "limit": 100
+    },
+    {
+      "source": "huggingface",
+      "family": "llama-small",
+      "provider": "Meta",
+      "author": "meta-llama",
+      "queries": [
+        "Llama-3.2"
+      ],
+      "include_patterns": [
+        "meta-llama/Llama-3.2-1B*",
+        "meta-llama/Llama-3.2-3B*",
+        "meta-llama/Llama-3.2-11B*"
+      ],
+      "exclude_patterns": [],
+      "trusted_mirrors": [],
+      "model_roles": ["generator"],
+      "limit": 100
+    },
+    {
+      "source": "huggingface",
+      "family": "qwen-small",
+      "provider": "Alibaba",
+      "author": "Qwen",
+      "queries": [
+        "Qwen3",
+        "Qwen2.5"
+      ],
+      "include_patterns": [
+        "Qwen/Qwen3-0.6B*",
+        "Qwen/Qwen3-1.7B*",
+        "Qwen/Qwen3-4B*",
+        "Qwen/Qwen3-8B*",
+        "Qwen/Qwen3-14B*",
+        "Qwen/Qwen3-30B-A3B*",
+        "Qwen/Qwen3-Coder-30B-A3B*",
+        "Qwen/Qwen2.5-0.5B*",
+        "Qwen/Qwen2.5-1.5B*",
+        "Qwen/Qwen2.5-3B*",
+        "Qwen/Qwen2.5-7B*",
+        "Qwen/Qwen2.5-14B*",
+        "Qwen/Qwen2.5-Coder-0.5B*",
+        "Qwen/Qwen2.5-Coder-1.5B*",
+        "Qwen/Qwen2.5-Coder-3B*",
+        "Qwen/Qwen2.5-Coder-7B*",
+        "Qwen/Qwen2.5-Coder-14B*",
+        "Qwen/Qwen2.5-Math-1.5B*",
+        "Qwen/Qwen2.5-Math-7B*"
+      ],
+      "exclude_patterns": [
+        "*VL*",
+        "*Omni*",
+        "*ASR*",
+        "*TTS*",
+        "*Embedding*",
+        "*ForcedAligner*"
+      ],
+      "trusted_mirrors": [],
+      "model_roles": ["generator"],
+      "limit": 100
+    },
+    {
+      "source": "huggingface",
+      "family": "mistral-small",
+      "provider": "Mistral AI",
+      "author": "mistralai",
+      "queries": [
+        "Ministral",
+        "Mistral-7B"
+      ],
+      "include_patterns": [
+        "mistralai/Ministral-3-3B*",
+        "mistralai/Ministral-3-8B*",
+        "mistralai/Ministral-3-14B*",
+        "mistralai/Ministral-8B*",
+        "mistralai/Mistral-7B*",
+        "mistralai/Mathstral-7B*",
+        "mistralai/Mamba-Codestral-7B*"
+      ],
+      "exclude_patterns": [],
+      "trusted_mirrors": [],
+      "model_roles": ["generator"],
+      "limit": 100
+    },
+    {
+      "source": "huggingface",
+      "family": "ibm-granite-generator",
+      "provider": "IBM",
+      "author": "ibm-granite",
+      "queries": [
+        "granite-3",
+        "granite-4",
+        "granite-code"
+      ],
+      "include_patterns": [
+        "ibm-granite/granite-3.0-1b*",
+        "ibm-granite/granite-3.0-2b*",
+        "ibm-granite/granite-3.0-3b*",
+        "ibm-granite/granite-3.0-8b*",
+        "ibm-granite/granite-3.1-1b*",
+        "ibm-granite/granite-3.1-2b*",
+        "ibm-granite/granite-3.1-3b*",
+        "ibm-granite/granite-4.0-350m*",
+        "ibm-granite/granite-4.0-h-350m*",
+        "ibm-granite/granite-4.0-h-micro*",
+        "ibm-granite/granite-4.0-tiny*",
+        "ibm-granite/granite-4.1-3b*",
+        "ibm-granite/granite-4.1-8b*",
+        "ibm-granite/granite-3b-code*",
+        "ibm-granite/granite-8b-code*"
+      ],
+      "exclude_patterns": [
+        "*embedding*",
+        "*guardian*",
+        "*speech*",
+        "*vision*"
+      ],
+      "trusted_mirrors": [],
+      "model_roles": ["generator"],
+      "limit": 100
+    },
+    {
+      "source": "huggingface",
       "family": "nvidia-embedding",
       "provider": "NVIDIA",
       "author": "nvidia",

@@ -6,6 +6,19 @@ from backend import model_discovery, update_engine
 
 
 class ModelDiscoveryTests(unittest.TestCase):
+    def test_default_baseline_includes_common_small_generator_families(self) -> None:
+        families = {
+            entry.get("family")
+            for entry in model_discovery.huggingface_discovery_entries()
+        }
+
+        self.assertIn("gemma", families)
+        self.assertIn("phi", families)
+        self.assertIn("llama-small", families)
+        self.assertIn("qwen-small", families)
+        self.assertIn("mistral-small", families)
+        self.assertIn("ibm-granite-generator", families)
+
     def test_filters_official_huggingface_repos_and_excludes_community_by_default(self) -> None:
         entry = {
             "source": "huggingface",

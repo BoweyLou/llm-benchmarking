@@ -12,11 +12,11 @@
 - Added `restricted` as a manual/effective recommendation status for models limited to specific approved user groups or cohorts.
 - Added separate general model approval state and review workbench controls so model-level approval can be saved independently from use-case approval.
 - Added a provider-origin country filter to the review workbench left rail.
-- Canonicalized provider aliases so Amazon Nova/AWS/Bedrock roll up to Amazon and Azure/Microsoft Azure/Azure AI Foundry roll up to Microsoft in provider facets, exports, and inference matching.
+- Canonicalized provider aliases so Amazon Nova/AWS/Bedrock roll up to Amazon, Azure/Microsoft Azure/Azure AI Foundry roll up to Microsoft, Qwen rolls up to Alibaba, Mistral rolls up to Mistral AI, and ibm-granite rolls up to IBM in provider facets, exports, and inference matching.
 - Added a Proxmox/Tailscale deployment path for the banking review workbench, including a systemd unit, deploy script, persistent remote SQLite location, and deployment runbook.
 - Added trusted tailnet write mode so the Proxmox-hosted review workbench can save from Tailscale clients without pasting an admin token.
 - Added release-date provenance, computed model-age evidence, Hugging Face repository timestamps, and all-modality OpenRouter discovery coverage to model exports.
-- Added curated Hugging Face model discovery for official/provider-owned model families, starting with Google Gemma, so small-model candidates appear in catalog exports even without leaderboard coverage.
+- Added curated Hugging Face model discovery for official/provider-owned small model families, including Google Gemma, Microsoft Phi, Meta Llama 3.2 small models, Qwen small models, Mistral/Ministral small models, and IBM Granite generators, so small-model candidates appear in catalog exports even without leaderboard coverage.
 - Added configured retrieval-catalog discovery for NVIDIA and IBM, covering provider-owned Hugging Face embedding/reranking repos plus tracked NVIDIA NIM and IBM watsonx Slate catalog rows.
 - Added model size metadata fields to the SQLite schema, API/list-models payloads, and clean CSV export.
 - Added `python -m backend model-discovery-sync --source configured`, targeted `--source huggingface|catalog`, and `python -m backend update --refresh-model-discovery` for targeted discovery refreshes while keeping benchmark-scoped updates fast by default.

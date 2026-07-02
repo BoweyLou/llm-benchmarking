@@ -3044,6 +3044,12 @@ def _refresh_huggingface_model_discovery(
                         source_url=source_url,
                         verified_at=verified_at,
                     )
+                    size_values = _apply_huggingface_discovery_size_defaults(
+                        size_values,
+                        entry,
+                        source_url=source_url,
+                        verified_at=verified_at,
+                    )
                     timestamp_values = model_discovery.huggingface_timestamp_values_from_item(item)
                     model_id, outcome = _ensure_discovered_huggingface_model(
                         repo_id=repo_id,
@@ -3097,6 +3103,27 @@ def _refresh_huggingface_model_discovery(
     summary["records_found"] = records_found
     _finish_source_run(source_run_id, status="completed", records_found=records_found, error_message=None)
     return summary
+
+
+def _apply_huggingface_discovery_size_defaults(
+    size_values: dict[str, Any],
+    entry: dict[str, Any],
+    *,
+    source_url: str,
+    verified_at: str,
+) -> dict[str, Any]:
+    if not bool(entry.get("small_model_candidate_if_unknown")):
+        return size_values
+    if size_values.get("parameter_count_b") is not None or size_values.get("active_parameter_count_b") is not None:
+        return size_values
+
+    updated = dict(size_values)
+    updated["small_model_candidate"] = 1
+    updated.setdefault("model_size_class", "small")
+    updated.setdefault("model_size_source_name", HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME)
+    updated.setdefault("model_size_source_url", source_url)
+    updated.setdefault("model_size_verified_at", verified_at)
+    return updated
 
 
 def _refresh_configured_model_discovery(
@@ -4190,6 +4217,13 @@ def _ensure_discovered_huggingface_model(
 
 
 def _resolve_huggingface_model_id(repo_id: str, display_name: str, provider: str) -> str | None:
+    candidate_model_id = _choose_model_id(display_name, repo_id)
+    display_names = {
+        normalize_text(display_name),
+        normalize_text(repo_id),
+        normalize_text(repo_id.split("/", 1)[1] if "/" in repo_id else repo_id),
+    }
+    repo_id_norm = normalize_text(repo_id)
     with get_connection(ENGINE) as conn:
         repo_match = fetch_one(
             conn,
@@ -4203,25 +4237,28 @@ def _resolve_huggingface_model_id(repo_id: str, display_name: str, provider: str
         if repo_match is not None:
             return str(repo_match["id"])
 
-    resolved = _resolve_model_id(display_name)
-    if resolved:
-        return resolved
-
-    identity = infer_model_identity(display_name, provider, repo_id)
-    if not identity.canonical_model_id:
-        return None
-
-    with get_connection(ENGINE) as conn:
-        identity_match = fetch_one(
+        exact_rows = fetch_all(
             conn,
-            select(models_table.c.id)
-            .where(
-                models_table.c.active == 1,
-                models_table.c.canonical_model_id == identity.canonical_model_id,
-            )
-            .limit(1),
+            select(
+                models_table.c.id,
+                models_table.c.name,
+                models_table.c.canonical_model_name,
+                models_table.c.openrouter_model_id,
+            ).where(models_table.c.active == 1),
         )
-    return str(identity_match["id"]) if identity_match is not None else None
+    for row in exact_rows:
+        if str(row.get("id") or "") == candidate_model_id:
+            return str(row["id"])
+        if normalize_text(str(row.get("openrouter_model_id") or "")) == repo_id_norm:
+            return str(row["id"])
+        row_names = {
+            normalize_text(str(row.get("name") or "")),
+            normalize_text(str(row.get("canonical_model_name") or "")),
+        }
+        if any(name and name in display_names for name in row_names):
+            return str(row["id"])
+
+    return None
 
 
 def _huggingface_discovery_existing_model_values(

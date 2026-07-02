@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-051: P2 Expand small-model generator discovery beyond Gemma
+  - Source: Human request 2026-07-02 after seeing the small-model filter mostly show Gemma rows while obvious small families such as Phi were missing.
+  - Problem: configured provider-owned Hugging Face discovery only covered Google Gemma for generator small-model rows, so Microsoft Phi and other common small/open generator families did not appear as small-model candidates unless another source happened to discover them.
+  - Scope: add curated provider-owned discovery lanes for Microsoft Phi, Meta Llama 3.2 small models, Qwen small models, Mistral/Ministral small models, and IBM Granite generators; preserve metadata-only discovery semantics; add a conservative curated fallback for Phi rows whose official HF metadata lacks numeric parameter counts; canonicalize Qwen/Alibaba and Mistral/Mistral AI provider facets.
+  - Acceptance: `model-discovery-sync --source configured` imports additional provider-owned small generator rows, marks Phi rows as small candidates where configured, does not create benchmark scores, keeps community fine-tunes excluded unless trusted mirrors are configured, and avoids split Qwen/Mistral provider filters.
+  - Validation: baseline coverage tests, Phi discovery regression, live configured discovery sync, full backend tests, docs/version checks, local and Proxmox catalog verification.
+  - Completed: 2026-07-02. The small-model filter now includes common provider-owned small generator families beyond Gemma.
+
 - [x] LBM-050: P2 Add restricted recommendation status
   - Source: Human request 2026-07-02 for limited-audience models such as cyber-specialist models that should only be available to certain people.
   - Problem: manual recommendation state could distinguish recommended, not recommended, and discouraged models, but it could not mark a model as approved only for a restricted group.

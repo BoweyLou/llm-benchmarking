@@ -465,6 +465,67 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(discovered["model_roles"], ["embedding"])
         self.assertEqual(discovered["metadata_source_name"], "huggingface_model_discovery")
 
+    def test_huggingface_model_discovery_adds_phi_small_model_candidates(self) -> None:
+        entry = {
+            "source": "huggingface",
+            "family": "phi",
+            "provider": "Microsoft",
+            "author": "microsoft",
+            "queries": ["Phi"],
+            "include_patterns": ["microsoft/Phi-4*", "microsoft/phi-4*"],
+            "exclude_patterns": ["microsoft/Phi-Ground*"],
+            "trusted_mirrors": [],
+            "model_roles": ["generator"],
+            "small_model_candidate_if_unknown": True,
+        }
+        items = [
+            {
+                "modelId": "microsoft/Phi-4-mini-instruct",
+                "pipeline_tag": "text-generation",
+                "tags": ["transformers", "text-generation", "license:mit"],
+            },
+            {
+                "modelId": "microsoft/phi-4",
+                "pipeline_tag": "text-generation",
+                "tags": ["transformers", "text-generation", "license:mit"],
+            },
+            {
+                "modelId": "microsoft/Phi-Ground",
+                "pipeline_tag": None,
+                "tags": ["pytorch"],
+            },
+        ]
+
+        with patch.object(update_engine.model_discovery, "huggingface_discovery_entries", return_value=[entry]), patch.object(
+            update_engine.model_discovery,
+            "fetch_huggingface_discovery_items",
+            return_value=items,
+        ):
+            summary = update_engine.refresh_model_discovery_metadata(source="huggingface", family="phi")
+
+        self.assertEqual(summary["records_found"], 2)
+        self.assertEqual(summary["models_created"], 2)
+
+        models = update_engine.list_models()
+        by_repo_id = {model.get("huggingface_repo_id"): model for model in models if model.get("huggingface_repo_id")}
+        self.assertIn("microsoft/Phi-4-mini-instruct", by_repo_id)
+        self.assertIn("microsoft/phi-4", by_repo_id)
+        self.assertNotIn("microsoft/Phi-Ground", by_repo_id)
+
+        mini = by_repo_id["microsoft/Phi-4-mini-instruct"]
+        self.assertEqual(mini["provider"], "Microsoft")
+        self.assertEqual(mini["model_roles"], ["generator"])
+        self.assertTrue(mini["small_model_candidate"])
+        self.assertEqual(mini["model_size_class"], "small")
+        self.assertIsNone(mini["parameter_count_b"])
+        self.assertEqual(mini["metadata_source_name"], "huggingface_model_discovery")
+
+        with get_connection(self.engine) as conn:
+            score_rows = fetch_all(conn, select(scores_table))
+            raw_records = fetch_all(conn, select(raw_source_records_table))
+        self.assertEqual(score_rows, [])
+        self.assertEqual(len(raw_records), 2)
+
     def test_catalog_model_discovery_adds_provider_catalog_embedding_rows(self) -> None:
         entry = {
             "source": "catalog",
@@ -688,6 +749,30 @@ class RankingTests(unittest.TestCase):
                         "origin_countries_json": "[]",
                         "active": 1,
                     },
+                    {
+                        "id": "qwen",
+                        "name": "Qwen",
+                        "country_code": "CN",
+                        "country_name": "China",
+                        "origin_countries_json": "[]",
+                        "active": 1,
+                    },
+                    {
+                        "id": "mistral",
+                        "name": "Mistral",
+                        "country_code": "FR",
+                        "country_name": "France",
+                        "origin_countries_json": "[]",
+                        "active": 1,
+                    },
+                    {
+                        "id": "ibm-granite",
+                        "name": "ibm-granite",
+                        "country_code": "US",
+                        "country_name": "United States",
+                        "origin_countries_json": "[]",
+                        "active": 1,
+                    },
                 ],
             )
             conn.execute(
@@ -719,6 +804,45 @@ class RankingTests(unittest.TestCase):
                         "model_roles_json": json.dumps(["generator"], ensure_ascii=True),
                         "active": 1,
                     },
+                    {
+                        "id": "qwen-provider-alias",
+                        "name": "Qwen2.5 7B Instruct",
+                        "provider_id": "qwen",
+                        "provider": "Qwen",
+                        "type": "open_weights",
+                        "family_id": "qwen::qwen2-5",
+                        "family_name": "Qwen2.5",
+                        "canonical_model_id": "qwen::qwen2-5-7b-instruct",
+                        "canonical_model_name": "Qwen2.5 7B Instruct",
+                        "model_roles_json": json.dumps(["generator"], ensure_ascii=True),
+                        "active": 1,
+                    },
+                    {
+                        "id": "mistral-provider-alias",
+                        "name": "Mistral 7B Instruct",
+                        "provider_id": "mistral",
+                        "provider": "Mistral",
+                        "type": "open_weights",
+                        "family_id": "mistral::mistral-7b",
+                        "family_name": "Mistral 7B",
+                        "canonical_model_id": "mistral::mistral-7b-instruct",
+                        "canonical_model_name": "Mistral 7B Instruct",
+                        "model_roles_json": json.dumps(["generator"], ensure_ascii=True),
+                        "active": 1,
+                    },
+                    {
+                        "id": "ibm-granite-provider-alias",
+                        "name": "Granite 4.1 3B",
+                        "provider_id": "ibm-granite",
+                        "provider": "ibm-granite",
+                        "type": "open_weights",
+                        "family_id": "ibm-granite::granite-4-1",
+                        "family_name": "Granite 4.1",
+                        "canonical_model_id": "ibm-granite::granite-4-1-3b",
+                        "canonical_model_name": "Granite 4.1 3B",
+                        "model_roles_json": json.dumps(["generator"], ensure_ascii=True),
+                        "active": 1,
+                    },
                 ],
             )
 
@@ -729,18 +853,36 @@ class RankingTests(unittest.TestCase):
         models = update_engine.list_models()
         nova = next(model for model in models if model["id"] == "nova-provider-alias")
         phi = next(model for model in models if model["id"] == "phi-provider-alias")
+        qwen = next(model for model in models if model["id"] == "qwen-provider-alias")
+        mistral = next(model for model in models if model["id"] == "mistral-provider-alias")
+        granite = next(model for model in models if model["id"] == "ibm-granite-provider-alias")
         self.assertEqual(nova["provider"], "Amazon")
         self.assertEqual(nova["provider_id"], "amazon")
         self.assertEqual(nova["family_id"], "amazon::nova-pro")
         self.assertEqual(phi["provider"], "Microsoft")
         self.assertEqual(phi["provider_id"], "microsoft")
         self.assertEqual(phi["family_id"], "microsoft::phi-4")
+        self.assertEqual(qwen["provider"], "Alibaba")
+        self.assertEqual(qwen["provider_id"], "alibaba")
+        self.assertEqual(qwen["family_id"], "alibaba::qwen2-5")
+        self.assertEqual(mistral["provider"], "Mistral AI")
+        self.assertEqual(mistral["provider_id"], "mistral-ai")
+        self.assertEqual(mistral["family_id"], "mistral-ai::mistral-7b")
+        self.assertEqual(granite["provider"], "IBM")
+        self.assertEqual(granite["provider_id"], "ibm")
+        self.assertEqual(granite["family_id"], "ibm::granite-4-1")
 
         provider_names = {provider["name"] for provider in update_engine.list_providers()}
         self.assertIn("Amazon", provider_names)
         self.assertIn("Microsoft", provider_names)
+        self.assertIn("Alibaba", provider_names)
+        self.assertIn("Mistral AI", provider_names)
+        self.assertIn("IBM", provider_names)
         self.assertNotIn("Amazon Nova", provider_names)
         self.assertNotIn("Microsoft Azure", provider_names)
+        self.assertNotIn("Qwen", provider_names)
+        self.assertNotIn("Mistral", provider_names)
+        self.assertNotIn("ibm-granite", provider_names)
 
     def test_list_providers_returns_seeded_provider_origin(self) -> None:
         providers = update_engine.list_providers()
