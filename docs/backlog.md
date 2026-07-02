@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-054: P2 Add review workbench update runner
+  - Source: Human request 2026-07-02 while using the Proxmox-hosted banking review workbench.
+  - Problem: `Sync now` only reloaded the current SQLite catalog, so reviewers could not start a full catalog/benchmark update or see progress from inside the interactive UI.
+  - Scope: add a `Run updates` button beside `Sync now`, call the existing `/api/update` background job, poll `/api/update/status/{log_id}`, show current step/progress/recent step states, disable duplicate starts while running, and reload the catalog on completion.
+  - Acceptance: reviewers can start the full update pipeline from `/review` on trusted loopback/Tailscale clients and watch progress without leaving the browser.
+  - Validation: static workbench coverage, rendered local smoke, update API polling smoke, docs/version checks, and live Proxmox redeploy.
+  - Completed: 2026-07-02. The review workbench can now start and monitor background update runs.
+
 - [x] LBM-053: P1 Add RTEB Finance retrieval signal
   - Source: Human request 2026-07-02 after noting that `RTEB(fin, beta)` is important for banking retrieval review.
   - Problem: the MTEB adapter only imported generic retrieval/reranking result-file averages and did not expose the finance-domain RTEB subset that covers finance benchmarks, Q&A, financial document retrieval, corporate governance, and closed/private finance tasks.

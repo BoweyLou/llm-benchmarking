@@ -119,6 +119,94 @@
       min-width: 0;
     }
 
+    .sync-strip > button,
+    .sync-strip > span {
+      flex: 0 0 auto;
+    }
+
+    .update-progress {
+      display: grid;
+      gap: 4px;
+      flex: 1 1 260px;
+      min-width: 220px;
+      max-width: 380px;
+      color: var(--muted);
+    }
+
+    .update-progress[hidden] {
+      display: none;
+    }
+
+    .update-progress-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+      font-size: 12px;
+    }
+
+    .update-progress-line span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text);
+      font-weight: 650;
+    }
+
+    .progress-track {
+      height: 6px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #edf1f6;
+    }
+
+    .progress-fill {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--blue);
+      transition: width 180ms ease;
+    }
+
+    .update-step-list {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 5px;
+      min-height: 18px;
+    }
+
+    .update-step {
+      max-width: 150px;
+      padding: 2px 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      overflow: hidden;
+      color: var(--muted);
+      background: #fff;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .update-step.running {
+      border-color: #b8cff5;
+      color: var(--blue);
+      background: var(--blue-soft);
+    }
+
+    .update-step.completed {
+      border-color: #bde4c9;
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .update-step.failed {
+      border-color: #f0b7b7;
+      color: var(--red);
+      background: var(--red-soft);
+    }
+
     .status-ok {
       color: var(--green);
       font-weight: 650;
@@ -921,6 +1009,17 @@
       <div class="sync-strip">
         <span id="lastSynced">Loading catalog...</span>
         <button class="linkish" id="syncNow">Sync now</button>
+        <button class="btn small" id="runUpdates">Run updates</button>
+        <div class="update-progress" id="updateProgressPanel" hidden aria-live="polite">
+          <div class="update-progress-line">
+            <span id="updateProgressLabel">Update idle</span>
+            <span id="updateProgressCount"></span>
+          </div>
+          <div class="progress-track" aria-hidden="true">
+            <div class="progress-fill" id="updateProgressBar"></div>
+          </div>
+          <div class="update-step-list" id="updateProgressSteps"></div>
+        </div>
         <span>Auto-save: <span class="status-ok">On</span></span>
       </div>
       <div class="header-actions">
@@ -1156,7 +1255,12 @@
       activeUseCaseId: null,
       sort: { key: "name", direction: "asc" },
       page: 1,
-      pageSize: 50
+      pageSize: 50,
+      update: {
+        logId: null,
+        pollTimer: null,
+        polling: false
+      }
     };
 
     const tabs = [
@@ -1196,6 +1300,12 @@
       showingCount: document.getElementById("showingCount"),
       pageLabel: document.getElementById("pageLabel"),
       lastSynced: document.getElementById("lastSynced"),
+      runUpdates: document.getElementById("runUpdates"),
+      updateProgressPanel: document.getElementById("updateProgressPanel"),
+      updateProgressLabel: document.getElementById("updateProgressLabel"),
+      updateProgressCount: document.getElementById("updateProgressCount"),
+      updateProgressBar: document.getElementById("updateProgressBar"),
+      updateProgressSteps: document.getElementById("updateProgressSteps"),
       saveStatus: document.getElementById("saveStatus"),
       toast: document.getElementById("toast"),
       addModelDialog: document.getElementById("addModelDialog"),
@@ -1234,6 +1344,118 @@
       ensureActiveModel();
       render();
       els.lastSynced.textContent = `Last synced: ${new Date(state.catalog.generated_at).toLocaleTimeString()}`;
+    }
+
+    async function startUpdateRun() {
+      if (state.update.pollTimer) {
+        toast("Update already running");
+        return;
+      }
+
+      els.runUpdates.disabled = true;
+      els.runUpdates.textContent = "Starting...";
+      showUpdateStarting();
+
+      const started = await request("/api/update", { method: "POST", body: "{}" });
+      state.update.logId = started.log_id;
+      state.update.pollTimer = window.setInterval(() => {
+        pollUpdateStatus().catch(handleUpdatePollingError);
+      }, 2500);
+      await pollUpdateStatus();
+    }
+
+    function showUpdateStarting() {
+      els.updateProgressPanel.hidden = false;
+      els.updateProgressLabel.textContent = "Starting update...";
+      els.updateProgressCount.textContent = "";
+      els.updateProgressBar.style.width = "0%";
+      els.updateProgressSteps.innerHTML = "";
+    }
+
+    async function pollUpdateStatus() {
+      if (!state.update.logId || state.update.polling) return;
+      state.update.polling = true;
+      try {
+        const log = await request(`/api/update/status/${state.update.logId}`, { method: "GET" });
+        renderUpdateProgress(log);
+        if (log.status === "completed" || log.status === "failed") {
+          stopUpdatePolling();
+          if (log.status === "completed") {
+            toast(`Update complete: ${log.scores_added || 0} added, ${log.scores_updated || 0} updated`);
+            await loadCatalog();
+          } else {
+            toast("Update failed");
+          }
+        }
+      } finally {
+        state.update.polling = false;
+      }
+    }
+
+    function stopUpdatePolling() {
+      if (state.update.pollTimer) {
+        window.clearInterval(state.update.pollTimer);
+      }
+      state.update.pollTimer = null;
+      els.runUpdates.disabled = false;
+      els.runUpdates.textContent = "Run updates";
+    }
+
+    function handleUpdatePollingError(error) {
+      stopUpdatePolling();
+      els.updateProgressPanel.hidden = false;
+      els.updateProgressLabel.textContent = "Update status unavailable";
+      els.updateProgressCount.textContent = "";
+      els.updateProgressSteps.innerHTML = `<span class="update-step failed">${escapeHtml(error.message)}</span>`;
+      toast(error.message);
+    }
+
+    function renderUpdateProgress(log) {
+      const steps = Array.isArray(log.progress_steps) ? log.progress_steps : [];
+      const totalSteps = Number(log.total_steps || steps.length || 0);
+      const finishedSteps = Number(log.finished_steps || 0);
+      const percent = Math.max(0, Math.min(100, Number(log.progress_percent || 0)));
+      const activeStep = steps.find((step) => step.status === "running")
+        || steps.find((step) => step.status === "failed")
+        || [...steps].reverse().find((step) => step.status === "completed")
+        || null;
+      const stepLabel = activeStep ? activeStep.label : (log.current_step_label || "Update");
+      const statusLabel = updateStatusLabel(log.status, stepLabel);
+
+      els.updateProgressPanel.hidden = false;
+      els.updateProgressLabel.textContent = statusLabel;
+      els.updateProgressCount.textContent = totalSteps ? `${finishedSteps}/${totalSteps} steps` : "";
+      els.updateProgressBar.style.width = `${percent}%`;
+      els.runUpdates.disabled = log.status === "running";
+      els.runUpdates.textContent = log.status === "running" ? "Updating..." : "Run updates";
+
+      const visibleSteps = recentUpdateSteps(steps);
+      els.updateProgressSteps.innerHTML = visibleSteps.map((step) => {
+        const status = safeUpdateStatus(step.status);
+        const detail = step.records_found == null ? "" : ` (${step.records_found})`;
+        return `<span class="update-step ${status}" title="${escapeAttr(step.label || "")}">${escapeHtml(step.label || "Step")}${detail}</span>`;
+      }).join("");
+
+      if (log.status === "completed") {
+        els.updateProgressCount.textContent = `${log.scores_added || 0} added, ${log.scores_updated || 0} updated`;
+      }
+    }
+
+    function updateStatusLabel(status, stepLabel) {
+      if (status === "completed") return "Update complete";
+      if (status === "failed") return `Update failed: ${stepLabel}`;
+      return `Updating: ${stepLabel}`;
+    }
+
+    function recentUpdateSteps(steps) {
+      const active = steps.filter((step) => step.status === "running" || step.status === "failed");
+      const completed = steps.filter((step) => step.status === "completed").slice(-2);
+      const pending = active.length || completed.length ? [] : steps.filter((step) => step.status === "pending").slice(0, 1);
+      return [...completed, ...active, ...pending].slice(-4);
+    }
+
+    function safeUpdateStatus(status) {
+      return ["pending", "running", "completed", "failed"].includes(status) ? status : "pending";
     }
 
     function populateFilters() {
@@ -2183,6 +2405,7 @@
         render();
       });
       document.getElementById("syncNow").addEventListener("click", loadCatalog);
+      els.runUpdates.addEventListener("click", () => startUpdateRun().catch(handleUpdatePollingError));
       document.getElementById("saveDecision").addEventListener("click", () => saveDecision(false).catch((error) => toast(error.message)));
       document.getElementById("saveNext").addEventListener("click", () => saveDecision(true).catch((error) => toast(error.message)));
       document.getElementById("applyFiltered").addEventListener("click", selectAllFiltered);
