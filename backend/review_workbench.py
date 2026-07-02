@@ -25,6 +25,7 @@ from .database import (
     get_connection,
     model_use_case_approvals as model_use_case_approvals_table,
     models as models_table,
+    update_log as update_log_table,
     utc_now_iso,
 )
 
@@ -48,6 +49,7 @@ def build_review_catalog() -> dict[str, Any]:
         "providers": providers,
         "families": families,
         "facets": facets,
+        "latest_update": _latest_update_summary(),
         "summary": {
             "model_count": len(models),
             "provider_count": len(providers),
@@ -645,6 +647,35 @@ def _counts_to_list(counts: dict[str, int]) -> list[dict[str, Any]]:
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     return dict(row)
+
+
+def _latest_update_summary() -> dict[str, Any] | None:
+    with get_connection(update_engine.ENGINE) as conn:
+        row = fetch_one(
+            conn,
+            select(
+                update_log_table.c.id,
+                update_log_table.c.started_at,
+                update_log_table.c.completed_at,
+                update_log_table.c.triggered_by,
+                update_log_table.c.status,
+                update_log_table.c.scores_added,
+                update_log_table.c.scores_updated,
+            )
+            .order_by(update_log_table.c.started_at.desc(), update_log_table.c.id.desc())
+            .limit(1),
+        )
+    if row is None:
+        return None
+    return {
+        "id": int(row["id"]),
+        "started_at": row.get("started_at"),
+        "completed_at": row.get("completed_at"),
+        "triggered_by": row.get("triggered_by"),
+        "status": row.get("status"),
+        "scores_added": int(row.get("scores_added") or 0),
+        "scores_updated": int(row.get("scores_updated") or 0),
+    }
 
 
 def _unique_clean(values: Iterable[str] | None) -> list[str]:

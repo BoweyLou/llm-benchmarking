@@ -16,6 +16,7 @@ from backend.database import (
     model_use_case_approvals as model_use_case_approvals_table,
     models as models_table,
     scores as scores_table,
+    update_log as update_log_table,
 )
 from backend.seed_data import seed_reference_data
 
@@ -59,6 +60,18 @@ class ReviewWorkbenchTests(unittest.TestCase):
             release_date_confidence="high",
         )
         self._insert_inference_destination("catalog-model", "azure-ai-foundry", "Azure AI Foundry")
+        with self.engine.begin() as conn:
+            conn.execute(
+                update_log_table.insert(),
+                {
+                    "started_at": "2026-07-02T22:52:13Z",
+                    "completed_at": "2026-07-02T22:55:42Z",
+                    "triggered_by": "cli",
+                    "status": "completed",
+                    "scores_added": 4970,
+                    "scores_updated": 94,
+                },
+            )
 
         with patch("backend.main.bootstrap"):
             client = TestClient(main.app)
@@ -82,6 +95,8 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Run updates", app_response.text)
         self.assertIn("updateProgressPanel", app_response.text)
         self.assertIn("/api/update/status/", app_response.text)
+        self.assertIn("lastDbUpdated", app_response.text)
+        self.assertIn("Last DB update", app_response.text)
         self.assertIn('${header("release_date", "Release")}', app_response.text)
         self.assertIn("modelReleaseInfo", app_response.text)
         self.assertIn("best_release_date", app_response.text)
@@ -107,6 +122,10 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertEqual(catalog_response.status_code, 200)
         payload = catalog_response.json()
         self.assertGreaterEqual(payload["summary"]["model_count"], 1)
+        self.assertEqual(payload["latest_update"]["status"], "completed")
+        self.assertEqual(payload["latest_update"]["completed_at"], "2026-07-02T22:55:42Z")
+        self.assertEqual(payload["latest_update"]["scores_added"], 4970)
+        self.assertEqual(payload["latest_update"]["scores_updated"], 94)
         self.assertIn("models", payload)
         self.assertIn("families", payload)
         self.assertIn("facets", payload)

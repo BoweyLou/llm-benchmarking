@@ -124,8 +124,27 @@
     }
 
     .sync-strip > button,
-    .sync-strip > span {
+    .sync-strip > span,
+    .sync-strip > .sync-times {
       flex: 0 0 auto;
+    }
+
+    .sync-times {
+      display: grid;
+      gap: 2px;
+      min-width: 156px;
+      text-align: right;
+      line-height: 1.2;
+    }
+
+    .sync-times span:first-child {
+      color: var(--text);
+      font-weight: 650;
+    }
+
+    .sync-times span:last-child {
+      color: var(--muted);
+      font-size: 12px;
     }
 
     .update-progress {
@@ -1144,7 +1163,10 @@
         </div>
       </div>
       <div class="sync-strip">
-        <span id="lastSynced">Loading catalog...</span>
+        <div class="sync-times" aria-live="polite">
+          <span id="lastSynced">Loading catalog...</span>
+          <span id="lastDbUpdated">Last DB update: loading...</span>
+        </div>
         <button class="linkish" id="syncNow">Sync now</button>
         <button class="btn small" id="runUpdates">Run updates</button>
         <div class="update-progress" id="updateProgressPanel" hidden aria-live="polite">
@@ -1452,6 +1474,7 @@
       showingCount: document.getElementById("showingCount"),
       pageLabel: document.getElementById("pageLabel"),
       lastSynced: document.getElementById("lastSynced"),
+      lastDbUpdated: document.getElementById("lastDbUpdated"),
       runUpdates: document.getElementById("runUpdates"),
       updateProgressPanel: document.getElementById("updateProgressPanel"),
       updateProgressLabel: document.getElementById("updateProgressLabel"),
@@ -1490,6 +1513,7 @@
 
     async function loadCatalog() {
       els.lastSynced.textContent = "Loading catalog...";
+      els.lastDbUpdated.textContent = "Last DB update: loading...";
       const [catalog, benchmarks] = await Promise.all([
         request("/api/review/catalog", { method: "GET" }),
         request("/api/benchmarks", { method: "GET" })
@@ -1504,6 +1528,27 @@
       ensureActiveModel();
       render();
       els.lastSynced.textContent = `Last synced: ${new Date(state.catalog.generated_at).toLocaleTimeString()}`;
+      renderLastDbUpdated();
+    }
+
+    function renderLastDbUpdated() {
+      const latestUpdate = state.catalog.latest_update;
+      if (!latestUpdate) {
+        els.lastDbUpdated.textContent = "Last DB update: never";
+        return;
+      }
+      const timestamp = latestUpdate.completed_at || latestUpdate.started_at;
+      const timeLabel = formatTime(timestamp);
+      const status = latestUpdate.status ? ` (${latestUpdate.status})` : "";
+      els.lastDbUpdated.textContent = `Last DB update: ${timeLabel}${status}`;
+      const detail = [
+        `Started: ${formatDateTime(latestUpdate.started_at)}`,
+        `Completed: ${formatDateTime(latestUpdate.completed_at)}`,
+        `Scores: ${formatNumber(latestUpdate.scores_added || 0)} added, ${formatNumber(latestUpdate.scores_updated || 0)} updated`
+      ];
+      if (latestUpdate.triggered_by) detail.push(`Triggered by: ${latestUpdate.triggered_by}`);
+      if (latestUpdate.id) detail.push(`Update log: ${latestUpdate.id}`);
+      els.lastDbUpdated.title = detail.join("\n");
     }
 
     function initialiseRankingDefaults() {
@@ -3005,6 +3050,12 @@
       if (!value) return "-";
       const date = new Date(value);
       return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    }
+
+    function formatTime(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleTimeString();
     }
 
     function modelReleaseInfo(model) {

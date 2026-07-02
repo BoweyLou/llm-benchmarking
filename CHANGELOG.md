@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 - 2026-07-03
+
+- Added a review workbench header timestamp for the latest database update job, separate from the latest catalog sync time.
+
 ## 0.3.0 - 2026-07-03
 
 - Expanded Artificial Analysis model leaderboard ingestion to normalize coding, agentic, task-level evaluation, pricing, latency, and Intelligence Index cost metrics, while preserving richer raw metadata such as context windows, parameters, modalities, license, Hugging Face links, and OpenRouter IDs.

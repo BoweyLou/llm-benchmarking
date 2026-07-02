@@ -119,6 +119,9 @@ manual-recommendation, use-case approval, family, catalog-status, model-role,
 small-model, and hyperscaler-availability filters; a sortable model table; family and needs-decision
 views; and a detail inspector for model approval plus per-use-case approval
 notes, manual ratings, generated blockers, warnings, and required controls.
+The header separates the latest catalog load time from the latest database
+update job recorded in `update_log`, so reviewers can tell whether a browser
+refresh is newer than the last backend ingest run.
 The `Rankings` view keeps benchmark comparison separate from manual review. It
 can show weighted use-case rankings from `/api/rankings` or raw benchmark
 leaderboards from the loaded score data. Ranking lanes stay model-role aware:
