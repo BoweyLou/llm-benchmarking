@@ -116,7 +116,7 @@ For interactive banking review, run the FastAPI app locally and open
 `/review`. The workbench shows the model catalog with provider, provider-origin
 country, use-case, general-approval, effective-recommendation,
 manual-recommendation, use-case approval, family, catalog-status, model-role,
-and small-model filters; a sortable model table; family and needs-decision
+small-model, and hyperscaler-availability filters; a sortable model table; family and needs-decision
 views; and a detail inspector for model approval plus per-use-case approval
 notes, manual ratings, generated blockers, warnings, and required controls.
 Provider filters use canonical parent providers: for example, Amazon Nova,
@@ -124,6 +124,9 @@ AWS, and Amazon Bedrock are shown under Amazon, while Azure, Microsoft Azure,
 and Azure AI Foundry are shown under Microsoft. Qwen rows are shown under
 Alibaba, Mistral rows are shown under Mistral AI, and ibm-granite rows are
 shown under IBM.
+Use `Hyperscaler availability` to show models with any hyperscaler route, a
+specific route such as AWS Bedrock, Azure AI Foundry, or Google Vertex AI, or no
+known hyperscaler route.
 
 On tablet-width screens, the workbench keeps the filters and table usable first
 and moves the inspector below the table so review controls remain reachable.
@@ -321,7 +324,7 @@ Benchmark adapters:
 - LiveBench
 - LiveCodeBench
 - MMMU
-- MTEB retrieval/reranking
+- MTEB retrieval/reranking and RTEB Finance
 - RAGTruth
 - SWE-bench Verified, Lite, Full, Multilingual, and Multimodal
 - tau-bench

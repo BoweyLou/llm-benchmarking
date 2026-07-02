@@ -3,6 +3,7 @@
 ## 0.2.0 - Unreleased
 
 - Added the FastAPI-served `/review` banking model review workbench with filterable model/use-case/family views, token-guarded review decision APIs, manual model creation, deprecation support, and review snapshot export/import.
+- Added RTEB Finance as a finance-domain retrieval benchmark from the official MTEB leaderboard dataset and included it as an optional retrieval-embedding ranking signal.
 - Added browser-side CSV export options in the review workbench for all, filtered, and selected model rows.
 - Added explicit all-filtered selection in the review workbench so bulk actions can target more than the visible page.
 - Split review workbench bulk `Not approved` from `Clear rating` so clearing manual recommendations no longer looks like it clears approval state.
@@ -12,6 +13,7 @@
 - Added `restricted` as a manual/effective recommendation status for models limited to specific approved user groups or cohorts.
 - Added separate general model approval state and review workbench controls so model-level approval can be saved independently from use-case approval.
 - Added a provider-origin country filter to the review workbench left rail.
+- Added a hyperscaler availability filter to the review workbench left rail for AWS Bedrock, Azure AI Foundry, Google Vertex AI, any hyperscaler route, and no known hyperscaler route.
 - Canonicalized provider aliases so Amazon Nova/AWS/Bedrock roll up to Amazon, Azure/Microsoft Azure/Azure AI Foundry roll up to Microsoft, Qwen rolls up to Alibaba, Mistral rolls up to Mistral AI, and ibm-granite rolls up to IBM in provider facets, exports, and inference matching.
 - Added a Proxmox/Tailscale deployment path for the banking review workbench, including a systemd unit, deploy script, persistent remote SQLite location, and deployment runbook.
 - Added trusted tailnet write mode so the Proxmox-hosted review workbench can save from Tailscale clients without pasting an admin token.

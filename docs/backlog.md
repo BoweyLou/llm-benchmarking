@@ -16,6 +16,22 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-053: P1 Add RTEB Finance retrieval signal
+  - Source: Human request 2026-07-02 after noting that `RTEB(fin, beta)` is important for banking retrieval review.
+  - Problem: the MTEB adapter only imported generic retrieval/reranking result-file averages and did not expose the finance-domain RTEB subset that covers finance benchmarks, Q&A, financial document retrieval, corporate governance, and closed/private finance tasks.
+  - Scope: add `rteb_finance` benchmark metadata, fetch official `mteb/results` dataset rows for the upstream RTEB Finance task list, preserve public/private and trained-on metadata, aggregate per-model RTEB Finance scores, and add the signal as an optional retrieval-embedding ranking input.
+  - Acceptance: RTEB Finance rows persist as `rteb_finance` scores for embedding models without mixing into generator rankings or hiding public/private task provenance.
+  - Validation: MTEB source spot-check tests, retrieval role ranking regression, docs/version checks, and live ingestion verification.
+  - Completed: 2026-07-02. RTEB Finance is now an explicit finance-domain retrieval signal.
+
+- [x] LBM-052: P2 Add hyperscaler availability filtering to review workbench
+  - Source: Human request 2026-07-02 while reviewing models in the Proxmox-hosted banking workbench.
+  - Problem: reviewers could see inference availability in model details but could not filter the catalog to models available through hyperscalers such as AWS Bedrock, Azure AI Foundry, or Google Vertex AI.
+  - Scope: add hyperscaler facets to `/api/review/catalog`, add a left-rail `Hyperscaler availability` filter, support any-route and no-route options, filter loaded models by `inference_summary.platform_names`, and update coverage/docs.
+  - Acceptance: reviewers can narrow the workbench to all models with a hyperscaler route, one named hyperscaler route, or models with no known hyperscaler route.
+  - Validation: review workbench API/static tests and docs/version checks.
+  - Completed: 2026-07-02. Hyperscaler availability filtering is available in the banking review workbench.
+
 - [x] LBM-051: P2 Expand small-model generator discovery beyond Gemma
   - Source: Human request 2026-07-02 after seeing the small-model filter mostly show Gemma rows while obvious small families such as Phi were missing.
   - Problem: configured provider-owned Hugging Face discovery only covered Google Gemma for generator small-model rows, so Microsoft Phi and other common small/open generator families did not appear as small-model candidates unless another source happened to discover them.

@@ -12,6 +12,7 @@ from backend import main, recommendation_engine, review_workbench, update_engine
 from backend.database import (
     get_engine,
     init_db,
+    model_inference_destinations as model_inference_destinations_table,
     model_use_case_approvals as model_use_case_approvals_table,
     models as models_table,
     scores as scores_table,
@@ -52,6 +53,7 @@ class ReviewWorkbenchTests(unittest.TestCase):
 
     def test_review_app_and_catalog_are_readable(self) -> None:
         self._insert_review_model("catalog-model", family_id="provider::catalog-family")
+        self._insert_inference_destination("catalog-model", "azure-ai-foundry", "Azure AI Foundry")
 
         with patch("backend.main.bootstrap"):
             client = TestClient(main.app)
@@ -69,6 +71,8 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("All matching use cases", app_response.text)
         self.assertIn("countryFilter", app_response.text)
         self.assertIn("Country", app_response.text)
+        self.assertIn("hyperscalerFilter", app_response.text)
+        self.assertIn("Hyperscaler availability", app_response.text)
         self.assertIn("General approval", app_response.text)
         self.assertIn("approve_model", app_response.text)
         self.assertEqual(catalog_response.status_code, 200)
@@ -79,8 +83,14 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("facets", payload)
         self.assertIn("countries", payload["facets"])
         self.assertTrue(payload["facets"]["countries"])
+        self.assertIn("hyperscalers", payload["facets"])
+        hyperscaler_names = {item["name"] for item in payload["facets"]["hyperscalers"]}
+        self.assertIn("Any hyperscaler", hyperscaler_names)
+        self.assertIn("Azure AI Foundry", hyperscaler_names)
+        self.assertIn("No hyperscaler route", hyperscaler_names)
         model = next(model for model in payload["models"] if model["id"] == "catalog-model")
         self.assertFalse(model["general_approved_for_use"])
+        self.assertIn("Azure AI Foundry", model["inference_summary"]["platform_names"])
 
     def test_review_decision_route_requires_admin_token(self) -> None:
         self._insert_review_model("guard-model")
@@ -394,6 +404,36 @@ class ReviewWorkbenchTests(unittest.TestCase):
                         ("ailuminate", 75.0),
                     )
                 ],
+            )
+
+    def _insert_inference_destination(
+        self,
+        model_id: str,
+        destination_id: str,
+        name: str,
+        *,
+        hyperscaler: str = "Azure",
+    ) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                model_inference_destinations_table.insert(),
+                {
+                    "model_id": model_id,
+                    "destination_id": destination_id,
+                    "name": name,
+                    "hyperscaler": hyperscaler,
+                    "availability_scope": "Configured account",
+                    "availability_note": "Live from configured hyperscaler catalog.",
+                    "location_scope": "Configured account regions",
+                    "regions_json": '["eastus2"]',
+                    "region_count": 1,
+                    "deployment_modes_json": '["Provisioned"]',
+                    "pricing_label": "Configured account pricing",
+                    "pricing_note": "Pricing depends on configured account.",
+                    "sources_json": "[]",
+                    "catalog_model_id": model_id,
+                    "synced_at": "2026-07-01T00:00:00Z",
+                },
             )
 
 

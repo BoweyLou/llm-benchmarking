@@ -312,6 +312,9 @@ def _build_facets(
     catalog_counts = _count_values(model.get("catalog_status") for model in models)
     country_counts: dict[str, int] = {}
     country_names: dict[str, str] = {}
+    hyperscaler_counts: dict[str, int] = {}
+    hyperscaler_model_count = 0
+    no_hyperscaler_model_count = 0
     role_counts: dict[str, int] = {}
     recommendation_counts: dict[str, int] = {}
     general_approval_counts = {"approved": 0, "not_approved": 0}
@@ -325,6 +328,13 @@ def _build_facets(
             country_id = country["id"]
             country_counts[country_id] = country_counts.get(country_id, 0) + 1
             country_names.setdefault(country_id, country["name"])
+        hyperscaler_entries = _model_hyperscaler_entries(model)
+        if hyperscaler_entries:
+            hyperscaler_model_count += 1
+            for hyperscaler in hyperscaler_entries:
+                hyperscaler_counts[hyperscaler] = hyperscaler_counts.get(hyperscaler, 0) + 1
+        else:
+            no_hyperscaler_model_count += 1
         for role in model.get("model_roles") or []:
             role_counts[str(role)] = role_counts.get(str(role), 0) + 1
         approvals = model.get("use_case_approvals")
@@ -351,6 +361,14 @@ def _build_facets(
                 country_counts.items(),
                 key=lambda item: (country_names.get(item[0], item[0]), item[0]),
             )
+        ],
+        "hyperscalers": [
+            {"id": "__any__", "name": "Any hyperscaler", "count": hyperscaler_model_count},
+            *[
+                {"id": name, "name": name, "count": count}
+                for name, count in sorted(hyperscaler_counts.items(), key=lambda item: item[0])
+            ],
+            {"id": "__none__", "name": "No hyperscaler route", "count": no_hyperscaler_model_count},
         ],
         "families": [
             {"id": family["family_id"], "name": family["family_name"], "count": family["model_count"]}
@@ -389,6 +407,20 @@ def _model_country_entries(model: dict[str, Any]) -> list[dict[str, str]]:
         if country_id and name:
             unique.setdefault(country_id, name)
     return [{"id": country_id, "name": name} for country_id, name in unique.items()]
+
+
+def _model_hyperscaler_entries(model: dict[str, Any]) -> list[str]:
+    summary = model.get("inference_summary") if isinstance(model.get("inference_summary"), dict) else {}
+    platform_names = summary.get("platform_names") if isinstance(summary, dict) else []
+    if not isinstance(platform_names, list):
+        return []
+
+    unique: dict[str, None] = {}
+    for value in platform_names:
+        name = _clean_text(value)
+        if name:
+            unique.setdefault(name, None)
+    return list(unique)
 
 
 def _model_needs_decision(model: dict[str, Any]) -> bool:

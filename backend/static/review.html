@@ -949,6 +949,10 @@
             <select id="countryFilter" class="select"></select>
           </div>
           <div class="filter-group">
+            <label for="hyperscalerFilter">Hyperscaler availability</label>
+            <select id="hyperscalerFilter" class="select"></select>
+          </div>
+          <div class="filter-group">
             <label for="useCaseFilter">Use case</label>
             <select id="useCaseFilter" class="select"></select>
           </div>
@@ -1136,6 +1140,7 @@
         search: "",
         provider: "",
         country: "",
+        hyperscaler: "",
         useCase: "",
         generalApproval: "",
         recommendation: "",
@@ -1168,6 +1173,7 @@
       search: document.getElementById("search"),
       providerFilter: document.getElementById("providerFilter"),
       countryFilter: document.getElementById("countryFilter"),
+      hyperscalerFilter: document.getElementById("hyperscalerFilter"),
       useCaseFilter: document.getElementById("useCaseFilter"),
       generalApprovalFilter: document.getElementById("generalApprovalFilter"),
       recommendationFilter: document.getElementById("recommendationFilter"),
@@ -1237,11 +1243,17 @@
         "All countries",
         ((state.catalog.facets || {}).countries || []).map((item) => [item.id, `${item.name} (${item.count})`])
       );
+      fillSelect(
+        els.hyperscalerFilter,
+        "All hyperscaler routes",
+        ((state.catalog.facets || {}).hyperscalers || []).map((item) => [item.id, `${item.name} (${item.count})`])
+      );
       fillSelect(els.useCaseFilter, "All use cases", state.catalog.use_cases.map((item) => [item.id, item.label]));
       fillSelect(els.familyFilter, "All families", state.catalog.families.map((item) => [item.family_id, item.family_name]));
       els.useCaseFilter.value = state.filters.useCase;
       els.providerFilter.value = state.filters.provider;
       els.countryFilter.value = state.filters.country;
+      els.hyperscalerFilter.value = state.filters.hyperscaler;
       els.familyFilter.value = state.filters.family;
     }
 
@@ -1273,11 +1285,13 @@
           model.provider,
           model.family_name,
           model.family_id,
-          ...countryLabelsFor(model)
+          ...countryLabelsFor(model),
+          ...hyperscalerValuesFor(model)
         ].join(" ").toLowerCase();
         if (q && !haystack.includes(q)) return false;
         if (state.filters.provider && model.provider !== state.filters.provider) return false;
         if (state.filters.country && !countryValuesFor(model).includes(state.filters.country)) return false;
+        if (state.filters.hyperscaler && !hyperscalerMatches(model, state.filters.hyperscaler)) return false;
         if (state.filters.family && model.family_id !== state.filters.family) return false;
         if (state.filters.catalogStatus && model.catalog_status !== state.filters.catalogStatus) return false;
         if (state.filters.role && !(model.model_roles || []).includes(state.filters.role)) return false;
@@ -1397,6 +1411,21 @@
 
     function countryLabelsFor(model) {
       return countryEntriesFor(model).flatMap((entry) => [entry.id, entry.name]);
+    }
+
+    function hyperscalerValuesFor(model) {
+      const summary = model.inference_summary && typeof model.inference_summary === "object" ? model.inference_summary : {};
+      const platformNames = Array.isArray(summary.platform_names) ? summary.platform_names : [];
+      return platformNames
+        .map((value) => String(value || "").trim())
+        .filter((value, index, values) => value && values.indexOf(value) === index);
+    }
+
+    function hyperscalerMatches(model, filterValue) {
+      const values = hyperscalerValuesFor(model);
+      if (filterValue === "__any__") return values.length > 0;
+      if (filterValue === "__none__") return values.length === 0;
+      return values.includes(filterValue);
     }
 
     function statusFor(model) {
@@ -2017,6 +2046,7 @@
         [els.search, "search"],
         [els.providerFilter, "provider"],
         [els.countryFilter, "country"],
+        [els.hyperscalerFilter, "hyperscaler"],
         [els.useCaseFilter, "useCase"],
         [els.generalApprovalFilter, "generalApproval"],
         [els.recommendationFilter, "recommendation"],
@@ -2043,6 +2073,7 @@
           search: "",
           provider: "",
           country: "",
+          hyperscaler: "",
           useCase: "",
           generalApproval: "",
           recommendation: "",
@@ -2055,6 +2086,7 @@
         });
         els.search.value = "";
         els.countryFilter.value = "";
+        els.hyperscalerFilter.value = "";
         els.generalApprovalFilter.value = "";
         els.recommendationFilter.value = "";
         els.manualRecommendationFilter.value = "";

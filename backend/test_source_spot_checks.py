@@ -164,6 +164,87 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual(len(raw_rows), 2)
         self.assertTrue(all(row["resolution_status"] == "resolved" for row in raw_rows))
 
+    def test_mteb_spot_check_persists_rteb_finance_scores(self) -> None:
+        adapter = MtebAdapter()
+        raw_records = [
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="rteb_finance",
+                raw_model_name="BAAI/bge-m3",
+                raw_value="66.529",
+                source_url="https://huggingface.co/spaces/mteb/leaderboard?benchmark_name=RTEB%28fin%2C%20beta%29",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="BAAI/bge-m3",
+                payload={
+                    "model_name": "BAAI/bge-m3",
+                    "task_name": "FinanceBenchRetrieval",
+                    "score": 0.66529,
+                    "is_public": True,
+                },
+                metadata={
+                    "model_provider": "BAAI",
+                    "model_roles": ["embedding"],
+                    "task_category": "retrieval",
+                    "benchmark_group": "RTEB(fin, beta)",
+                    "benchmark_name": "RTEB Finance",
+                    "task_name": "FinanceBenchRetrieval",
+                    "languages": ["eng-Latn"],
+                    "is_public": True,
+                    "trained_on": False,
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="rteb_finance",
+                raw_model_name="BAAI/bge-m3",
+                raw_value="72.033",
+                source_url="https://huggingface.co/spaces/mteb/leaderboard?benchmark_name=RTEB%28fin%2C%20beta%29",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="BAAI/bge-m3",
+                payload={
+                    "model_name": "BAAI/bge-m3",
+                    "task_name": "EnglishFinance1Retrieval",
+                    "score": 0.72033,
+                    "is_public": False,
+                },
+                metadata={
+                    "model_provider": "BAAI",
+                    "model_roles": ["embedding"],
+                    "task_category": "retrieval",
+                    "benchmark_group": "RTEB(fin, beta)",
+                    "benchmark_name": "RTEB Finance",
+                    "task_name": "EnglishFinance1Retrieval",
+                    "languages": ["eng-Latn"],
+                    "is_public": False,
+                    "trained_on": False,
+                },
+            ),
+        ]
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, raw_records)
+
+        self.assertEqual([candidate.benchmark_id for candidate in candidates], ["rteb_finance"])
+        self.assertAlmostEqual(candidates[0].value, 69.281)
+        self.assertEqual(candidates[0].metadata["private_row_count"], 1)
+        self.assertIn("RTEB Finance", str(candidates[0].notes))
+
+        with get_connection(self.engine) as conn:
+            model_row = fetch_one(
+                conn,
+                select(models_table).where(models_table.c.name == "BAAI/bge-m3"),
+            )
+        self.assertIsNotNone(model_row)
+        model_id = str(model_row["id"])
+        self.assertEqual(json.loads(str(model_row["model_roles_json"])), ["embedding"])
+
+        finance = self._latest_score(model_id, "rteb_finance")
+        self.assertAlmostEqual(float(finance["value"]), 69.281)
+        self.assertIn("closed/private", str(finance["notes"]))
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 2)
+        self.assertTrue(all(row["resolution_status"] == "resolved" for row in raw_rows))
+
     def test_artificial_analysis_spot_check_persists_multimetric_scores(self) -> None:
             adapter = ArtificialAnalysisAdapter()
             metrics = {

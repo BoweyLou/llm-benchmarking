@@ -604,6 +604,20 @@ BENCHMARKS: list[dict[str, Any]] = [
         "active": 1,
     },
     {
+        "id": "rteb_finance",
+        "name": "RTEB Finance",
+        "short": "RTEB Fin.",
+        "source": "MTEB",
+        "url": "https://huggingface.co/spaces/mteb/leaderboard?benchmark_name=RTEB%28fin%2C%20beta%29",
+        "category": "Retrieval & Grounding",
+        "metric": "Average NDCG@10 %",
+        "higher_is_better": 1,
+        "tier": 2,
+        "scraper_id": "MtebAdapter",
+        "description": "RTEB(fin, beta) retrieval quality for financial-domain embedding selection, aggregated from the official mteb/results dataset across finance benchmarks, Q&A, financial document retrieval, corporate-governance, and closed/private finance retrieval tasks.",
+        "active": 1,
+    },
+    {
         "id": "terminal_bench",
         "name": "Terminal-Bench 2.0",
         "short": "Term-B",
@@ -1592,10 +1606,12 @@ USE_CASES: list[dict[str, Any]] = [
         "benchmark_notes": {
             "mteb_retrieval": "Primary retrieval quality signal from MTEB task-level main scores.",
             "mteb_retrieval_reranking": "Optional blended signal when the same model also has reranking coverage.",
+            "rteb_finance": "Optional finance-domain retrieval quality signal from RTEB(fin, beta).",
         },
         "weights": {
-            "mteb_retrieval": 0.80,
-            "mteb_retrieval_reranking": 0.20,
+            "mteb_retrieval": 0.65,
+            "rteb_finance": 0.25,
+            "mteb_retrieval_reranking": 0.10,
         },
     },
     {
