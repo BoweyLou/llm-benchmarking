@@ -11,10 +11,11 @@ def fetch_openrouter_models(
     *,
     url: str,
     headers: dict[str, str],
+    params: dict[str, Any] | None = None,
     timeout: float = 30.0,
 ) -> list[dict[str, Any]]:
     with httpx.Client(headers=headers, follow_redirects=True, timeout=timeout) as client:
-        response = client.get(url)
+        response = client.get(url, params=params)
         response.raise_for_status()
         payload = response.json()
 

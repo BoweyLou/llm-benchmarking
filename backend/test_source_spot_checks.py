@@ -183,6 +183,7 @@ class SourceSpotCheckTests(unittest.TestCase):
                 metadata={
                     "model_creator": "Anthropic",
                     "metrics": metrics,
+                    "release_date": "2026-02-05",
                 },
             )
 
@@ -208,6 +209,18 @@ class SourceSpotCheckTests(unittest.TestCase):
             self.assertEqual(intelligence["source_type"], "primary")
             self.assertEqual(intelligence["verified"], 1)
             self.assertIn("Artificial Analysis field", str(intelligence["notes"]))
+
+            with get_connection(self.engine) as conn:
+                model_row = fetch_one(
+                    conn,
+                    select(models_table).where(models_table.c.id == "claude-opus-4-6"),
+                )
+            self.assertIsNotNone(model_row)
+            self.assertEqual(model_row["release_date"], "2026-02-05")
+            self.assertEqual(model_row["release_date_precision"], "day")
+            self.assertEqual(model_row["release_date_confidence"], "high")
+            self.assertEqual(model_row["release_date_source_name"], "Artificial Analysis")
+            self.assertEqual(model_row["release_date_source_url"], adapter.source_url)
 
             raw_rows = update_engine.list_raw_source_records(source_run_id)
             self.assertEqual(len(raw_rows), 1)

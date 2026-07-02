@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable
 
 import httpx
@@ -110,6 +110,7 @@ VALID_RECOMMENDATION_STATUSES = {
     RECOMMENDATION_STATUS_DISCOURAGED,
 }
 SOURCE_METADATA_PROMOTION_LABELS = {
+    "artificial_analysis": "Artificial Analysis",
     "chatbot_arena": "Chatbot Arena",
     "ifeval": "IFEval",
 }
@@ -3025,6 +3026,7 @@ def _refresh_huggingface_model_discovery(
                         source_url=source_url,
                         verified_at=verified_at,
                     )
+                    timestamp_values = model_discovery.huggingface_timestamp_values_from_item(item)
                     model_id, outcome = _ensure_discovered_huggingface_model(
                         repo_id=repo_id,
                         display_name=display_name,
@@ -3033,6 +3035,7 @@ def _refresh_huggingface_model_discovery(
                         verified_at=verified_at,
                         discovered_update_log_id=log_id,
                         size_values=size_values,
+                        timestamp_values=timestamp_values,
                     )
                     raw_record = RawSourceRecord(
                         source_id=HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME,
@@ -3049,6 +3052,7 @@ def _refresh_huggingface_model_discovery(
                             "provider": provider,
                             "huggingface_repo_id": repo_id,
                             "model_roles": [MODEL_ROLE_GENERATOR],
+                            **timestamp_values,
                             **size_values,
                         },
                     )
@@ -3278,6 +3282,16 @@ def _promote_score_candidate_metadata(model_id: str, candidate: ScoreCandidate) 
         if documentation_url and _model_field_missing(row, "documentation_url"):
             values["documentation_url"] = documentation_url
 
+        release_date_values = _source_metadata_release_date_values(
+            source_id,
+            candidate.metadata,
+            trust_level=trust_level,
+            source_url=_source_metadata_source_url(source_id, candidate.metadata, candidate.source_url),
+            verified_at=candidate.collected_at,
+        )
+        if release_date_values and _should_update_release_date(row, release_date_values):
+            values.update(release_date_values)
+
         if values and _model_field_missing(row, "metadata_source_name"):
             values["metadata_source_name"] = SOURCE_METADATA_PROMOTION_LABELS[source_id]
             values["metadata_source_url"] = _source_metadata_source_url(source_id, candidate.metadata, candidate.source_url)
@@ -3301,6 +3315,11 @@ def _source_metadata_trust_level(
     source_type: str,
     verified: bool,
 ) -> str | None:
+    if source_id == "artificial_analysis":
+        if verified and source_type == "primary":
+            return "verified"
+        return None
+
     if source_id == "chatbot_arena":
         return "verified"
 
@@ -3315,6 +3334,78 @@ def _source_metadata_trust_level(
     if source_type == "primary" and verified:
         return "verified"
     return None
+
+
+def _source_metadata_release_date_values(
+    source_id: str,
+    metadata: dict[str, Any],
+    *,
+    trust_level: str,
+    source_url: str | None,
+    verified_at: str,
+) -> dict[str, Any]:
+    if source_id == "artificial_analysis":
+        release_date = _clean_release_date(metadata.get("release_date"))
+        confidence = "high"
+    elif source_id == "ifeval":
+        release_date = _clean_release_date(metadata.get("announcement_date"))
+        confidence = "medium" if trust_level == "verified" else "low"
+    else:
+        release_date = None
+        confidence = "low"
+
+    if not release_date:
+        return {}
+
+    precision = _release_date_precision(release_date)
+    if precision is None:
+        return {}
+
+    return {
+        "release_date": release_date,
+        "release_date_precision": precision,
+        "release_date_confidence": confidence,
+        "release_date_source_name": SOURCE_METADATA_PROMOTION_LABELS[source_id],
+        "release_date_source_url": source_url,
+        "release_date_verified_at": verified_at,
+    }
+
+
+def _should_update_release_date(row: dict[str, Any], values: dict[str, Any]) -> bool:
+    next_release_date = _clean_text(values.get("release_date"))
+    if not next_release_date:
+        return False
+
+    current_release_date = _clean_text(row.get("release_date"))
+    if not current_release_date:
+        return True
+
+    current_precision = _clean_text(row.get("release_date_precision")) or _release_date_precision(current_release_date)
+    next_precision = _clean_text(values.get("release_date_precision")) or _release_date_precision(next_release_date)
+    current_confidence = _clean_text(row.get("release_date_confidence"))
+    next_confidence = _clean_text(values.get("release_date_confidence"))
+
+    if current_release_date == next_release_date:
+        return any(
+            _model_field_missing(row, field_name)
+            for field_name in (
+                "release_date_precision",
+                "release_date_confidence",
+                "release_date_source_name",
+                "release_date_source_url",
+                "release_date_verified_at",
+            )
+        )
+
+    current_precision_rank = _release_precision_rank(current_precision)
+    next_precision_rank = _release_precision_rank(next_precision)
+    current_confidence_rank = _release_confidence_rank(current_confidence)
+    next_confidence_rank = _release_confidence_rank(next_confidence)
+    if next_precision_rank > current_precision_rank and next_confidence_rank >= current_confidence_rank:
+        return True
+    if next_confidence_rank > current_confidence_rank and next_precision_rank >= current_precision_rank:
+        return True
+    return False
 
 
 def _source_metadata_provider(source_id: str, metadata: dict[str, Any]) -> str | None:
@@ -3690,6 +3781,11 @@ def _ensure_model(
             ),
             catalog_status=CATALOG_STATUS_TRACKED,
             release_date=None,
+            release_date_precision=None,
+            release_date_confidence=None,
+            release_date_source_name=None,
+            release_date_source_url=None,
+            release_date_verified_at=None,
             context_window=None,
             family_id=identity.family_id,
             family_name=identity.family_name,
@@ -3714,6 +3810,7 @@ def _ensure_discovered_huggingface_model(
     verified_at: str,
     discovered_update_log_id: int | None,
     size_values: dict[str, Any],
+    timestamp_values: dict[str, Any],
 ) -> tuple[str, str]:
     existing_model_id = _resolve_huggingface_model_id(repo_id, display_name, provider)
     if existing_model_id:
@@ -3729,6 +3826,7 @@ def _ensure_discovered_huggingface_model(
                 verified_at=verified_at,
                 discovered_update_log_id=discovered_update_log_id,
                 size_values=size_values,
+                timestamp_values=timestamp_values,
                 conn=conn,
             )
             if not values:
@@ -3754,6 +3852,11 @@ def _ensure_discovered_huggingface_model(
             "model_roles_json": json.dumps([MODEL_ROLE_GENERATOR], ensure_ascii=True),
             "catalog_status": CATALOG_STATUS_PROVISIONAL,
             "release_date": None,
+            "release_date_precision": None,
+            "release_date_confidence": None,
+            "release_date_source_name": None,
+            "release_date_source_url": None,
+            "release_date_verified_at": None,
             "context_window": None,
             "family_id": identity.family_id,
             "family_name": identity.family_name,
@@ -3767,6 +3870,7 @@ def _ensure_discovered_huggingface_model(
             "metadata_source_name": HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME,
             "metadata_source_url": source_url,
             "metadata_verified_at": verified_at,
+            **timestamp_values,
             **size_values,
         }
         stmt = sqlite_insert(models_table).values(**values)
@@ -3825,6 +3929,7 @@ def _huggingface_discovery_existing_model_values(
     verified_at: str,
     discovered_update_log_id: int | None,
     size_values: dict[str, Any],
+    timestamp_values: dict[str, Any],
     conn: Any,
 ) -> dict[str, Any]:
     values: dict[str, Any] = {}
@@ -3844,6 +3949,11 @@ def _huggingface_discovery_existing_model_values(
     current_size_source = _clean_text(row.get("model_size_source_name"))
     if not current_size_source or current_size_source == HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME:
         values.update(size_values)
+
+    if timestamp_values.get("huggingface_created_at") and _model_field_missing(row, "huggingface_created_at"):
+        values["huggingface_created_at"] = timestamp_values["huggingface_created_at"]
+    if timestamp_values.get("huggingface_last_modified_at"):
+        values["huggingface_last_modified_at"] = timestamp_values["huggingface_last_modified_at"]
 
     if _model_field_missing(row, "discovered_at"):
         values["discovered_at"] = verified_at
@@ -4115,6 +4225,11 @@ def _canonicalize_model_catalog() -> None:
                 models_table.c.type,
                 models_table.c.catalog_status,
                 models_table.c.release_date,
+                models_table.c.release_date_precision,
+                models_table.c.release_date_confidence,
+                models_table.c.release_date_source_name,
+                models_table.c.release_date_source_url,
+                models_table.c.release_date_verified_at,
                 models_table.c.context_window,
                 models_table.c.context_window_tokens,
                 models_table.c.max_output_tokens,
@@ -4129,6 +4244,8 @@ def _canonicalize_model_catalog() -> None:
                 models_table.c.openrouter_canonical_slug,
                 models_table.c.openrouter_added_at,
                 models_table.c.huggingface_repo_id,
+                models_table.c.huggingface_created_at,
+                models_table.c.huggingface_last_modified_at,
                 models_table.c.metadata_source_name,
                 models_table.c.metadata_source_url,
                 models_table.c.metadata_verified_at,
@@ -4545,6 +4662,7 @@ def _fetch_openrouter_models() -> list[dict[str, Any]]:
     return openrouter_metadata.fetch_openrouter_models(
         url=OPENROUTER_MODELS_URL,
         headers=HTTP_HEADERS,
+        params={"output_modalities": "all"},
     )
 
 
@@ -5405,6 +5523,11 @@ def _import_openrouter_provisional_models(
             "type": _infer_openrouter_model_type(item),
             "catalog_status": CATALOG_STATUS_PROVISIONAL,
             "release_date": None,
+            "release_date_precision": None,
+            "release_date_confidence": None,
+            "release_date_source_name": None,
+            "release_date_source_url": None,
+            "release_date_verified_at": None,
             "context_window": None,
             "family_id": identity.family_id,
             "family_name": identity.family_name,
@@ -5578,6 +5701,20 @@ def _canonical_model_enrichment(group: list[dict[str, Any]], canonical: dict[str
                 payload["release_date"] = row["release_date"]
                 break
 
+    for release_field in (
+        "release_date_precision",
+        "release_date_confidence",
+        "release_date_source_name",
+        "release_date_source_url",
+        "release_date_verified_at",
+    ):
+        if canonical.get(release_field):
+            continue
+        for row in group:
+            if row.get(release_field):
+                payload[release_field] = row[release_field]
+                break
+
     if not canonical.get("context_window"):
         for row in group:
             if row.get("context_window"):
@@ -5599,6 +5736,8 @@ def _canonical_model_enrichment(group: list[dict[str, Any]], canonical: dict[str
         "openrouter_canonical_slug",
         "openrouter_added_at",
         "huggingface_repo_id",
+        "huggingface_created_at",
+        "huggingface_last_modified_at",
         "metadata_source_name",
         "metadata_source_url",
         "metadata_verified_at",
@@ -5758,6 +5897,123 @@ def _clean_text(value: Any) -> str | None:
     return text_value or None
 
 
+def _clean_release_date(value: Any) -> str | None:
+    text_value = _clean_text(value)
+    if not text_value:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(float(value) / 1000.0, tz=timezone.utc).date().isoformat()
+        except (OverflowError, OSError, ValueError):
+            return None
+    precision = _release_date_precision(text_value)
+    return text_value if precision is not None else None
+
+
+def _release_date_precision(value: Any) -> str | None:
+    text_value = _clean_text(value)
+    if not text_value:
+        return None
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text_value):
+        return "day"
+    if re.fullmatch(r"\d{4}-\d{2}", text_value):
+        return "month"
+    if re.fullmatch(r"\d{4}-Q[1-4]", text_value, flags=re.IGNORECASE):
+        return "quarter"
+    if re.fullmatch(r"\d{4}", text_value):
+        return "year"
+    return None
+
+
+def _release_precision_rank(value: Any) -> int:
+    return {
+        "year": 1,
+        "quarter": 2,
+        "month": 3,
+        "day": 4,
+    }.get(str(value or "").strip().lower(), 0)
+
+
+def _release_confidence_rank(value: Any) -> int:
+    text_value = str(value or "").strip().lower()
+    if text_value == "high":
+        return 3
+    if text_value == "low":
+        return 1
+    return 2
+
+
+def _model_age_payload(model: dict[str, Any], *, reference_date: date | None = None) -> dict[str, Any]:
+    today = reference_date or datetime.now(timezone.utc).date()
+    candidates = [
+        {
+            "date": _clean_text(model.get("release_date")),
+            "basis": "release_date",
+            "confidence": _clean_text(model.get("release_date_confidence")) or "medium",
+            "source_name": _clean_text(model.get("release_date_source_name")),
+            "source_url": _clean_text(model.get("release_date_source_url")),
+        },
+        {
+            "date": _clean_text(model.get("huggingface_created_at")),
+            "basis": "huggingface_created_at",
+            "confidence": "low",
+            "source_name": "huggingface",
+            "source_url": f"https://huggingface.co/{model.get('huggingface_repo_id')}"
+            if _clean_text(model.get("huggingface_repo_id"))
+            else None,
+        },
+        {
+            "date": _clean_text(model.get("openrouter_added_at")),
+            "basis": "openrouter_added_at",
+            "confidence": "low",
+            "source_name": "openrouter",
+            "source_url": OPENROUTER_MODELS_URL,
+        },
+        {
+            "date": _clean_text(model.get("discovered_at")),
+            "basis": "discovered_at",
+            "confidence": "low",
+            "source_name": _clean_text(model.get("metadata_source_name")),
+            "source_url": _clean_text(model.get("metadata_source_url")),
+        },
+    ]
+
+    for candidate in candidates:
+        parsed_date = _age_basis_date(candidate["date"], basis=str(candidate["basis"]))
+        if parsed_date is None:
+            continue
+        return {
+            "model_age_days": max((today - parsed_date).days, 0),
+            "model_age_basis": candidate["basis"],
+            "model_age_confidence": candidate["confidence"],
+            "model_age_source_name": candidate["source_name"],
+            "model_age_source_url": candidate["source_url"],
+            "model_age_reference_date": today.isoformat(),
+        }
+
+    return {
+        "model_age_days": None,
+        "model_age_basis": None,
+        "model_age_confidence": None,
+        "model_age_source_name": None,
+        "model_age_source_url": None,
+        "model_age_reference_date": today.isoformat(),
+    }
+
+
+def _age_basis_date(value: Any, *, basis: str) -> date | None:
+    text_value = _clean_text(value)
+    if not text_value:
+        return None
+    if basis == "release_date" and _release_date_precision(text_value) != "day":
+        return None
+    candidate = text_value[:10]
+    try:
+        return date.fromisoformat(candidate)
+    except ValueError:
+        return None
+
+
 def _resolve_provider_metadata(
     row: dict[str, Any],
     providers_by_id: dict[str, dict[str, Any]],
@@ -5816,10 +6072,20 @@ def _serialize_model(
     payload["provider_origin_basis"] = provider_metadata.get("origin_basis") if provider_metadata is not None else None
     payload["provider_origin_source_url"] = provider_metadata.get("source_url") if provider_metadata is not None else None
     payload["provider_origin_verified_at"] = provider_metadata.get("verified_at") if provider_metadata is not None else None
+    payload["release_date"] = _clean_text(payload.get("release_date"))
+    payload["release_date_precision"] = _clean_text(payload.get("release_date_precision")) or _release_date_precision(payload.get("release_date"))
+    payload["release_date_confidence"] = _clean_text(payload.get("release_date_confidence")) or (
+        "medium" if payload.get("release_date") else None
+    )
+    payload["release_date_source_name"] = _clean_text(payload.get("release_date_source_name"))
+    payload["release_date_source_url"] = _clean_text(payload.get("release_date_source_url"))
     payload["small_model_candidate"] = bool(payload.get("small_model_candidate", 0))
     payload["model_size_class"] = _clean_text(payload.get("model_size_class"))
     payload["model_size_source_name"] = _clean_text(payload.get("model_size_source_name"))
     payload["model_size_source_url"] = _clean_text(payload.get("model_size_source_url"))
+    payload["huggingface_repo_id"] = _clean_text(payload.get("huggingface_repo_id"))
+    payload["huggingface_created_at"] = _clean_text(payload.get("huggingface_created_at"))
+    payload["huggingface_last_modified_at"] = _clean_text(payload.get("huggingface_last_modified_at"))
     payload["base_models"] = _decode_json_string_list(payload.pop("base_models_json", None))
     payload["supported_languages"] = _decode_json_string_list(payload.pop("supported_languages_json", None))
     payload["capabilities"] = _decode_json_string_list(payload.pop("capabilities_json", None))
@@ -5846,6 +6112,7 @@ def _serialize_model(
     )
     payload["discovered_at"] = payload.get("discovered_at")
     payload["discovered_update_log_id"] = payload.get("discovered_update_log_id")
+    payload.update(_model_age_payload(payload))
     payload["use_case_approvals"] = {
         use_case_id: dict(approval)
         for use_case_id, approval in (use_case_approvals or {}).items()
@@ -6127,7 +6394,14 @@ def _model_summary(model: dict[str, Any]) -> dict[str, Any]:
             model.get("model_roles_json") if "model_roles_json" in model else model.get("model_roles"),
         ),
         "catalog_status": model.get("catalog_status", CATALOG_STATUS_TRACKED),
-        "release_date": model.get("release_date"),
+        "release_date": _clean_text(model.get("release_date")),
+        "release_date_precision": _clean_text(model.get("release_date_precision")) or _release_date_precision(model.get("release_date")),
+        "release_date_confidence": _clean_text(model.get("release_date_confidence")) or (
+            "medium" if _clean_text(model.get("release_date")) else None
+        ),
+        "release_date_source_name": _clean_text(model.get("release_date_source_name")),
+        "release_date_source_url": _clean_text(model.get("release_date_source_url")),
+        "release_date_verified_at": model.get("release_date_verified_at"),
         "context_window": model.get("context_window"),
         "context_window_tokens": model.get("context_window_tokens"),
         "max_output_tokens": model.get("max_output_tokens"),
@@ -6139,7 +6413,9 @@ def _model_summary(model: dict[str, Any]) -> dict[str, Any]:
         "model_size_source_url": _clean_text(model.get("model_size_source_url")),
         "model_size_verified_at": model.get("model_size_verified_at"),
         "openrouter_added_at": model.get("openrouter_added_at"),
-        "huggingface_repo_id": model.get("huggingface_repo_id"),
+        "huggingface_repo_id": _clean_text(model.get("huggingface_repo_id")),
+        "huggingface_created_at": _clean_text(model.get("huggingface_created_at")),
+        "huggingface_last_modified_at": _clean_text(model.get("huggingface_last_modified_at")),
         "model_card_url": model.get("model_card_url"),
         "model_card_source": model.get("model_card_source"),
         "model_card_verified_at": model.get("model_card_verified_at"),
@@ -6190,6 +6466,7 @@ def _model_summary(model: dict[str, Any]) -> dict[str, Any]:
         "inference_summary": model.get("inference_summary", {}),
         "source_freshness": list(model.get("source_freshness", []) or []),
     }
+    summary.update(_model_age_payload(summary))
     summary.update(build_license_policy_payload(license_id, license_name))
     summary.update(
         build_provenance_policy_payload(

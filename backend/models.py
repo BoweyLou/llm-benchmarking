@@ -262,6 +262,17 @@ class ModelOut(APIModel):
     model_roles: list[ModelRole] = Field(default_factory=lambda: ["generator"])
     catalog_status: str = "tracked"
     release_date: str | None = None
+    release_date_precision: str | None = None
+    release_date_confidence: str | None = None
+    release_date_source_name: str | None = None
+    release_date_source_url: str | None = None
+    release_date_verified_at: datetime | None = None
+    model_age_days: int | None = None
+    model_age_basis: str | None = None
+    model_age_confidence: str | None = None
+    model_age_source_name: str | None = None
+    model_age_source_url: str | None = None
+    model_age_reference_date: str | None = None
     context_window: str | None = None
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
@@ -278,6 +289,8 @@ class ModelOut(APIModel):
     openrouter_canonical_slug: str | None = None
     openrouter_added_at: datetime | None = None
     huggingface_repo_id: str | None = None
+    huggingface_created_at: datetime | None = None
+    huggingface_last_modified_at: datetime | None = None
     metadata_source_name: str | None = None
     metadata_source_url: str | None = None
     metadata_verified_at: datetime | None = None
@@ -356,6 +369,17 @@ class ModelSummaryOut(APIModel):
     model_roles: list[ModelRole] = Field(default_factory=lambda: ["generator"])
     catalog_status: str = "tracked"
     release_date: str | None = None
+    release_date_precision: str | None = None
+    release_date_confidence: str | None = None
+    release_date_source_name: str | None = None
+    release_date_source_url: str | None = None
+    release_date_verified_at: datetime | None = None
+    model_age_days: int | None = None
+    model_age_basis: str | None = None
+    model_age_confidence: str | None = None
+    model_age_source_name: str | None = None
+    model_age_source_url: str | None = None
+    model_age_reference_date: str | None = None
     context_window: str | None = None
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
@@ -368,6 +392,8 @@ class ModelSummaryOut(APIModel):
     model_size_verified_at: datetime | None = None
     openrouter_added_at: datetime | None = None
     huggingface_repo_id: str | None = None
+    huggingface_created_at: datetime | None = None
+    huggingface_last_modified_at: datetime | None = None
     model_card_url: str | None = None
     model_card_source: str | None = None
     model_card_verified_at: datetime | None = None

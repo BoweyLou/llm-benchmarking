@@ -6,7 +6,7 @@ source-review outcomes for the benchmark catalog. It reflects the integrated
 implemented, including model-role separation for generator, embedding, and
 reranker model rankings. It also documents the curated model-discovery lane
 that exposes official small-model candidates even when ranking evidence is not
-available yet.
+available yet, plus the `LBM-036` release-age evidence fields.
 
 ## Current Flow
 
@@ -19,7 +19,7 @@ flowchart LR
     end
 
     subgraph Benchmarks["Benchmark adapters"]
-        AA["Artificial Analysis models"]
+        AA["Artificial Analysis models and release dates"]
         AAIF["Artificial Analysis IFBench"]
         Arena["Chatbot Arena"]
         AIL["AILuminate"]
@@ -41,9 +41,9 @@ flowchart LR
     end
 
     subgraph Enrichment["External enrichment"]
-        ORModels["OpenRouter models API"]
+        ORModels["OpenRouter all-modality models API"]
         ORMarket["OpenRouter rankings and programming collection"]
-        HFDiscover["Curated Hugging Face model discovery"]
+        HFDiscover["Curated Hugging Face model discovery and repo timestamps"]
         HF["Hugging Face model cards"]
         Clouds["AWS Bedrock, Azure AI Foundry, Google Vertex AI"]
     end
@@ -59,7 +59,7 @@ flowchart LR
     end
 
     subgraph Store["SQLite store"]
-        Models["models"]
+        Models["models and age evidence"]
         Scores["scores"]
         Runs["update_log, source_runs, raw_source_records"]
         Market["model_market_snapshots"]
@@ -132,13 +132,17 @@ flowchart LR
 3. Each adapter produces raw source records and normalized score candidates.
    The update engine resolves names, creates missing models, promotes trusted
    metadata through explicit precedence rules, upserts the best score per model
-   and benchmark, and stores raw records for auditability.
+   and benchmark, and stores raw records for auditability. Trusted source
+   release dates are promoted with precision, confidence, source URL, and
+   verification timestamp.
 4. Post-source phases refresh identity/canonical model fields, reapply provider
-   origin baselines, pull OpenRouter model metadata, run curated Hugging Face
-   model discovery for full updates, refresh Hugging Face model cards and
-   licenses, collect optional OpenRouter market signals, and run the post-update
-   audit. Benchmark-scoped updates skip model discovery unless
-   `--refresh-model-discovery` is passed.
+   origin baselines, pull all-modality OpenRouter model metadata, run curated
+   Hugging Face model discovery for full updates, refresh Hugging Face model
+   cards and licenses, collect optional OpenRouter market signals, and run the
+   post-update audit. Benchmark-scoped updates skip model discovery unless
+   `--refresh-model-discovery` is passed. Hugging Face repository creation,
+   OpenRouter addition, and local discovery timestamps are retained as age
+   proxies, not as official release dates.
 5. `python -m backend inference-sync` is a separate sync for hyperscaler
    inference destinations. It writes availability, region, deployment-mode, and
    pricing evidence to the inference catalog tables.
@@ -147,7 +151,7 @@ flowchart LR
 
 | Source | Current adapter or phase | Provides now | Caveats or next step |
 | --- | --- | --- | --- |
-| Artificial Analysis models | `ArtificialAnalysisAdapter` | Intelligence, speed, blended cost, creator/family metadata. | General model leaderboard only; additional AA evaluation pages should be added as separate adapters when stable. |
+| Artificial Analysis models | `ArtificialAnalysisAdapter` | Intelligence, speed, blended cost, creator/family metadata, release date. | Release dates are promoted as high-confidence model release evidence; additional AA evaluation pages should be added as separate adapters when stable. |
 | Artificial Analysis IFBench | `ArtificialAnalysisIfbenchAdapter` | IFBench score plus cost, output-token, and latency metrics. | One AA evaluation page is integrated; other AA pages remain future candidates. |
 | Chatbot Arena | `ChatbotArenaAdapter` | Arena ELO, rank bands, votes, organization, model URL, license, price, context metadata. | Metadata promotion uses source-precedence rules and does not override higher-trust sources silently. |
 | AILuminate | `AILuminateAdapter` | Public grade plus locale and system-class companion evidence. | Risk-category detail should wait for a stable detail-page surface. |
@@ -155,7 +159,7 @@ flowchart LR
 | BigCodeBench | `BigCodeBenchAdapter` | Full/Hard aggregate plus Instruct/Complete Pass@1 variants. | Variant scores stay separate to avoid one opaque coding score. |
 | Epoch AI GPQA CSV | `EpochGpqaAdapter` | GPQA Diamond score, task version, organization, stderr, status from `benchmarks.csv`. | Filters the shared CSV down to GPQA Diamond only. |
 | HELM Capabilities | `HelmCapabilitiesAdapter` | Core-scenarios mean plus MMLU-Pro, GPQA, IFEval, WildBench, and Omni-MATH component scores with release metadata. | Use as transparent triangulation; HELM freshness is lower than sources with active current releases. |
-| IFEval | `IfevalAdapter` | Instruction-following score, rank, organization, verified/self-reported flags, provider/model IDs, price, context, announcement date, latency, throughput. | Dominated by self-reported/unverified data; trust labels and precedence rules matter. |
+| IFEval | `IfevalAdapter` | Instruction-following score, rank, organization, verified/self-reported flags, provider/model IDs, price, context, announcement date, latency, throughput. | Announcement dates are lower-confidence release evidence when the source is self-reported; trust labels and precedence rules matter. |
 | LiveBench | `LiveBenchAdapter` | Official static leaderboard overall and category scores with release and task-score metadata. | Task-level LiveBench scores remain raw metadata until category ingestion is stable in production. |
 | LiveCodeBench | `LiveCodeBenchAdapter` | Code-generation Pass@1 for the default window plus difficulty, platform, release-window, and contamination metadata. | Contamination flags should be inspected before using the score as a sole coding signal. |
 | MMMU | `MmmuAdapter` | Validation overall plus stable test and MMMU-Pro companion metrics; human/random baselines are skipped. | Use validation overall as the continuity anchor; companion rows add coverage. |
@@ -166,8 +170,8 @@ flowchart LR
 | Terminal-Bench | `TerminalBenchAdapter` | Best verified single-model Terminal-Bench score plus agent, version, integration method, date, and stderr metadata. | Phase-two only; distinguish model capability from best agent-system evidence. |
 | FaithJudge | `FaithJudgeAdapter` | Aggregate RAG hallucination rate plus task-level FaithBench/RAGTruth summarization, QA, and data-to-text rates. | Lower is better; task rows prevent one aggregate from carrying all RAG faithfulness meaning. |
 | Vectara Hallucination | `VectaraHallucinationAdapter` | Factual consistency plus hallucination-rate and answer-rate companion metrics. | This is grounded summarization evidence, not retrieval relevance. |
-| OpenRouter models | `_refresh_openrouter_model_metadata()` | Model IDs/slugs, canonical OpenRouter identity, context and pricing fields, Hugging Face repo links, newly discovered provisional models. | Not first-party truth for every vendor; source precedence prevents silent overrides. |
-| Hugging Face model discovery | `_refresh_huggingface_model_discovery()` | Curated official/provider-owned model repos, `huggingface_repo_id`, model size fields, small-model candidate flag, provisional catalog rows, and raw source records. | Metadata-only; does not synthesize scores or relax `small_model_routing` cost/speed gates. v1 baseline covers official Google Gemma discovery and leaves trusted mirrors empty. |
+| OpenRouter models | `_refresh_openrouter_model_metadata()` | All output modalities, model IDs/slugs, canonical OpenRouter identity, context and pricing fields, Hugging Face repo links, OpenRouter addition timestamp, newly discovered provisional models. | OpenRouter addition is an age proxy, not an official release date; source precedence prevents silent overrides. |
+| Hugging Face model discovery | `_refresh_huggingface_model_discovery()` | Curated official/provider-owned model repos, `huggingface_repo_id`, Hugging Face creation and modification timestamps, model size fields, small-model candidate flag, provisional catalog rows, and raw source records. | Repository creation is an age proxy, not an official release date; metadata-only discovery does not synthesize scores or relax `small_model_routing` cost/speed gates. v1 baseline covers official Google Gemma discovery and leaves trusted mirrors empty. |
 | OpenRouter market | `_refresh_openrouter_market_signals()` | Global and programming rank, total tokens, share, change ratio, request count, volume snapshots. | Ranking page payloads are optional and can change shape; failures are nonfatal warnings and appear in freshness/degraded export context. |
 | Hugging Face model cards | `_refresh_model_card_metadata()` | Model-card URL/source, docs/repo/paper URLs, license, base models, languages, capabilities, intended use, limitations, training data, cutoff. | Only models with `huggingface_repo_id`; README extraction can be incomplete or noisy. |
 | Hyperscaler catalogs | `sync_inference_catalog()` | AWS Bedrock, Azure AI Foundry, and Google Vertex AI availability, regions, deployment modes, pricing, source links, sync status. | AWS/GCP richer catalog data needs credentials; Azure public pricing can rate-limit. |
@@ -192,6 +196,9 @@ flowchart LR
   companion splits.
 - `LBM-024`: model exports now expose source freshness and degraded-source
   context.
+- `LBM-036`: model exports now expose release-date provenance, model-age
+  estimates, Hugging Face repository timestamps, and all-modality OpenRouter
+  discovery coverage.
 
 ### New Source Adapters
 
@@ -222,6 +229,18 @@ stores raw source records, links `huggingface_repo_id`, and parses size markers
 such as `270M`, `12B`, `26B-A4B`, `E2B`, and `E4B`. The exported size fields
 let downstream review find small-model candidates, while `small_model_routing`
 still ranks only models with the required `aa_cost` and `aa_speed` evidence.
+
+### Release-age Boundary
+
+The catalog separates official or source-asserted release dates from proxy age
+signals. `release_date` is populated only from trusted source metadata such as
+Artificial Analysis release dates or IFEval announcement dates, and is paired
+with precision, confidence, source URL, and verification timestamp. Computed
+`model_age_days` prefers exact day-level release dates, then falls back to
+Hugging Face repository creation, OpenRouter addition, and local discovery
+timestamps. The fallback basis and confidence are exported so spreadsheet and
+API consumers can distinguish "known release date" from "best available age
+proxy."
 
 ## Source Evidence Checked
 

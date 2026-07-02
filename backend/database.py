@@ -142,6 +142,11 @@ models = Table(
     Column("model_roles_json", Text, nullable=False, server_default=text("'[\"generator\"]'")),
     Column("catalog_status", String, nullable=False, server_default=text("'tracked'")),
     Column("release_date", String),
+    Column("release_date_precision", String),
+    Column("release_date_confidence", String),
+    Column("release_date_source_name", String),
+    Column("release_date_source_url", String),
+    Column("release_date_verified_at", String),
     Column("context_window", String),
     Column("context_window_tokens", Integer),
     Column("max_output_tokens", Integer),
@@ -158,6 +163,8 @@ models = Table(
     Column("openrouter_canonical_slug", String),
     Column("openrouter_added_at", String),
     Column("huggingface_repo_id", String),
+    Column("huggingface_created_at", String),
+    Column("huggingface_last_modified_at", String),
     Column("metadata_source_name", String),
     Column("metadata_source_url", String),
     Column("metadata_verified_at", String),
@@ -450,6 +457,11 @@ def _create_schema_sql() -> list[str]:
             model_roles_json TEXT NOT NULL DEFAULT '["generator"]',
             catalog_status TEXT NOT NULL DEFAULT 'tracked',
             release_date TEXT,
+            release_date_precision TEXT,
+            release_date_confidence TEXT,
+            release_date_source_name TEXT,
+            release_date_source_url TEXT,
+            release_date_verified_at TEXT,
             context_window TEXT,
             context_window_tokens INTEGER,
             max_output_tokens INTEGER,
@@ -466,6 +478,8 @@ def _create_schema_sql() -> list[str]:
             openrouter_canonical_slug TEXT,
             openrouter_added_at TEXT,
             huggingface_repo_id TEXT,
+            huggingface_created_at TEXT,
+            huggingface_last_modified_at TEXT,
             metadata_source_name TEXT,
             metadata_source_url TEXT,
             metadata_verified_at TEXT,
@@ -851,6 +865,11 @@ def _migration_20260701_schema_repairs(conn: Connection) -> None:
         "provider_id": "ALTER TABLE models ADD COLUMN provider_id TEXT",
         "model_roles_json": "ALTER TABLE models ADD COLUMN model_roles_json TEXT NOT NULL DEFAULT '[\"generator\"]'",
         "catalog_status": "ALTER TABLE models ADD COLUMN catalog_status TEXT NOT NULL DEFAULT 'tracked'",
+        "release_date_precision": "ALTER TABLE models ADD COLUMN release_date_precision TEXT",
+        "release_date_confidence": "ALTER TABLE models ADD COLUMN release_date_confidence TEXT",
+        "release_date_source_name": "ALTER TABLE models ADD COLUMN release_date_source_name TEXT",
+        "release_date_source_url": "ALTER TABLE models ADD COLUMN release_date_source_url TEXT",
+        "release_date_verified_at": "ALTER TABLE models ADD COLUMN release_date_verified_at TEXT",
         "context_window_tokens": "ALTER TABLE models ADD COLUMN context_window_tokens INTEGER",
         "max_output_tokens": "ALTER TABLE models ADD COLUMN max_output_tokens INTEGER",
         "parameter_count_b": "ALTER TABLE models ADD COLUMN parameter_count_b REAL",
@@ -866,6 +885,8 @@ def _migration_20260701_schema_repairs(conn: Connection) -> None:
         "openrouter_canonical_slug": "ALTER TABLE models ADD COLUMN openrouter_canonical_slug TEXT",
         "openrouter_added_at": "ALTER TABLE models ADD COLUMN openrouter_added_at TEXT",
         "huggingface_repo_id": "ALTER TABLE models ADD COLUMN huggingface_repo_id TEXT",
+        "huggingface_created_at": "ALTER TABLE models ADD COLUMN huggingface_created_at TEXT",
+        "huggingface_last_modified_at": "ALTER TABLE models ADD COLUMN huggingface_last_modified_at TEXT",
         "metadata_source_name": "ALTER TABLE models ADD COLUMN metadata_source_name TEXT",
         "metadata_source_url": "ALTER TABLE models ADD COLUMN metadata_source_url TEXT",
         "metadata_verified_at": "ALTER TABLE models ADD COLUMN metadata_verified_at TEXT",
@@ -1139,11 +1160,31 @@ def _migration_20260701_model_size_metadata(conn: Connection) -> None:
             conn.exec_driver_sql(statement)
 
 
+def _migration_20260702_model_age_metadata(conn: Connection) -> None:
+    model_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(models)").fetchall()
+    }
+    expected_model_columns = {
+        "release_date_precision": "ALTER TABLE models ADD COLUMN release_date_precision TEXT",
+        "release_date_confidence": "ALTER TABLE models ADD COLUMN release_date_confidence TEXT",
+        "release_date_source_name": "ALTER TABLE models ADD COLUMN release_date_source_name TEXT",
+        "release_date_source_url": "ALTER TABLE models ADD COLUMN release_date_source_url TEXT",
+        "release_date_verified_at": "ALTER TABLE models ADD COLUMN release_date_verified_at TEXT",
+        "huggingface_created_at": "ALTER TABLE models ADD COLUMN huggingface_created_at TEXT",
+        "huggingface_last_modified_at": "ALTER TABLE models ADD COLUMN huggingface_last_modified_at TEXT",
+    }
+    for column_name, statement in expected_model_columns.items():
+        if column_name not in model_columns:
+            conn.exec_driver_sql(statement)
+
+
 SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
     ("20260701_002_model_roles", _migration_20260701_model_roles),
     ("20260701_003_recommendation_proposals", _migration_20260701_recommendation_proposals),
     ("20260701_004_model_size_metadata", _migration_20260701_model_size_metadata),
+    ("20260702_001_model_age_metadata", _migration_20260702_model_age_metadata),
 )
 
 

@@ -51,6 +51,20 @@ class CatalogExportTests(unittest.TestCase):
                 "model_size_source_name": "huggingface_model_discovery",
                 "model_size_source_url": "https://huggingface.co/provider/model-a",
                 "model_size_verified_at": "2026-07-01T00:00:00Z",
+                "release_date": "2026-06-15",
+                "release_date_precision": "day",
+                "release_date_confidence": "high",
+                "release_date_source_name": "Artificial Analysis",
+                "release_date_source_url": "https://artificialanalysis.ai/models/model-a",
+                "release_date_verified_at": "2026-07-01T00:00:00Z",
+                "model_age_days": 16,
+                "model_age_basis": "release_date",
+                "model_age_confidence": "high",
+                "model_age_source_name": "Artificial Analysis",
+                "model_age_source_url": "https://artificialanalysis.ai/models/model-a",
+                "model_age_reference_date": "2026-07-01",
+                "huggingface_created_at": "2026-06-16T12:00:00Z",
+                "huggingface_last_modified_at": "2026-06-25T18:30:00Z",
                 "model_roles": ["embedding", "reranker"],
                 "provider_origin_countries": [{"code": "US", "name": "United States"}],
                 "scores": {"benchmark": {"value": 95.0, "verified": True}},
@@ -78,6 +92,15 @@ class CatalogExportTests(unittest.TestCase):
         self.assertEqual(rows[0]["model_size_class"], "small")
         self.assertEqual(rows[0]["small_model_candidate"], "true")
         self.assertEqual(rows[0]["model_size_source_name"], "huggingface_model_discovery")
+        self.assertEqual(rows[0]["release_date"], "2026-06-15")
+        self.assertEqual(rows[0]["release_date_precision"], "day")
+        self.assertEqual(rows[0]["release_date_confidence"], "high")
+        self.assertEqual(rows[0]["release_date_source_name"], "Artificial Analysis")
+        self.assertEqual(rows[0]["model_age_days"], "16")
+        self.assertEqual(rows[0]["model_age_basis"], "release_date")
+        self.assertEqual(rows[0]["model_age_confidence"], "high")
+        self.assertEqual(rows[0]["huggingface_created_at"], "2026-06-16T12:00:00Z")
+        self.assertEqual(rows[0]["huggingface_last_modified_at"], "2026-06-25T18:30:00Z")
         self.assertEqual(rows[0]["model_roles"], "embedding; reranker")
         self.assertEqual(rows[0]["provider_origin_country_names"], "United States")
         self.assertEqual(rows[0]["score_count"], "1")

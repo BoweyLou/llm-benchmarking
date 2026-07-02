@@ -1,6 +1,6 @@
 # LLM Benchmarking
 
-LLM Benchmarking is a local backend-only model intelligence workspace. It stores public benchmark scores, model metadata, size-aware catalog discovery fields, provider-origin metadata, license and provenance review fields, use-case approvals, inference-location coverage, and update history in SQLite.
+LLM Benchmarking is a local backend-only model intelligence workspace. It stores public benchmark scores, model metadata, release-date and age evidence, size-aware catalog discovery fields, provider-origin metadata, license and provenance review fields, use-case approvals, inference-location coverage, and update history in SQLite.
 
 The primary output is now a simple model metadata list:
 
@@ -8,7 +8,7 @@ The primary output is now a simple model metadata list:
 python -m backend list-models
 ```
 
-That command prints a JSON array. Each model item includes the serialized metadata used by the old dashboard, including scores, source details, model roles, model size fields, small-model candidate visibility, provider origin, license policy, provenance policy, use-case approvals, inference destinations, OpenRouter market metadata, model-card fields, and family/duplicate curation fields.
+That command prints a JSON array. Each model item includes the serialized metadata used by the old dashboard, including scores, source details, model roles, release-date provenance, model-age evidence, model size fields, small-model candidate visibility, provider origin, license policy, provenance policy, use-case approvals, inference destinations, OpenRouter market metadata, model-card fields, and family/duplicate curation fields.
 It also writes spreadsheet-friendly CSV output to `output/model-list.csv` by default, plus normalized companion CSVs for scores, use-case approvals, inference destinations, provider-origin countries, and source freshness. When recommendation proposals have been synced, use-case approvals include proposed and effective recommendation fields.
 
 ## Stack
@@ -179,6 +179,16 @@ Models also carry size-aware catalog fields in exports and API responses:
 `model_size_verified_at`. These fields make small-model candidates visible in
 the catalog without changing evidence-gated ranking semantics.
 
+Models also carry release and age evidence in exports and API responses:
+`release_date`, `release_date_precision`, `release_date_confidence`,
+`release_date_source_name`, `release_date_source_url`,
+`release_date_verified_at`, `model_age_days`, `model_age_basis`,
+`model_age_confidence`, `model_age_source_name`, `model_age_source_url`,
+`model_age_reference_date`, `huggingface_created_at`, and
+`huggingface_last_modified_at`. Exact release dates from trusted sources are
+kept separate from proxy age signals such as Hugging Face repository creation,
+OpenRouter addition, or local discovery timestamps.
+
 ## Current Data Sources
 
 For a detailed source-by-source data-flow diagram, source inventory, and
@@ -211,6 +221,7 @@ Metadata and catalog enrichments:
 - Curated Hugging Face model discovery for official/provider-owned repos
 - OpenRouter models and market/ranking signals
   Recent OpenRouter models from the last 60 days are imported as provisional rows when no exact OpenRouter ID or canonical slug is already represented.
+- Hugging Face repository creation and modification timestamps from curated model discovery
 - Hugging Face model-card metadata
 - Hyperscaler inference catalogs for AWS Bedrock, Azure AI Foundry, and Google Vertex AI
 
@@ -271,6 +282,7 @@ Notes:
 
 - Full `update` runs curated Hugging Face model discovery before model-card refresh. `update --benchmarks ...` skips that discovery phase unless `--refresh-model-discovery` is passed.
 - `model-discovery-sync` runs only the curated metadata discovery lane. The v1 repo-backed baseline covers official Google Gemma discovery and intentionally excludes community quantizations/fine-tunes unless a trusted mirror is configured.
+- OpenRouter model refresh requests all output modalities so non-text-capable catalog rows are not hidden by the provider default.
 - `inference-sync` supports destination subsets.
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.

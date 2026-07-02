@@ -70,6 +70,7 @@ class ArtificialAnalysisAdapter(BaseSourceAdapter):
                             else None,
                             row.get("modelCreatorName"),
                         ),
+                        "release_date": row.get("releaseDate"),
                         "metrics": metrics,
                     },
                 )

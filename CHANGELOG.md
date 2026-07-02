@@ -2,6 +2,7 @@
 
 ## 0.2.0 - Unreleased
 
+- Added release-date provenance, computed model-age evidence, Hugging Face repository timestamps, and all-modality OpenRouter discovery coverage to model exports.
 - Added curated Hugging Face model discovery for official/provider-owned model families, starting with Google Gemma, so small-model candidates appear in catalog exports even without leaderboard coverage.
 - Added model size metadata fields to the SQLite schema, API/list-models payloads, and clean CSV export.
 - Added `python -m backend model-discovery-sync --source huggingface --family gemma` and `python -m backend update --refresh-model-discovery` for targeted discovery refreshes while keeping benchmark-scoped updates fast by default.

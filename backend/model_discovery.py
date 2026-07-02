@@ -169,6 +169,17 @@ def model_size_values_from_metadata(metadata: ModelSizeMetadata, *, source_name:
     return values
 
 
+def huggingface_timestamp_values_from_item(item: dict[str, Any]) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    created_at = _clean_timestamp(item.get("createdAt"))
+    last_modified = _clean_timestamp(item.get("lastModified"))
+    if created_at:
+        values["huggingface_created_at"] = created_at
+    if last_modified:
+        values["huggingface_last_modified_at"] = last_modified
+    return values
+
+
 def _repo_id_from_item(item: dict[str, Any]) -> str | None:
     for key in ("modelId", "id"):
         value = _clean_text(item.get(key))
@@ -218,6 +229,13 @@ def _clean_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _clean_timestamp(value: Any) -> str | None:
+    text = _clean_text(value)
+    if not text:
+        return None
+    return text
+
+
 def _min_or_none(values: list[float]) -> float | None:
     if not values:
         return None
@@ -241,6 +259,7 @@ __all__ = [
     "fetch_huggingface_discovery_items",
     "filter_huggingface_discovery_items",
     "huggingface_discovery_entries",
+    "huggingface_timestamp_values_from_item",
     "infer_model_size_metadata",
     "load_model_discovery_baseline",
     "model_size_values_from_metadata",

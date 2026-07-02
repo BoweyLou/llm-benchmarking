@@ -83,6 +83,32 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertTrue(update_engine._should_refresh_model_discovery({"aa_cost"}, refresh_model_discovery=True))
         self.assertFalse(update_engine._should_refresh_model_discovery(set(), refresh_model_discovery=False))
 
+    def test_extracts_huggingface_timestamp_metadata(self) -> None:
+        values = model_discovery.huggingface_timestamp_values_from_item(
+            {
+                "createdAt": "2026-06-16T12:00:00Z",
+                "lastModified": "2026-06-25T18:30:00Z",
+            }
+        )
+
+        self.assertEqual(
+            values,
+            {
+                "huggingface_created_at": "2026-06-16T12:00:00Z",
+                "huggingface_last_modified_at": "2026-06-25T18:30:00Z",
+            },
+        )
+
+    def test_ignores_blank_huggingface_timestamp_metadata(self) -> None:
+        values = model_discovery.huggingface_timestamp_values_from_item(
+            {
+                "createdAt": "  ",
+                "lastModified": None,
+            }
+        )
+
+        self.assertEqual(values, {})
+
 
 if __name__ == "__main__":
     unittest.main()

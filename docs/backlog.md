@@ -24,6 +24,14 @@ the row is older than 14 days or the backend/API shape has changed.
   - Validation: `python -m unittest backend.test_banking_review backend.test_catalog_export backend.test_recommendation_engine`; `make docs-check`.
   - Completed: 2026-07-02. The backend CLI now supports local banking review export and simple manual curation without reintroducing a frontend workflow.
 
+- [x] LBM-036: P2 Improve model-age data with release-date provenance and proxy age evidence
+  - Source: User request 2026-07-02 after reviewing sparse model-age coverage.
+  - Problem: the catalog had only sparse `release_date` values and did not distinguish official/source-asserted release dates from proxy timestamps such as repository creation, OpenRouter addition, or local discovery.
+  - Scope: model schema/API/export fields for release-date provenance and computed model-age evidence; Artificial Analysis and IFEval release-date promotion; Hugging Face repository timestamps; all-modality OpenRouter refresh; docs and tests.
+  - Acceptance: exports expose release date precision, confidence, source URL, verification timestamp, computed age days, age basis/confidence, and Hugging Face timestamps without treating proxy timestamps as official release dates.
+  - Validation: targeted unit/source/migration tests; docs checks; version check.
+  - Completed: 2026-07-02. Model exports now include explicit release-date provenance, computed model-age evidence, Hugging Face repo timestamps, and all-modality OpenRouter discovery coverage.
+
 - [x] LBM-032: P3 Add MTEB retrieval/reranking support after model taxonomy can distinguish generator vs embedding models
   - Source: Data ingest source map 2026-07-01, conditional new source adapter.
   - Problem: MTEB is relevant for embedding and reranking model selection, especially RAG retrieval sorting and document operations, but the current catalog is primarily generator-model oriented.
