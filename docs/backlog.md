@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-035: P1 Add banking review export and manual curation utility
+  - Source: Human request 2026-07-02.
+  - Problem: the banking model review workflow could export generated recommendation proposals, but applying manual approvals, recommendation ratings, whole-family decisions, and deprecation markers still required low-level API calls or direct SQLite edits.
+  - Scope: backend-only `banking-review` CLI, combined model/use-case CSV export, manual model addition, model/family approval and recommendation updates, deprecation markers, README examples, and focused tests.
+  - Acceptance: `python -m backend banking-review export` writes a combined banking review CSV after syncing `australian_bank` proposals by default; `banking-review set` can target model ids or family ids; `banking-review add-model` can add a manual listing row; `banking-review deprecate` keeps deprecated rows visible in exports and can also mark them not recommended.
+  - Validation: `python -m unittest backend.test_banking_review backend.test_catalog_export backend.test_recommendation_engine`; `make docs-check`.
+  - Completed: 2026-07-02. The backend CLI now supports local banking review export and simple manual curation without reintroducing a frontend workflow.
+
 - [x] LBM-032: P3 Add MTEB retrieval/reranking support after model taxonomy can distinguish generator vs embedding models
   - Source: Data ingest source map 2026-07-01, conditional new source adapter.
   - Problem: MTEB is relevant for embedding and reranking model selection, especially RAG retrieval sorting and document operations, but the current catalog is primarily generator-model oriented.

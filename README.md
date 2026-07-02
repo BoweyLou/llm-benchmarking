@@ -106,6 +106,37 @@ Each use-case approval can then carry:
 - `effective_recommendation_status`: manual rating when present, otherwise automatic hard blocker, otherwise proposal.
 - proposal blockers, warnings, reasons, required controls, score, confidence, policy version, and computed timestamp.
 
+## Banking Review Utility
+
+For spreadsheet review, use the local banking-review utility. It regenerates
+the `australian_bank` recommendation proposals by default, then writes a
+combined `model x use case` CSV with the normalized model-list columns and the
+manual/proposed/effective recommendation fields:
+
+```bash
+python -m backend banking-review export
+```
+
+The default output is
+`output/banking-model-list-with-recommendations.csv`. Use `--output <path>` to
+choose another file, or `--skip-sync` when you need to export the current
+database state without refreshing proposal rows.
+
+Manual curation commands write local SQLite review state:
+
+```bash
+python -m backend banking-review add-model --name "Vendor Model" --provider "Vendor"
+python -m backend banking-review set --model-id vendor-model --use-case customer_support --approval approved --recommendation recommended --notes "Approved for pilot."
+python -m backend banking-review set --family-id openai::gpt-5 --use-case coding --approval approved --recommendation recommended
+python -m backend banking-review deprecate --model-id old-model --mark-not-recommended --all-use-cases --notes "Deprecated from banking review."
+```
+
+`set` accepts repeatable `--model-id`, repeatable `--family-id`, repeatable
+`--use-case`, or `--all-use-cases`. `deprecate` sets
+`catalog_status=deprecated` and keeps the row active so it remains visible in
+exports; add `--mark-not-recommended` when the deprecation should also become a
+manual recommendation rating.
+
 ## Run Locally
 
 ```bash
@@ -226,6 +257,10 @@ python -m backend model-card-sync
 python -m backend model-card-audit
 python -m backend recommendation-audit
 python -m backend recommendation-sync
+python -m backend banking-review export
+python -m backend banking-review set --model-id gpt-5-4 --use-case customer_support --approval approved --recommendation recommended
+python -m backend banking-review set --family-id openai::gpt-5 --use-case coding --approval approved
+python -m backend banking-review deprecate --model-id old-model --mark-not-recommended --all-use-cases
 python -m backend model-license-sync
 python -m backend model-license-sync --refresh-model-cards
 python -m backend provider-origin-export
@@ -240,6 +275,7 @@ Notes:
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.
 - `recommendation-audit` previews generated use-case recommendation proposals. `recommendation-sync` persists them so `list-models`, CSV export, and the API include proposed/effective recommendation fields.
+- `banking-review export` writes the review-friendly combined CSV. `banking-review set` and `banking-review deprecate` apply model- or family-scoped manual approval and recommendation decisions.
 - `model-license-sync` fills missing licenses using safe open-weight family propagation, a `Proprietary` fallback for missing proprietary licenses, and tracked exact/family overrides from [backend/model_license_baseline.json](backend/model_license_baseline.json).
 - `list-models` writes a clean CSV bundle to `output/model-list*.csv` by default in addition to the requested stdout/file format; pass `--no-csv` when you do not want the bundle, or `--no-csv-sidecars` when you only want the main model CSV.
 - `provider-origin-export` and `model-curation-export` push live curation back into the tracked baseline JSON files.

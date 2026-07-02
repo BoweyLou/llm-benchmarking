@@ -5,6 +5,13 @@ import json
 from pathlib import Path
 import sys
 
+from .banking_review import (
+    DEFAULT_BANKING_REVIEW_OUTPUT,
+    add_model_to_listing,
+    deprecate_listings,
+    export_banking_review_list,
+    set_review_state,
+)
 from .catalog_export import (
     build_model_metadata_list,
     render_model_metadata_csv_bundle,
@@ -75,6 +82,113 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not write normalized CSV companion files for scores, approvals, inference destinations, origins, and source freshness.",
     )
     list_models_parser.set_defaults(func=cmd_list_models)
+
+    banking_review_parser = subparsers.add_parser(
+        "banking-review",
+        help="Export and curate the Australian-bank model review list.",
+    )
+    banking_review_subparsers = banking_review_parser.add_subparsers(dest="banking_review_command", required=True)
+
+    banking_export_parser = banking_review_subparsers.add_parser(
+        "export",
+        help="Sync banking recommendation proposals and write a combined model x use-case CSV.",
+    )
+    banking_export_parser.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        default=DEFAULT_BANKING_REVIEW_OUTPUT,
+        help=f"Output CSV path. Defaults to {DEFAULT_BANKING_REVIEW_OUTPUT}.",
+    )
+    banking_export_parser.add_argument(
+        "--profile",
+        default=PROFILE_AUSTRALIAN_BANK,
+        choices=sorted(SUPPORTED_PROFILES),
+        help=f"Recommendation profile. Defaults to {PROFILE_AUSTRALIAN_BANK}.",
+    )
+    banking_export_parser.add_argument(
+        "--skip-sync",
+        action="store_true",
+        help="Do not regenerate recommendation proposals before exporting.",
+    )
+    banking_export_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print export summary as JSON.",
+    )
+    banking_export_parser.set_defaults(func=cmd_banking_review_export)
+
+    banking_add_parser = banking_review_subparsers.add_parser(
+        "add-model",
+        help="Add a manually curated model row to the local listing.",
+    )
+    banking_add_parser.add_argument("--name", required=True, help="Display model name.")
+    banking_add_parser.add_argument("--provider", required=True, help="Provider name.")
+    banking_add_parser.add_argument("--model-id", help="Optional explicit model id. Defaults to a slug from the name.")
+    banking_add_parser.add_argument("--type", default="proprietary", help="Model type. Defaults to proprietary.")
+    banking_add_parser.add_argument(
+        "--model-role",
+        action="append",
+        dest="model_roles",
+        choices=("generator", "embedding", "reranker", "multimodal_embedding"),
+        help="Model role. Repeat for multiple roles. Defaults to generator.",
+    )
+    banking_add_parser.add_argument(
+        "--catalog-status",
+        default="tracked",
+        choices=("tracked", "provisional", "deprecated"),
+        help="Initial listing status. Defaults to tracked.",
+    )
+    banking_add_parser.add_argument("--notes", help="Optional local curation note.")
+    banking_add_parser.add_argument("--json", action="store_true", help="Print result as JSON.")
+    banking_add_parser.set_defaults(func=cmd_banking_review_add_model)
+
+    banking_set_parser = banking_review_subparsers.add_parser(
+        "set",
+        help="Set approval and/or manual recommendation state for models or families.",
+    )
+    banking_set_target = banking_set_parser.add_mutually_exclusive_group(required=True)
+    banking_set_target.add_argument("--model-id", action="append", dest="model_ids", help="Target model id. Repeatable.")
+    banking_set_target.add_argument("--family-id", action="append", dest="family_ids", help="Target family id. Repeatable.")
+    banking_set_parser.add_argument("--use-case", action="append", dest="use_case_ids", help="Use-case id. Repeatable.")
+    banking_set_parser.add_argument("--all-use-cases", action="store_true", help="Apply to every configured use case.")
+    banking_set_parser.add_argument(
+        "--approval",
+        choices=("unchanged", "approved", "not_approved"),
+        default="unchanged",
+        help="Approval state to write. Defaults to unchanged.",
+    )
+    banking_set_parser.add_argument(
+        "--recommendation",
+        choices=("unchanged", "unrated", "recommended", "not_recommended", "discouraged"),
+        default="unchanged",
+        help="Manual recommendation rating to write. Defaults to unchanged.",
+    )
+    banking_set_parser.add_argument("--notes", help="Approval note. Existing notes are preserved when omitted.")
+    banking_set_parser.add_argument(
+        "--recommendation-notes",
+        help="Recommendation note. Existing recommendation notes are preserved when omitted.",
+    )
+    banking_set_parser.add_argument("--json", action="store_true", help="Print result as JSON.")
+    banking_set_parser.set_defaults(func=cmd_banking_review_set)
+
+    banking_deprecate_parser = banking_review_subparsers.add_parser(
+        "deprecate",
+        help="Mark models or families deprecated while keeping them visible in exports.",
+    )
+    banking_deprecate_target = banking_deprecate_parser.add_mutually_exclusive_group(required=True)
+    banking_deprecate_target.add_argument("--model-id", action="append", dest="model_ids", help="Target model id. Repeatable.")
+    banking_deprecate_target.add_argument("--family-id", action="append", dest="family_ids", help="Target family id. Repeatable.")
+    banking_deprecate_parser.add_argument("--notes", help="Optional deprecation note.")
+    banking_deprecate_parser.add_argument(
+        "--mark-not-recommended",
+        action="store_true",
+        help="Also mark selected use cases not_recommended. Defaults to all use cases when no --use-case is provided.",
+    )
+    banking_deprecate_parser.add_argument("--use-case", action="append", dest="use_case_ids", help="Use-case id for --mark-not-recommended.")
+    banking_deprecate_parser.add_argument("--all-use-cases", action="store_true", help="Apply --mark-not-recommended to all use cases.")
+    banking_deprecate_parser.add_argument("--json", action="store_true", help="Print result as JSON.")
+    banking_deprecate_parser.set_defaults(func=cmd_banking_review_deprecate)
 
     update_parser = subparsers.add_parser("update", help="Run a synchronous benchmark update.")
     update_parser.add_argument(
@@ -274,6 +388,83 @@ def _write_csv_sidecars(models: list[dict[str, object]], csv_output: Path) -> li
         sidecar_path.write_text(content, encoding="utf-8")
         paths.append(sidecar_path)
     return paths
+
+
+def cmd_banking_review_export(args: argparse.Namespace) -> int:
+    summary = export_banking_review_list(
+        args.output,
+        profile_id=args.profile,
+        sync_proposals=not bool(args.skip_sync),
+    )
+    if args.json:
+        print(json.dumps(summary, indent=2, sort_keys=True, default=str))
+    else:
+        print(
+            "Exported banking review CSV:",
+            f"models={summary['model_count']}",
+            f"rows={summary['review_row_count']}",
+            f"path={summary['output_path']}",
+        )
+        if summary["synced_proposals"]:
+            print(f"Stored proposal rows: {summary['stored_proposal_count']}")
+    return 0
+
+
+def cmd_banking_review_add_model(args: argparse.Namespace) -> int:
+    result = add_model_to_listing(
+        name=args.name,
+        provider=args.provider,
+        model_id=args.model_id,
+        model_type=args.type,
+        model_roles=args.model_roles,
+        catalog_status=args.catalog_status,
+        notes=args.notes,
+    )
+    _print_banking_review_result(result, json_output=bool(args.json))
+    return 0
+
+
+def cmd_banking_review_set(args: argparse.Namespace) -> int:
+    result = set_review_state(
+        model_ids=args.model_ids,
+        family_ids=args.family_ids,
+        use_case_ids=args.use_case_ids,
+        all_use_cases=bool(args.all_use_cases),
+        approved_for_use=_approval_choice_to_bool(args.approval),
+        recommendation_status=None if args.recommendation == "unchanged" else args.recommendation,
+        approval_notes=args.notes,
+        recommendation_notes=args.recommendation_notes,
+    )
+    _print_banking_review_result(result, json_output=bool(args.json))
+    return 0
+
+
+def cmd_banking_review_deprecate(args: argparse.Namespace) -> int:
+    result = deprecate_listings(
+        model_ids=args.model_ids,
+        family_ids=args.family_ids,
+        notes=args.notes,
+        mark_not_recommended=bool(args.mark_not_recommended),
+        use_case_ids=args.use_case_ids,
+        all_use_cases=bool(args.all_use_cases),
+    )
+    _print_banking_review_result(result, json_output=bool(args.json))
+    return 0
+
+
+def _approval_choice_to_bool(value: str) -> bool | None:
+    if value == "approved":
+        return True
+    if value == "not_approved":
+        return False
+    return None
+
+
+def _print_banking_review_result(result: dict[str, object], *, json_output: bool) -> None:
+    if json_output:
+        print(json.dumps(result, indent=2, sort_keys=True, default=str))
+        return
+    print(json.dumps(result, indent=2, sort_keys=True, default=str))
 
 
 def cmd_update(args: argparse.Namespace) -> int:
