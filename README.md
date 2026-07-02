@@ -119,6 +119,11 @@ manual-recommendation, use-case approval, family, catalog-status, model-role,
 small-model, and hyperscaler-availability filters; a sortable model table; family and needs-decision
 views; and a detail inspector for model approval plus per-use-case approval
 notes, manual ratings, generated blockers, warnings, and required controls.
+The `Rankings` view keeps benchmark comparison separate from manual review. It
+can show weighted use-case rankings from `/api/rankings` or raw benchmark
+leaderboards from the loaded score data. Ranking lanes stay model-role aware:
+generator use cases rank generator models, retrieval embeddings rank embedding
+models, and retrieval reranking ranks reranker models.
 The model table `Release` column shows the best available release indicator:
 trusted source release date first, then proxy dates such as Hugging Face
 repository creation, OpenRouter addition, or local catalog discovery when an
@@ -190,6 +195,10 @@ activity, or edit notes and manual decisions. Change `Manual rating` and
 use-case `Approval` in `Notes`, then save. For many models, filter first, use
 `Select all filtered` when needed, and apply the bulk recommendation or approval
 action to the exact selected model IDs.
+In `Rankings`, select a use-case ranking or a benchmark leaderboard, then select
+a ranked row to inspect score, coverage, missing evidence, and raw benchmark
+details. Ranking evidence is read-only; use the review tabs for approval and
+recommendation decisions.
 Use `Restricted` for limited-audience access decisions and record who may use
 the model in the recommendation notes.
 Use `Effective recommendation` to filter the final status shown in exports and

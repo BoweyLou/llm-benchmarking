@@ -50,6 +50,10 @@
       letter-spacing: 0;
     }
 
+    [hidden] {
+      display: none !important;
+    }
+
     button {
       cursor: pointer;
     }
@@ -418,6 +422,79 @@
       font-size: 12px;
     }
 
+    .rankings-toolbar {
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) minmax(220px, 1fr) auto;
+      align-items: end;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .rankings-toolbar label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .segmented {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #f8fafc;
+    }
+
+    .segment {
+      height: 28px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: #384455;
+      font-weight: 650;
+    }
+
+    .segment.active {
+      background: #fff;
+      color: var(--blue);
+      box-shadow: 0 1px 3px rgba(17, 24, 39, 0.12);
+    }
+
+    .ranking-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-muted);
+    }
+
+    .score-bar {
+      display: grid;
+      grid-template-columns: minmax(34px, auto) 1fr;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .score-track {
+      height: 7px;
+      border-radius: 999px;
+      background: #e6eaf0;
+      overflow: hidden;
+    }
+
+    .score-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--blue);
+    }
+
     .table-wrap {
       overflow: auto;
       min-height: 0;
@@ -758,6 +835,22 @@
     .list-stack {
       display: grid;
       gap: 8px;
+    }
+
+    .breakdown-row {
+      display: grid;
+      grid-template-columns: minmax(110px, 1fr) 62px 72px 56px;
+      gap: 8px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      font-size: 12px;
+    }
+
+    .breakdown-row strong {
+      font-size: 13px;
     }
 
     .activity-row {
@@ -1185,7 +1278,7 @@
               <button class="btn small" id="selectAllFiltered">Select all filtered</button>
               <button class="linkish" id="clearSelection">Clear selection</button>
             </div>
-            <div class="table-actions">
+            <div class="table-actions" id="tableActions">
               <select class="select" id="groupBy" style="width: 150px">
                 <option value="">Group by: None</option>
                 <option value="family">Group by: Family</option>
@@ -1200,7 +1293,7 @@
               <button class="btn small" id="columnsButton">Columns</button>
             </div>
           </div>
-          <div class="bulkbar">
+          <div class="bulkbar" id="bulkbar">
             <div class="bulk-actions">
               <strong id="bulkTarget">0 selected</strong>
               <button class="btn green" data-action="approve_model">Approve model</button>
@@ -1279,6 +1372,7 @@
   <script>
     const state = {
       catalog: null,
+      benchmarks: [],
       tab: "all",
       filters: {
         search: "",
@@ -1306,12 +1400,21 @@
         logId: null,
         pollTimer: null,
         polling: false
+      },
+      rankings: {
+        mode: "use_case",
+        useCaseId: "",
+        benchmarkId: "",
+        cache: {},
+        loadingUseCaseId: "",
+        error: ""
       }
     };
 
     const tabs = [
       ["all", "All models"],
       ["usecase", "Use-case review"],
+      ["rankings", "Rankings"],
       ["families", "Families"],
       ["needs", "Needs decision"],
       ["deprecated", "Deprecated"]
@@ -1338,6 +1441,8 @@
       inspectorTabs: document.getElementById("inspectorTabs"),
       inspectorHead: document.getElementById("inspectorHead"),
       inspectorBody: document.getElementById("inspectorBody"),
+      tableActions: document.getElementById("tableActions"),
+      bulkbar: document.getElementById("bulkbar"),
       modelCount: document.getElementById("modelCount"),
       selectedCount: document.getElementById("selectedCount"),
       activeUseCaseLabel: document.getElementById("activeUseCaseLabel"),
@@ -1385,14 +1490,31 @@
 
     async function loadCatalog() {
       els.lastSynced.textContent = "Loading catalog...";
-      state.catalog = await request("/api/review/catalog", { method: "GET" });
+      const [catalog, benchmarks] = await Promise.all([
+        request("/api/review/catalog", { method: "GET" }),
+        request("/api/benchmarks", { method: "GET" })
+      ]);
+      state.catalog = catalog;
+      state.benchmarks = benchmarks;
       if (!state.activeUseCaseId) {
         state.activeUseCaseId = (state.catalog.use_cases[0] || {}).id || "";
       }
+      initialiseRankingDefaults();
       populateFilters();
       ensureActiveModel();
       render();
       els.lastSynced.textContent = `Last synced: ${new Date(state.catalog.generated_at).toLocaleTimeString()}`;
+    }
+
+    function initialiseRankingDefaults() {
+      const useCases = rankingUseCases();
+      if (!state.rankings.useCaseId || !useCases.some((item) => item.id === state.rankings.useCaseId)) {
+        state.rankings.useCaseId = (useCases.find((item) => item.id === state.activeUseCaseId) || useCases[0] || {}).id || "";
+      }
+      const benchmarkOptions = benchmarkLeaderboardOptions();
+      if (!state.rankings.benchmarkId || !benchmarkOptions.some((item) => item.id === state.rankings.benchmarkId)) {
+        state.rankings.benchmarkId = (benchmarkOptions.find((item) => item.id === "mteb_retrieval") || benchmarkOptions[0] || {}).id || "";
+      }
     }
 
     async function startUpdateRun() {
@@ -1735,6 +1857,18 @@
     function render() {
       const models = filteredModels();
       renderTabs(models);
+      if (state.tab === "rankings") {
+        const rows = rankingRows();
+        renderRankingCounts(rows);
+        renderRankingsView(rows);
+        ensureActiveRankingModel(rows);
+        renderInspector();
+        ensureRankingData().catch((error) => {
+          state.rankings.error = error.message;
+          render();
+        });
+        return;
+      }
       renderCounts(models);
       if (state.tab === "families") {
         renderFamilies(models);
@@ -1749,6 +1883,7 @@
       const counts = {
         all: state.catalog.summary.model_count,
         usecase: models.length,
+        rankings: rankingRows().length,
         families: state.catalog.summary.family_count,
         needs: state.catalog.summary.needs_decision_count,
         deprecated: state.catalog.summary.deprecated_count
@@ -1759,6 +1894,10 @@
     }
 
     function renderCounts(models) {
+      els.tableActions.hidden = false;
+      els.bulkbar.hidden = false;
+      els.selectAllFiltered.hidden = false;
+      document.getElementById("clearSelection").hidden = false;
       const selectedCount = state.selected.size;
       const targetCount = selectedCount || models.length;
       els.modelCount.textContent = `${models.length} models`;
@@ -1774,6 +1913,337 @@
         : null;
       els.activeUseCaseLabel.textContent = useCase ? `Use case: ${useCase.label}` : "Use case: All";
       document.getElementById("applyFiltered").textContent = `Select all filtered (${models.length})`;
+    }
+
+    function renderRankingCounts(rows) {
+      els.tableActions.hidden = true;
+      els.bulkbar.hidden = true;
+      els.selectAllFiltered.hidden = true;
+      document.getElementById("clearSelection").hidden = true;
+      els.modelCount.textContent = `${rows.length} ranked`;
+      els.selectedCount.textContent = state.rankings.mode === "benchmark" ? "Benchmark leaderboard" : "Use-case ranking";
+      els.activeUseCaseLabel.textContent = rankingContextLabel();
+      els.showingCount.textContent = `Showing ${rows.length} ranked rows`;
+      els.pageLabel.textContent = rows.length ? `1-${Math.min(state.pageSize, rows.length)} of ${rows.length}` : "No ranked rows";
+      document.getElementById("applyFiltered").textContent = "Select all filtered";
+    }
+
+    function renderRankingsView(rows) {
+      const totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
+      if (state.page > totalPages) state.page = totalPages;
+      const start = (state.page - 1) * state.pageSize;
+      const pageRows = rows.slice(start, start + state.pageSize);
+      els.pageLabel.textContent = rows.length
+        ? `${start + 1}-${Math.min(start + state.pageSize, rows.length)} of ${rows.length}`
+        : "No ranked rows";
+      els.mainTable.innerHTML = `
+        <div class="rankings-toolbar">
+          <div class="segmented" role="tablist" aria-label="Ranking mode">
+            <button class="segment ${state.rankings.mode === "use_case" ? "active" : ""}" data-ranking-mode="use_case">Use-case ranking</button>
+            <button class="segment ${state.rankings.mode === "benchmark" ? "active" : ""}" data-ranking-mode="benchmark">Benchmark leaderboard</button>
+          </div>
+          ${state.rankings.mode === "benchmark" ? renderBenchmarkSelect() : renderRankingUseCaseSelect()}
+          <button class="btn small" id="refreshRanking">Refresh ranking</button>
+        </div>
+        ${renderRankingSummary(rows)}
+        ${pageRows.length ? renderRankingTable(pageRows) : renderRankingEmpty()}`;
+    }
+
+    function renderRankingUseCaseSelect() {
+      return `<label>Use case
+        <select class="select" id="rankingUseCaseSelect">
+          ${rankingUseCases().map((useCase) => {
+            const roles = (useCase.model_roles || ["generator"]).join(", ");
+            return `<option value="${escapeAttr(useCase.id)}" ${useCase.id === state.rankings.useCaseId ? "selected" : ""}>${escapeHtml(useCase.label)} - ${escapeHtml(roles)}</option>`;
+          }).join("")}
+        </select>
+      </label>`;
+    }
+
+    function renderBenchmarkSelect() {
+      const counts = benchmarkScoreCounts();
+      return `<label>Benchmark
+        <select class="select" id="rankingBenchmarkSelect">
+          ${benchmarkLeaderboardOptions().map((benchmark) => {
+            const count = counts[benchmark.id] || 0;
+            return `<option value="${escapeAttr(benchmark.id)}" ${benchmark.id === state.rankings.benchmarkId ? "selected" : ""}>${escapeHtml(benchmark.short || benchmark.name || benchmark.id)} (${count})</option>`;
+          }).join("")}
+        </select>
+      </label>`;
+    }
+
+    function renderRankingSummary(rows) {
+      const useCase = activeRankingUseCase();
+      const benchmark = activeBenchmark();
+      const details = state.rankings.mode === "benchmark"
+        ? [
+            `Benchmark: ${benchmarkLabel(state.rankings.benchmarkId)}`,
+            `Direction: ${benchmarkHigherIsBetter(benchmark) ? "higher is better" : "lower is better"}`,
+            `Compatible roles: ${benchmarkCompatibleRoles(state.rankings.benchmarkId).join(", ")}`
+          ]
+        : [
+            `Use case: ${(useCase && useCase.label) || state.rankings.useCaseId || "-"}`,
+            `Roles: ${((useCase && useCase.model_roles) || ["generator"]).join(", ")}`,
+            `Required: ${((useCase && useCase.required_benchmarks) || []).join(", ") || "none"}`
+          ];
+      if (state.rankings.mode === "use_case" && state.rankings.loadingUseCaseId) details.push("Loading ranking...");
+      if (state.rankings.error) details.push(`Error: ${state.rankings.error}`);
+      details.push(`${rows.length} ranked rows after filters`);
+      return `<div class="ranking-summary">${details.map((item) => badge(item, state.rankings.error ? "red" : "gray")).join("")}</div>`;
+    }
+
+    function renderRankingTable(rows) {
+      return `
+        <table>
+          <colgroup>
+            <col style="width: 48px">
+            <col style="width: 172px">
+            <col style="width: 86px">
+            <col style="width: 74px">
+            <col style="width: 92px">
+            <col style="width: 82px">
+            <col style="width: 86px">
+            <col style="width: 210px">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Model</th>
+              <th>Provider</th>
+              <th>Roles</th>
+              <th>Score</th>
+              <th>${state.rankings.mode === "benchmark" ? "Metric" : "Coverage"}</th>
+              <th>Release</th>
+              <th>Evidence</th>
+            </tr>
+          </thead>
+          <tbody>${rows.map(renderRankingRow).join("")}</tbody>
+        </table>`;
+    }
+
+    function renderRankingRow(row) {
+      const model = row.localModel || row.model || {};
+      const releaseInfo = modelReleaseInfo(model);
+      const evidence = row.type === "benchmark"
+        ? `${benchmarkLabel(row.benchmark_id)} ${row.verified ? "verified" : "unverified"}`
+        : `${(row.breakdown || []).length} benchmarks${row.missing_benchmarks && row.missing_benchmarks.length ? `, ${row.missing_benchmarks.length} missing` : ""}`;
+      const scoreLabel = row.type === "benchmark" ? formatNumber(row.raw_value) : formatNumber(row.score);
+      const secondaryLabel = row.type === "benchmark" ? (row.metric || "-") : formatPercent(row.coverage);
+      return `<tr class="${state.activeModelId === model.id ? "selected" : ""}" data-model-id="${escapeAttr(model.id)}">
+        <td><strong>${escapeHtml(row.rank)}</strong></td>
+        <td><div class="model-name">${escapeHtml(model.name || row.model.name || "")}</div><div class="subtle">${escapeHtml(model.id || row.model.id || "")}</div></td>
+        <td>${escapeHtml(model.provider || row.model.provider || "")}</td>
+        <td><span class="subtle">${escapeHtml((model.model_roles || row.model.model_roles || []).join(", "))}</span></td>
+        <td>${scoreBar(scoreLabel, row.type === "benchmark" ? row.normalised : row.score)}</td>
+        <td><span class="subtle">${escapeHtml(secondaryLabel)}</span></td>
+        <td><div class="release-cell" title="${escapeAttr(releaseInfo.title)}"><span class="release-date">${escapeHtml(releaseInfo.label)}</span><span class="release-basis">${escapeHtml(releaseInfo.basisLabel)}</span></div></td>
+        <td><span class="subtle" title="${escapeAttr(evidence)}">${escapeHtml(evidence)}</span></td>
+      </tr>`;
+    }
+
+    function renderRankingEmpty() {
+      if (state.rankings.loadingUseCaseId) return `<div class="empty">Loading ranking evidence...</div>`;
+      return `<div class="empty">No ranked models match the current ranking and filters.</div>`;
+    }
+
+    function scoreBar(label, score) {
+      const width = Math.max(0, Math.min(100, Number(score || 0)));
+      return `<div class="score-bar"><strong>${escapeHtml(label)}</strong><span class="score-track"><span class="score-fill" style="width:${width}%"></span></span></div>`;
+    }
+
+    function rankingRows() {
+      return state.rankings.mode === "benchmark" ? benchmarkRankingRows() : useCaseRankingRows();
+    }
+
+    function useCaseRankingRows() {
+      const useCaseId = state.rankings.useCaseId;
+      const payload = useCaseId ? state.rankings.cache[useCaseId] : null;
+      if (!payload || !Array.isArray(payload.rankings)) return [];
+      const allowedIds = new Set(rankingFilteredModels().flatMap(rankingModelKeys));
+      return payload.rankings
+        .map((row) => {
+          const localModel = modelByRankingId((row.model || {}).id);
+          return { ...row, type: "use_case", localModel: localModel || row.model };
+        })
+        .filter((row) => {
+          const rankingId = (row.model || {}).id;
+          const localModel = row.localModel || {};
+          return localModel && (allowedIds.has(rankingId) || rankingModelKeys(localModel).some((id) => allowedIds.has(id)));
+        });
+    }
+
+    function benchmarkRankingRows() {
+      const benchmark = activeBenchmark();
+      if (!benchmark) return [];
+      const benchmarkId = benchmark.id;
+      const compatibleRoles = benchmarkCompatibleRoles(benchmarkId);
+      const higherIsBetter = benchmarkHigherIsBetter(benchmark);
+      const rows = rankingFilteredModels()
+        .filter((model) => modelMatchesAnyRole(model, compatibleRoles))
+        .map((model) => {
+          const score = (model.scores || {})[benchmarkId];
+          if (!score || score.value === null || score.value === undefined) return null;
+          return {
+            type: "benchmark",
+            rank: 0,
+            model,
+            localModel: model,
+            benchmark_id: benchmarkId,
+            raw_value: Number(score.value),
+            normalised: 0,
+            metric: benchmark.metric || "",
+            source_type: score.source_type || "primary",
+            verified: Boolean(score.verified),
+            notes: score.notes || "",
+            collected_at: score.collected_at || "",
+            source_url: score.source_url || ""
+          };
+        })
+        .filter(Boolean);
+      const values = rows.map((row) => row.raw_value);
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      rows.forEach((row) => {
+        row.normalised = max === min ? 75 : normaliseRawScore(row.raw_value, min, max, higherIsBetter);
+      });
+      rows.sort((a, b) => {
+        const diff = higherIsBetter ? b.raw_value - a.raw_value : a.raw_value - b.raw_value;
+        return diff || String(a.model.name).localeCompare(String(b.model.name), undefined, { sensitivity: "base" });
+      });
+      rows.forEach((row, index) => {
+        row.rank = index + 1;
+      });
+      return rows;
+    }
+
+    function rankingUseCases() {
+      return (state.catalog.use_cases || []).filter((useCase) => useCase.weights && Object.keys(useCase.weights).length);
+    }
+
+    function activeRankingUseCase() {
+      return rankingUseCases().find((useCase) => useCase.id === state.rankings.useCaseId) || null;
+    }
+
+    function activeBenchmark() {
+      return (state.benchmarks || []).find((benchmark) => benchmark.id === state.rankings.benchmarkId) || null;
+    }
+
+    function benchmarkById(benchmarkId) {
+      return (state.benchmarks || []).find((benchmark) => benchmark.id === benchmarkId) || null;
+    }
+
+    function benchmarkLabel(benchmarkId) {
+      const benchmark = benchmarkById(benchmarkId) || {};
+      return benchmark.short || benchmark.name || benchmarkId || "-";
+    }
+
+    function benchmarkScoreCounts() {
+      const counts = {};
+      (state.catalog.models || []).forEach((model) => {
+        Object.entries(model.scores || {}).forEach(([benchmarkId, score]) => {
+          if (score && score.value !== null && score.value !== undefined) counts[benchmarkId] = (counts[benchmarkId] || 0) + 1;
+        });
+      });
+      return counts;
+    }
+
+    function benchmarkLeaderboardOptions() {
+      const counts = benchmarkScoreCounts();
+      return (state.benchmarks || [])
+        .filter((benchmark) => counts[benchmark.id] > 0)
+        .sort((a, b) => String(a.category || "").localeCompare(String(b.category || "")) || String(a.short || a.name || a.id).localeCompare(String(b.short || b.name || b.id)));
+    }
+
+    function benchmarkCompatibleRoles(benchmarkId) {
+      if (benchmarkId === "mteb_reranking") return ["reranker"];
+      if (benchmarkId === "mteb_retrieval_reranking") return ["embedding", "reranker"];
+      if (benchmarkId === "mteb_retrieval" || benchmarkId === "rteb_finance") return ["embedding"];
+      return ["generator"];
+    }
+
+    function rankingFilteredModels() {
+      if (!state.catalog) return [];
+      const q = state.filters.search.toLowerCase();
+      return state.catalog.models.filter((model) => {
+        const haystack = [
+          model.name,
+          model.id,
+          model.provider,
+          model.family_name,
+          model.family_id,
+          ...countryLabelsFor(model),
+          ...hyperscalerValuesFor(model)
+        ].join(" ").toLowerCase();
+        if (q && !haystack.includes(q)) return false;
+        if (state.filters.provider && model.provider !== state.filters.provider) return false;
+        if (state.filters.country && !countryValuesFor(model).includes(state.filters.country)) return false;
+        if (state.filters.hyperscaler && !hyperscalerMatches(model, state.filters.hyperscaler)) return false;
+        if (state.filters.family && model.family_id !== state.filters.family) return false;
+        if (state.filters.catalogStatus && model.catalog_status !== state.filters.catalogStatus) return false;
+        if (state.filters.role && !(model.model_roles || []).includes(state.filters.role)) return false;
+        if (state.filters.smallOnly && !model.small_model_candidate) return false;
+        if (state.filters.generalApproval && generalApprovalStatus(model) !== state.filters.generalApproval) return false;
+        return true;
+      });
+    }
+
+    function modelMatchesAnyRole(model, roles) {
+      if (!roles.length) return true;
+      return (model.model_roles || ["generator"]).some((role) => roles.includes(role));
+    }
+
+    function modelById(modelId) {
+      return (state.catalog.models || []).find((model) => model.id === modelId) || null;
+    }
+
+    function modelByRankingId(modelId) {
+      return (state.catalog.models || []).find((model) => rankingModelKeys(model).includes(modelId)) || null;
+    }
+
+    function rankingModelKeys(model) {
+      return [model.id, model.canonical_model_id, model.family_id]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean);
+    }
+
+    function normaliseRawScore(rawValue, min, max, higherIsBetter) {
+      if (max === min) return 75;
+      const scaled = (rawValue - min) / (max - min) * 100;
+      const score = higherIsBetter ? scaled : 100 - scaled;
+      return Math.max(0, Math.min(100, score));
+    }
+
+    function benchmarkHigherIsBetter(benchmark) {
+      if (!benchmark) return true;
+      return !(benchmark.higher_is_better === false || benchmark.higher_is_better === 0);
+    }
+
+    async function ensureRankingData() {
+      if (state.rankings.mode !== "use_case") return;
+      const useCaseId = state.rankings.useCaseId;
+      if (!useCaseId || state.rankings.cache[useCaseId] || state.rankings.loadingUseCaseId === useCaseId) return;
+      state.rankings.error = "";
+      state.rankings.loadingUseCaseId = useCaseId;
+      renderRankingsView(rankingRows());
+      try {
+        state.rankings.cache[useCaseId] = await request(`/api/rankings?use_case=${encodeURIComponent(useCaseId)}`, { method: "GET" });
+      } finally {
+        state.rankings.loadingUseCaseId = "";
+      }
+      render();
+    }
+
+    function rankingContextLabel() {
+      if (state.rankings.mode === "benchmark") return `Benchmark: ${benchmarkLabel(state.rankings.benchmarkId)}`;
+      const useCase = activeRankingUseCase();
+      return `Ranking: ${(useCase && useCase.label) || state.rankings.useCaseId || "-"}`;
+    }
+
+    function ensureActiveRankingModel(rows) {
+      if (!rows.length) return;
+      if (!state.activeModelId || !rows.some((row) => (row.localModel || row.model || {}).id === state.activeModelId)) {
+        state.activeModelId = (rows[0].localModel || rows[0].model || {}).id || null;
+      }
     }
 
     function renderTable(models) {
@@ -1899,11 +2369,12 @@
 
     function renderInspector() {
       const model = activeModel();
+      els.inspectorTabs.hidden = state.tab === "rankings";
       renderInspectorTabState();
       if (!model) {
         els.inspectorHead.innerHTML = `<h2>No model selected</h2><p class="subtle">Adjust filters to show models.</p>`;
         els.inspectorBody.innerHTML = "";
-        setInspectorFooter(false, "Select a model to review.");
+        setInspectorFooter(false, state.tab === "rankings" ? "Select a ranked model to inspect evidence." : "Select a model to review.");
         return;
       }
       const approvals = model.use_case_approvals || {};
@@ -1927,6 +2398,11 @@
           <div><span>Context window</span>${escapeHtml(model.context_window || model.context_window_tokens || "-")}</div>
           <div><span>Data residency</span>${escapeHtml((model.inference_summary && (model.inference_summary.platform_names || []).join(", ")) || "-")}</div>
         </div>`;
+      if (state.tab === "rankings") {
+        els.inspectorBody.innerHTML = renderRankingInspector(model);
+        setInspectorFooter(false, "Ranking evidence is read-only. Use review tabs for decisions.");
+        return;
+      }
       if (state.inspectorTab === "controls") {
         els.inspectorBody.innerHTML = renderControlsPanel(activeUseCaseId, activeApproval);
         setInspectorFooter(false, `Viewing controls for ${activeUseCaseLabel}.`);
@@ -1942,6 +2418,71 @@
         els.inspectorBody.innerHTML = renderUseCasesPanel(model, approvals, activeUseCaseId);
         setInspectorFooter(false, `Select a use case, then switch to Notes to edit ${activeUseCaseLabel}.`);
       }
+    }
+
+    function renderRankingInspector(model) {
+      const row = rankingRows().find((item) => ((item.localModel || item.model || {}).id === model.id));
+      if (!row) return `<div class="empty">This model is not ranked in the current ranking view.</div>`;
+      if (row.type === "benchmark") return renderBenchmarkRankingInspector(row);
+      return renderUseCaseRankingInspector(row);
+    }
+
+    function renderUseCaseRankingInspector(row) {
+      const useCase = activeRankingUseCase() || {};
+      return `
+        <div class="inspector-panel">
+          <h3>${escapeHtml(useCase.label || state.rankings.useCaseId || "Use-case ranking")}</h3>
+          <div class="meta-grid">
+            <div><span>Rank</span>${escapeHtml(row.rank)}</div>
+            <div><span>Weighted score</span>${escapeHtml(formatNumber(row.score))}</div>
+            <div><span>Coverage</span>${escapeHtml(formatPercent(row.coverage))}</div>
+            <div><span>Roles</span>${escapeHtml(((useCase.model_roles || ["generator"]).join(", ")))}</div>
+          </div>
+        </div>
+        <div class="inspector-panel">
+          <h3>Benchmark breakdown</h3>
+          <div class="list-stack">
+            ${(row.breakdown || []).map((item) => renderBreakdownRow(item)).join("") || '<div class="empty">No benchmark evidence for this model in the selected use case.</div>'}
+          </div>
+        </div>
+        <div class="inspector-panel">
+          <h3>Missing evidence</h3>
+          <div class="subtle">${escapeHtml((row.missing_benchmarks || []).map(benchmarkLabel).join(", ") || "None")}</div>
+        </div>`;
+    }
+
+    function renderBenchmarkRankingInspector(row) {
+      const benchmark = benchmarkById(row.benchmark_id) || {};
+      return `
+        <div class="inspector-panel">
+          <h3>${escapeHtml(benchmarkLabel(row.benchmark_id))}</h3>
+          <div class="meta-grid">
+            <div><span>Rank</span>${escapeHtml(row.rank)}</div>
+            <div><span>Raw score</span>${escapeHtml(formatNumber(row.raw_value))}</div>
+            <div><span>Metric</span>${escapeHtml(row.metric || benchmark.metric || "-")}</div>
+            <div><span>Direction</span>${escapeHtml(benchmarkHigherIsBetter(benchmark) ? "Higher is better" : "Lower is better")}</div>
+            <div><span>Source type</span>${escapeHtml(row.source_type || "-")}</div>
+            <div><span>Verified</span>${escapeHtml(row.verified ? "Yes" : "No")}</div>
+          </div>
+        </div>
+        <div class="inspector-panel">
+          <h3>Score notes</h3>
+          <p class="subtle">${escapeHtml(row.notes || benchmark.description || "No notes available.")}</p>
+          <div class="activity-row">
+            <strong>Collected</strong>
+            <span>${escapeHtml(formatDateTime(row.collected_at))}</span>
+            <span class="subtle">${escapeHtml(row.source_url || benchmark.url || "")}</span>
+          </div>
+        </div>`;
+    }
+
+    function renderBreakdownRow(item) {
+      return `<div class="breakdown-row">
+        <div><strong>${escapeHtml(benchmarkLabel(item.benchmark_id))}</strong><div class="subtle">${escapeHtml(item.metric || "")}</div></div>
+        <span>${escapeHtml(formatNumber(item.raw_value))}</span>
+        <span>${escapeHtml(formatNumber(item.normalised))}</span>
+        <span>${escapeHtml(formatPercent(item.weight))}</span>
+      </div>`;
     }
 
     function renderInspectorTabState() {
@@ -2448,6 +2989,18 @@
       return "gray";
     }
 
+    function formatNumber(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "-";
+      return number.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    }
+
+    function formatPercent(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "-";
+      return `${Math.round(number * 100)}%`;
+    }
+
     function formatDateTime(value) {
       if (!value) return "-";
       const date = new Date(value);
@@ -2637,6 +3190,23 @@
         renderInspector();
       });
       els.mainTable.addEventListener("click", (event) => {
+        const rankingMode = event.target.closest("[data-ranking-mode]");
+        if (rankingMode) {
+          state.rankings.mode = rankingMode.dataset.rankingMode;
+          state.rankings.error = "";
+          state.page = 1;
+          render();
+          return;
+        }
+        const refreshRanking = event.target.closest("#refreshRanking");
+        if (refreshRanking) {
+          if (state.rankings.mode === "use_case" && state.rankings.useCaseId) {
+            delete state.rankings.cache[state.rankings.useCaseId];
+          }
+          state.rankings.error = "";
+          render();
+          return;
+        }
         const sort = event.target.closest("[data-sort]");
         if (sort) {
           const key = sort.dataset.sort;
@@ -2676,6 +3246,24 @@
         const row = event.target.closest("tr[data-model-id]");
         if (row) {
           state.activeModelId = row.dataset.modelId;
+          render();
+        }
+      });
+      els.mainTable.addEventListener("change", (event) => {
+        const rankingUseCase = event.target.closest("#rankingUseCaseSelect");
+        if (rankingUseCase) {
+          state.rankings.useCaseId = rankingUseCase.value;
+          state.activeUseCaseId = rankingUseCase.value;
+          state.rankings.error = "";
+          state.page = 1;
+          render();
+          return;
+        }
+        const rankingBenchmark = event.target.closest("#rankingBenchmarkSelect");
+        if (rankingBenchmark) {
+          state.rankings.benchmarkId = rankingBenchmark.value;
+          state.rankings.error = "";
+          state.page = 1;
           render();
         }
       });

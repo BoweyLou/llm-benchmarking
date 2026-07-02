@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-058: P2 Add role-aware benchmark rankings to review workbench
+  - Source: Human approval 2026-07-02 after planning benchmark ranking views for generative, embedding, and reranker models.
+  - Problem: reviewers needed benchmark rankings somewhere in the interactive workbench, but a single mixed leaderboard would incorrectly compare embeddings, rerankers, and generative models.
+  - Scope: add a `Rankings` view to `/review`, use existing `/api/rankings` for weighted use-case rankings, build raw benchmark leaderboards from loaded score data and `/api/benchmarks`, keep benchmark compatibility role-aware, and show ranking evidence in the right inspector.
+  - Acceptance: reviewers can switch between use-case ranking and benchmark leaderboard modes, inspect score/coverage/breakdown/missing evidence, and see embedding/reranker rankings separated from generator rankings.
+  - Validation: static workbench coverage, JavaScript syntax check, focused review-workbench tests, rendered local browser smoke, docs/version checks, and live Proxmox redeploy.
+  - Completed: 2026-07-02. The review workbench now includes role-aware ranking and benchmark leaderboard views.
+
 - [x] LBM-057: P2 Show release-date evidence in review table
   - Source: Human request 2026-07-02 while triaging models in the banking review workbench.
   - Problem: the model table showed use-case approval update time, but reviewers needed the release date or best available indication of model age when comparing listings.
