@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-042: P1 Split bulk approval clearing from recommendation clearing in the review workbench
+  - Source: Human bug report 2026-07-02 after a bulk clear operation appeared to sync but approved rows remained approved after reload.
+  - Problem: the frontend `Clear` bulk action only sent `recommendation_status=unrated`; it did not send `approved_for_use=false`, so the API correctly saved a recommendation clear while leaving approval state unchanged.
+  - Scope: add explicit `Not approved` bulk action, rename ambiguous `Clear` to `Clear rating`, preserve existing clear-rating behavior, add API regression coverage for `approved_for_use=false`, update README/backlog/changelog, redeploy Proxmox workbench, and verify live HTML.
+  - Acceptance: reviewers can bulk clear approval state with `Not approved`; `Clear rating` only clears manual recommendation; false approval writes persist through the review API.
+  - Validation: targeted review tests, full backend suite, docs/version checks, inline script parse, live Proxmox HTML check, and service health check.
+  - Completed: 2026-07-02. Bulk approval clearing is now a distinct action and the ambiguous clear label is removed.
+
 - [x] LBM-041: P2 Make all-filtered selection explicit for review bulk operations
   - Source: Human request 2026-07-02 after using bulk operations in the review workbench.
   - Problem: the page checkbox selected only the visible 50 rows, making it unclear how to bulk-apply a decision to every row matching the current filters.

@@ -116,6 +116,34 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertEqual({row["approved_for_use"] for row in approval_rows}, {1})
         self.assertEqual({row["catalog_status"] for row in model_rows}, {"deprecated"})
 
+    def test_review_decision_route_can_clear_approval_boolean(self) -> None:
+        os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
+        self._insert_review_model("unapprove-model")
+        review_workbench.apply_review_decisions(
+            model_ids=["unapprove-model"],
+            use_case_ids=["customer_support"],
+            approved_for_use=True,
+            recommendation_status="recommended",
+        )
+
+        with patch("backend.main.bootstrap"):
+            response = TestClient(main.app).post(
+                "/api/review/decisions",
+                json={
+                    "model_ids": ["unapprove-model"],
+                    "use_case_ids": ["customer_support"],
+                    "approved_for_use": False,
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["updated_count"], 1)
+        model = next(model for model in update_engine.list_models() if model["id"] == "unapprove-model")
+        approval = model["use_case_approvals"]["customer_support"]
+        self.assertFalse(approval["approved_for_use"])
+        self.assertEqual(approval["recommendation_status"], "recommended")
+
     def test_add_model_route_creates_manual_listing(self) -> None:
         os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
 

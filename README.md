@@ -147,6 +147,9 @@ Bulk review actions can target the current visible page with the table checkbox
 or the full filtered result set with `Select all filtered`. Selecting all
 filtered rows replaces the current selection with the exact filtered model IDs
 before a bulk action is saved.
+Use `Not approved` to clear approval state in bulk. Use `Clear rating` only when
+you want to reset the manual recommendation rating to `unrated` while leaving
+approval state unchanged.
 
 To run the workbench on the Proxmox tailnet host, use the deploy script:
 

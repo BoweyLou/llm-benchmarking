@@ -848,11 +848,12 @@
             <div class="bulk-actions">
               <strong id="bulkTarget">0 selected</strong>
               <button class="btn green" data-action="approve">Approve</button>
+              <button class="btn orange" data-action="not_approved">Not approved</button>
               <button class="btn green" data-action="recommended">Recommended</button>
               <button class="btn orange" data-action="not_recommended">Not recommended</button>
               <button class="btn red" data-action="discouraged">Discouraged</button>
               <button class="btn purple" data-action="deprecated">Deprecate</button>
-              <button class="btn" data-action="clear">Clear</button>
+              <button class="btn" data-action="clear">Clear rating</button>
             </div>
             <div class="bulk-note">
               <span id="bulkScope">Actions apply to selected rows. If none are selected, they apply to the filtered list.</span>
@@ -1369,15 +1370,28 @@
       const useCaseId = state.filters.useCase || state.activeUseCaseId || (state.catalog.use_cases[0] || {}).id;
       const payload = { model_ids: modelIds, use_case_ids: useCaseId ? [useCaseId] : [] };
       if (action === "approve") payload.approved_for_use = true;
+      if (action === "not_approved") payload.approved_for_use = false;
       if (action === "recommended") payload.recommendation_status = "recommended";
       if (action === "not_recommended") payload.recommendation_status = "not_recommended";
       if (action === "discouraged") payload.recommendation_status = "discouraged";
       if (action === "clear") payload.recommendation_status = "unrated";
       if (action === "deprecated") payload.catalog_status = "deprecated";
       await request("/api/review/decisions", { method: "POST", body: JSON.stringify(payload) });
-      toast(`Saved ${action.replace("_", " ")} for ${modelIds.length} models`);
+      toast(`Saved ${bulkActionLabel(action)} for ${modelIds.length} models`);
       state.selected.clear();
       await loadCatalog();
+    }
+
+    function bulkActionLabel(action) {
+      return {
+        approve: "approved",
+        not_approved: "not approved",
+        recommended: "recommended",
+        not_recommended: "not recommended",
+        discouraged: "discouraged",
+        deprecated: "deprecated",
+        clear: "clear rating"
+      }[action] || action.replace(/_/g, " ");
     }
 
     async function addModel(form) {
