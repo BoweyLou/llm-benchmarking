@@ -77,6 +77,8 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Run updates", app_response.text)
         self.assertIn("updateProgressPanel", app_response.text)
         self.assertIn("/api/update/status/", app_response.text)
+        self.assertIn("Unreviewed", app_response.text)
+        self.assertIn("general_approval_status", app_response.text)
         self.assertIn('data-inspector-tab="controls"', app_response.text)
         self.assertIn('data-inspector-tab="activity"', app_response.text)
         self.assertIn('data-inspector-tab="notes"', app_response.text)
@@ -94,12 +96,15 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("countries", payload["facets"])
         self.assertTrue(payload["facets"]["countries"])
         self.assertIn("hyperscalers", payload["facets"])
+        general_approval_counts = {item["id"]: item["count"] for item in payload["facets"]["general_approvals"]}
+        self.assertGreaterEqual(general_approval_counts.get("unreviewed", 0), 1)
         hyperscaler_names = {item["name"] for item in payload["facets"]["hyperscalers"]}
         self.assertIn("Any hyperscaler", hyperscaler_names)
         self.assertIn("Azure AI Foundry", hyperscaler_names)
         self.assertIn("No hyperscaler route", hyperscaler_names)
         model = next(model for model in payload["models"] if model["id"] == "catalog-model")
         self.assertFalse(model["general_approved_for_use"])
+        self.assertEqual(model["general_approval_status"], "unreviewed")
         self.assertIn("Azure AI Foundry", model["inference_summary"]["platform_names"])
 
     def test_review_decision_route_requires_admin_token(self) -> None:
@@ -242,6 +247,50 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertTrue(model["general_approved_for_use"])
         self.assertFalse(model["use_case_approvals"]["customer_support"]["approved_for_use"])
 
+    def test_review_model_approval_route_tracks_unreviewed_state(self) -> None:
+        os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
+        self._insert_review_model("triage-model")
+
+        with patch("backend.main.bootstrap"):
+            client = TestClient(main.app)
+            not_approved_response = client.post(
+                "/api/review/model-approvals",
+                json={
+                    "model_ids": ["triage-model"],
+                    "approval_status": "not_approved",
+                    "approval_notes": "Reviewed and rejected for general use.",
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+
+        self.assertEqual(not_approved_response.status_code, 200)
+        self.assertEqual(not_approved_response.json()["approval_status"], "not_approved")
+        model = next(model for model in review_workbench.build_review_catalog()["models"] if model["id"] == "triage-model")
+        self.assertFalse(model["general_approved_for_use"])
+        self.assertEqual(model["general_approval_status"], "not_approved")
+        self.assertIsNotNone(model["general_approval_updated_at"])
+
+        with patch("backend.main.bootstrap"):
+            unreviewed_response = TestClient(main.app).post(
+                "/api/review/model-approvals",
+                json={
+                    "model_ids": ["triage-model"],
+                    "approval_status": "unreviewed",
+                    "approval_notes": "Should be cleared.",
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+
+        self.assertEqual(unreviewed_response.status_code, 200)
+        self.assertEqual(unreviewed_response.json()["approval_status"], "unreviewed")
+        with self.engine.begin() as conn:
+            row = conn.execute(models_table.select().where(models_table.c.id == "triage-model")).mappings().one()
+        self.assertEqual(row["general_approved_for_use"], 0)
+        self.assertIsNone(row["general_approval_notes"])
+        self.assertIsNone(row["general_approval_updated_at"])
+        model = next(model for model in review_workbench.build_review_catalog()["models"] if model["id"] == "triage-model")
+        self.assertEqual(model["general_approval_status"], "unreviewed")
+
     def test_seed_reapply_preserves_general_model_approval(self) -> None:
         review_workbench.apply_model_approvals(
             model_ids=["gpt-5-4"],
@@ -330,6 +379,7 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertEqual(export_response.status_code, 200)
         snapshot = export_response.json()
         self.assertEqual(len(snapshot["model_approvals"]), 1)
+        self.assertEqual(snapshot["model_approvals"][0]["approval_status"], "approved")
 
         second_tempdir = tempfile.TemporaryDirectory()
         second_engine = get_engine(f"sqlite:///{Path(second_tempdir.name) / 'import.sqlite'}")

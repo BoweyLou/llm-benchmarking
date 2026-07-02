@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-056: P2 Add unreviewed general approval triage state
+  - Source: Human request 2026-07-02 while triaging models in the banking review workbench.
+  - Problem: the general approval field only showed approved/not-approved-style states, making it hard to distinguish explicitly rejected models from models that had not been triaged yet.
+  - Scope: add `Unreviewed` to the general approval filter and inspector select, expose `general_approval_status` in the review catalog/browser CSV, save `approval_status=unreviewed` by clearing the general approval timestamp, and preserve approved/not-approved compatibility for existing bulk actions.
+  - Acceptance: reviewers can filter and inspect `Approved`, `Not approved`, and `Unreviewed` general approval states and reset a model to unreviewed from the inspector.
+  - Validation: focused API/UI tests, JavaScript syntax check, rendered local browser smoke, docs/version checks, and live Proxmox redeploy.
+  - Completed: 2026-07-02. General approval now supports explicit unreviewed triage.
+
 - [x] LBM-055: P1 Fix review workbench inspector tabs
   - Source: Human bug report 2026-07-02 while using the banking review workbench.
   - Problem: the right inspector showed `Use cases`, `Controls`, `Activity`, and `Notes` as tabs, but only `Use cases` rendered content and the other labels did not switch panels.

@@ -209,6 +209,7 @@ def api_apply_review_model_approvals(payload: ReviewModelApprovalIn) -> dict[str
         return apply_model_approvals(
             model_ids=payload.model_ids,
             approved_for_use=payload.approved_for_use,
+            approval_status=payload.approval_status,
             approval_notes=payload.approval_notes,
         )
     except ValueError as exc:

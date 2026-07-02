@@ -34,6 +34,8 @@ SNAPSHOT_SCHEMA_VERSION = 1
 def build_review_catalog() -> dict[str, Any]:
     """Return the model catalog plus review-oriented facets for the workbench."""
     models = build_model_metadata_list()
+    for model in models:
+        model["general_approval_status"] = _general_approval_status(model)
     use_cases = update_engine.list_use_cases()
     providers = update_engine.list_providers()
     families = _build_family_summaries(models)
@@ -116,6 +118,7 @@ def apply_model_approvals(
     *,
     model_ids: Iterable[str],
     approved_for_use: bool,
+    approval_status: str | None = None,
     approval_notes: str | None = None,
 ) -> dict[str, Any]:
     """Save model-level general approval without touching use-case decisions."""
@@ -124,16 +127,18 @@ def apply_model_approvals(
         raise ValueError("At least one model id is required.")
     _ensure_models_exist(normalized_model_ids)
 
+    normalized_status = _normalize_general_approval_status(approval_status, approved_for_use=approved_for_use)
     cleaned_notes = _clean_text(approval_notes)
-    updated_at = utc_now_iso()
+    approved_value = 1 if normalized_status == "approved" else 0
+    updated_at = None if normalized_status == "unreviewed" else utc_now_iso()
     with update_engine.ENGINE.begin() as conn:
         result = conn.execute(
             update(models_table)
             .where(models_table.c.active == 1)
             .where(models_table.c.id.in_(normalized_model_ids))
             .values(
-                general_approved_for_use=1 if approved_for_use else 0,
-                general_approval_notes=cleaned_notes,
+                general_approved_for_use=approved_value,
+                general_approval_notes=None if normalized_status == "unreviewed" else cleaned_notes,
                 general_approval_updated_at=updated_at,
             )
         )
@@ -141,7 +146,8 @@ def apply_model_approvals(
     return {
         "model_ids": normalized_model_ids,
         "updated_count": int(result.rowcount or 0),
-        "approved_for_use": bool(approved_for_use),
+        "approved_for_use": normalized_status == "approved",
+        "approval_status": normalized_status,
         "saved_at": updated_at,
     }
 
@@ -225,11 +231,16 @@ def export_review_snapshot() -> dict[str, Any]:
             .order_by(models_table.c.provider.asc(), models_table.c.name.asc()),
         )
 
+    model_approvals = [_row_to_dict(row) for row in model_approval_rows]
+
     return {
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "exported_at": utc_now_iso(),
         "catalog_statuses": [_row_to_dict(row) for row in catalog_status_rows],
-        "model_approvals": [_row_to_dict(row) for row in model_approval_rows],
+        "model_approvals": [
+            {**row, "approval_status": _general_approval_status(row)}
+            for row in model_approvals
+        ],
         "manual_models": [_row_to_dict(row) for row in manual_model_rows],
         "decisions": [_row_to_dict(row) for row in decision_rows],
     }
@@ -317,13 +328,10 @@ def _build_facets(
     no_hyperscaler_model_count = 0
     role_counts: dict[str, int] = {}
     recommendation_counts: dict[str, int] = {}
-    general_approval_counts = {"approved": 0, "not_approved": 0}
+    general_approval_counts = {"approved": 0, "not_approved": 0, "unreviewed": 0}
     approval_counts = {"approved": 0, "not_approved": 0}
     for model in models:
-        if model.get("general_approved_for_use"):
-            general_approval_counts["approved"] += 1
-        else:
-            general_approval_counts["not_approved"] += 1
+        general_approval_counts[_general_approval_status(model)] += 1
         for country in _model_country_entries(model):
             country_id = country["id"]
             country_counts[country_id] = country_counts.get(country_id, 0) + 1
@@ -485,13 +493,23 @@ def _import_model_approvals(rows: Iterable[Any]) -> int:
             model_id = _clean_text(row.get("id"))
             if not model_id or not _model_exists(model_id, conn=conn):
                 continue
+            approval_status = _normalize_general_approval_status(
+                row.get("approval_status"),
+                approved_for_use=bool(row.get("general_approved_for_use")),
+                updated_at=_clean_text(row.get("general_approval_updated_at")),
+                unreviewed_when_missing=True,
+            )
             result = conn.execute(
                 update(models_table)
                 .where(models_table.c.id == model_id)
                 .values(
-                    general_approved_for_use=1 if bool(row.get("general_approved_for_use")) else 0,
-                    general_approval_notes=_clean_text(row.get("general_approval_notes")),
-                    general_approval_updated_at=_clean_text(row.get("general_approval_updated_at")) or utc_now_iso(),
+                    general_approved_for_use=1 if approval_status == "approved" else 0,
+                    general_approval_notes=None
+                    if approval_status == "unreviewed"
+                    else _clean_text(row.get("general_approval_notes")),
+                    general_approval_updated_at=None
+                    if approval_status == "unreviewed"
+                    else (_clean_text(row.get("general_approval_updated_at")) or utc_now_iso()),
                 )
             )
             updated += int(result.rowcount or 0)
@@ -650,6 +668,34 @@ def _clean_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _general_approval_status(model: dict[str, Any]) -> str:
+    if model.get("general_approved_for_use"):
+        return "approved"
+    if _clean_text(model.get("general_approval_updated_at")):
+        return "not_approved"
+    return "unreviewed"
+
+
+def _normalize_general_approval_status(
+    status: Any,
+    *,
+    approved_for_use: bool,
+    updated_at: str | None = None,
+    unreviewed_when_missing: bool = False,
+) -> str:
+    normalized = _clean_text(status)
+    if normalized is None:
+        if approved_for_use:
+            return "approved"
+        if unreviewed_when_missing and not updated_at:
+            return "unreviewed"
+        return "not_approved"
+    normalized = normalized.lower()
+    if normalized not in {"approved", "not_approved", "unreviewed"}:
+        raise ValueError(f"Unsupported general approval status: {status}")
+    return normalized
 
 
 __all__ = [

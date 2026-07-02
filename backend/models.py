@@ -18,6 +18,7 @@ FamilyApprovalScope = Literal["family", "delta"]
 RecommendationStatusIn = Literal["unrated", "recommended", "not_recommended", "discouraged", "restricted"]
 RecommendationStatusOut = Literal["unrated", "recommended", "not_recommended", "discouraged", "restricted", "mixed"]
 CatalogStatusIn = Literal["tracked", "provisional", "deprecated"]
+GeneralApprovalStatusIn = Literal["approved", "not_approved", "unreviewed"]
 UpdateProgressStatus = Literal["pending", "running", "completed", "failed"]
 LicensePolicyClass = Literal["commercial_clear", "potential_legal_review", "commercial_blocked"]
 ProvenancePolicyClass = Literal["standard", "derivative_review", "derivative_unverified"]
@@ -491,6 +492,7 @@ class ReviewDecisionIn(APIModel):
 class ReviewModelApprovalIn(APIModel):
     model_ids: list[str] = Field(default_factory=list)
     approved_for_use: bool = False
+    approval_status: GeneralApprovalStatusIn | None = None
     approval_notes: str | None = None
 
 

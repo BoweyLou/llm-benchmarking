@@ -1080,6 +1080,7 @@
               <option value="">All general approvals</option>
               <option value="approved">Approved</option>
               <option value="not_approved">Not approved</option>
+              <option value="unreviewed">Unreviewed</option>
             </select>
           </div>
           <div class="filter-group">
@@ -1510,6 +1511,19 @@
       select.value = current;
     }
 
+    function generalApprovalStatus(model) {
+      if (model.general_approval_status) return model.general_approval_status;
+      if (model.general_approved_for_use) return "approved";
+      return model.general_approval_updated_at ? "not_approved" : "unreviewed";
+    }
+
+    function generalApprovalClass(model) {
+      const status = generalApprovalStatus(model);
+      if (status === "approved") return "green";
+      if (status === "not_approved") return "red";
+      return "orange";
+    }
+
     function filteredModels() {
       if (!state.catalog) return [];
       let models = state.catalog.models.slice();
@@ -1543,8 +1557,7 @@
         if (state.filters.smallOnly && !model.small_model_candidate) return false;
         if (useCaseId && !approvals[useCaseId]) return false;
         if (state.filters.generalApproval) {
-          const generalApproved = model.general_approved_for_use ? "approved" : "not_approved";
-          if (generalApproved !== state.filters.generalApproval) return false;
+          if (generalApprovalStatus(model) !== state.filters.generalApproval) return false;
         }
         if (useCaseId) {
           if (!approvalMatchesUseCaseFilters(approvals[useCaseId])) return false;
@@ -1575,7 +1588,7 @@
       if (key === "manual") return statusFor(model).manual;
       if (key === "proposed") return statusFor(model).proposed;
       if (key === "approval") return statusFor(model).approved ? "approved" : "not";
-      if (key === "general_approval") return model.general_approved_for_use ? "approved" : "not";
+      if (key === "general_approval") return generalApprovalStatus(model);
       return model[key] || "";
     }
 
@@ -1800,6 +1813,7 @@
     function renderRow(model) {
       const status = statusFor(model);
       const selected = state.selected.has(model.id);
+      const generalStatus = generalApprovalStatus(model);
       return `<tr class="${selected ? "selected" : ""}" data-model-id="${escapeAttr(model.id)}">
         <td><input type="checkbox" class="row-select" data-model-id="${escapeAttr(model.id)}" ${selected ? "checked" : ""}></td>
         <td><div class="model-name">${escapeHtml(model.name)}</div><div class="subtle">${escapeHtml(model.id)}</div></td>
@@ -1807,7 +1821,7 @@
         <td><button class="linkish family-link" data-family-id="${escapeAttr(model.family_id || "")}">${escapeHtml(model.family_name || model.family_id || "")}</button></td>
         <td><span class="subtle">${escapeHtml((model.model_roles || []).join(", "))}</span></td>
         <td>${compactCatalogBadge(model.catalog_status || "tracked", catalogClass(model.catalog_status))}</td>
-        <td>${badge(model.general_approved_for_use ? "Approved" : "Pending", model.general_approved_for_use ? "green" : "orange")}</td>
+        <td>${badge(generalStatus, generalApprovalClass(model))}</td>
         <td>${compactBadge(status.proposed, recommendationClass(status.proposed))}</td>
         <td>${status.manual === "unrated" ? '<span class="subtle">-</span>' : compactBadge(status.manual, recommendationClass(status.manual))}</td>
         <td>${compactBadge(status.effective, recommendationClass(status.effective))}</td>
@@ -1870,6 +1884,7 @@
       const activeApproval = approvals[activeUseCaseId] || {};
       const activeUseCase = state.catalog.use_cases.find((item) => item.id === activeUseCaseId) || {};
       const activeUseCaseLabel = activeUseCase.label || activeUseCaseId || "selected use case";
+      const generalStatus = generalApprovalStatus(model);
       els.inspectorHead.innerHTML = `
         <h2>${escapeHtml(model.name)}</h2>
         <div class="subtle">${escapeHtml(model.id)}</div>
@@ -1877,7 +1892,7 @@
           ${badge(model.provider || "Unknown", "gray")}
           ${badge(`Family: ${model.family_name || model.family_id || "Unknown"}`, "blue")}
           ${badge(`Catalog: ${model.catalog_status || "tracked"}`, catalogClass(model.catalog_status))}
-          ${badge(`General: ${model.general_approved_for_use ? "Approved" : "Pending"}`, model.general_approved_for_use ? "green" : "orange")}
+          ${badge(`General: ${labelStatus(generalStatus)}`, generalApprovalClass(model))}
         </div>
         <div class="meta-grid">
           <div><span>Model type</span>${escapeHtml(model.type || "")}</div>
@@ -1952,7 +1967,7 @@
         {
           title: "General model approval",
           when: model.general_approval_updated_at,
-          detail: model.general_approved_for_use ? "Approved" : "Not approved"
+          detail: labelStatus(generalApprovalStatus(model))
         },
         {
           title: "Use-case approval",
@@ -2012,13 +2027,15 @@
     }
 
     function renderModelApprovalPanel(model) {
+      const status = generalApprovalStatus(model);
       return `
         <div class="model-approval-panel">
           <div class="form-grid">
             <label>General model approval
               <select class="select" id="modelApproval">
-                <option value="approved" ${model.general_approved_for_use ? "selected" : ""}>Approved</option>
-                <option value="not_approved" ${!model.general_approved_for_use ? "selected" : ""}>Not approved</option>
+                <option value="approved" ${status === "approved" ? "selected" : ""}>Approved</option>
+                <option value="not_approved" ${status === "not_approved" ? "selected" : ""}>Not approved</option>
+                <option value="unreviewed" ${status === "unreviewed" ? "selected" : ""}>Unreviewed</option>
               </select>
             </label>
             <label>Last updated
@@ -2118,13 +2135,14 @@
     async function saveModelApproval() {
       const model = activeModel();
       if (!model) return;
-      const approved = document.getElementById("modelApproval").value === "approved";
+      const approvalStatus = document.getElementById("modelApproval").value;
       const notes = document.getElementById("modelApprovalNotes").value;
       await request("/api/review/model-approvals", {
         method: "POST",
         body: JSON.stringify({
           model_ids: [model.id],
-          approved_for_use: approved,
+          approval_status: approvalStatus,
+          approved_for_use: approvalStatus === "approved",
           approval_notes: notes
         })
       });
@@ -2141,6 +2159,7 @@
         method: "POST",
         body: JSON.stringify({
           model_ids: modelIds,
+          approval_status: approved ? "approved" : "not_approved",
           approved_for_use: approved
         })
       });
@@ -2244,6 +2263,7 @@
         ["family_id", (model) => model.family_id],
         ["family_name", (model) => model.family_name],
         ["catalog_status", (model) => model.catalog_status],
+        ["general_approval_status", (model) => generalApprovalStatus(model)],
         ["general_approved_for_use", (model) => Boolean(model.general_approved_for_use)],
         ["general_approval_updated_at", (model) => model.general_approval_updated_at],
         ["general_approval_notes", (model) => model.general_approval_notes],

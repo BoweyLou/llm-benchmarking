@@ -148,7 +148,9 @@ Saved decisions write to SQLite:
 
 - `models.general_approved_for_use`, `models.general_approval_notes`, and
   `models.general_approval_updated_at` store model-level approval independent
-  of use-case decisions.
+  of use-case decisions. General approval has three review states: `Approved`,
+  `Not approved`, and `Unreviewed`; `Unreviewed` means no timestamped general
+  approval decision has been saved yet.
 - `model_use_case_approvals` stores use-case approval, manual recommendation
   status, and notes.
 - `models.catalog_status` stores listing state such as `tracked`,
@@ -168,7 +170,9 @@ read the table columns as:
   case.
 
 General model approval is reviewed separately in the top panel of the right
-inspector. Use `Approve model` or `Reject model` for model-level decisions.
+inspector. Use `Approve model` or `Reject model` for model-level decisions, or
+set the model back to `Unreviewed` from the inspector when it should return to
+the untriaged queue.
 Use `Approve use case` or `Not approved use case` only for the active use-case
 approval.
 

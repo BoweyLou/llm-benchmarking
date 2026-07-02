@@ -4,6 +4,7 @@
 
 - Added the FastAPI-served `/review` banking model review workbench with filterable model/use-case/family views, token-guarded review decision APIs, manual model creation, deprecation support, and review snapshot export/import.
 - Added a review workbench `Run updates` control that starts the full background update pipeline and shows live step progress from the update status API.
+- Added `Unreviewed` as an explicit general-approval triage state in the review workbench and review API.
 - Fixed the review workbench inspector tabs so `Controls`, `Activity`, and `Notes` switch to separate usable panels.
 - Added RTEB Finance as a finance-domain retrieval benchmark from the official MTEB leaderboard dataset and included it as an optional retrieval-embedding ranking signal.
 - Added browser-side CSV export options in the review workbench for all, filtered, and selected model rows.
