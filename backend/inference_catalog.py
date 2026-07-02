@@ -119,6 +119,8 @@ DESTINATIONS: dict[str, dict[str, Any]] = {
 PROVIDER_DESTINATIONS: dict[str, list[str]] = {
     "ai21-labs": ["aws-bedrock"],
     "amazon": ["aws-bedrock"],
+    "amazon-nova": ["aws-bedrock"],
+    "aws": ["aws-bedrock"],
     "anthropic": ["aws-bedrock"],
     "cohere": ["aws-bedrock"],
     "google": ["google-vertex-ai"],
@@ -127,6 +129,10 @@ PROVIDER_DESTINATIONS: dict[str, list[str]] = {
     "meta-ai": ["aws-bedrock", "azure-ai-foundry", "google-vertex-ai"],
     "mistral": ["aws-bedrock", "azure-ai-foundry", "google-vertex-ai"],
     "mistral-ai": ["aws-bedrock", "azure-ai-foundry", "google-vertex-ai"],
+    "microsoft": ["azure-ai-foundry"],
+    "microsoft-azure": ["azure-ai-foundry"],
+    "azure-ai-foundry": ["azure-ai-foundry"],
+    "azure-openai": ["azure-ai-foundry"],
     "openai": ["azure-ai-foundry"],
 }
 

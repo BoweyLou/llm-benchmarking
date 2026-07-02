@@ -10,6 +10,7 @@
 - Added a separate manual recommendation filter to the review workbench left rail while keeping effective recommendation filtering available.
 - Added separate general model approval state and review workbench controls so model-level approval can be saved independently from use-case approval.
 - Added a provider-origin country filter to the review workbench left rail.
+- Canonicalized provider aliases so Amazon Nova/AWS/Bedrock roll up to Amazon and Azure/Microsoft Azure/Azure AI Foundry roll up to Microsoft in provider facets, exports, and inference matching.
 - Added a Proxmox/Tailscale deployment path for the banking review workbench, including a systemd unit, deploy script, persistent remote SQLite location, and deployment runbook.
 - Added trusted tailnet write mode so the Proxmox-hosted review workbench can save from Tailscale clients without pasting an admin token.
 - Added release-date provenance, computed model-age evidence, Hugging Face repository timestamps, and all-modality OpenRouter discovery coverage to model exports.

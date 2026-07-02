@@ -65,6 +65,7 @@ from .seed_data import (
     INTERNAL_VIEW_BENCHMARK_ID,
     USE_CASES,
     apply_provider_origin_baseline,
+    canonical_provider_name,
     derive_provider_origin_fields,
     export_provider_origin_baseline,
     normalize_origin_countries,
@@ -245,6 +246,7 @@ def bootstrap() -> None:
         _repair_score_trust_labels()
         _sync_provider_directory()
         apply_provider_origin_baseline(ENGINE)
+        _canonicalize_provider_aliases()
         apply_model_curation_baseline(ENGINE)
         apply_model_license_baseline(ENGINE)
         _migrate_legacy_model_approvals()
@@ -2764,6 +2766,7 @@ def _run_update_job(
 
             advance_phase("phase:provider-origin-baseline")
             apply_provider_origin_baseline(ENGINE)
+            _canonicalize_provider_aliases()
 
             advance_phase("phase:openrouter-models")
             try:
@@ -3013,7 +3016,9 @@ def _refresh_huggingface_model_discovery(
                     if not repo_id:
                         continue
                     display_name = _suggest_display_name(repo_id.split("/", 1)[1]) or repo_id
-                    provider = _clean_text(entry.get("provider")) or _provider_hint_from_name(repo_id) or "Unknown"
+                    provider = canonical_provider_name(
+                        _clean_text(entry.get("provider")) or _provider_hint_from_name(repo_id) or "Unknown"
+                    )
                     source_url = f"https://huggingface.co/{repo_id}"
                     size_metadata = model_discovery.infer_model_size_metadata(
                         repo_id,
@@ -3136,7 +3141,7 @@ def _refresh_catalog_model_discovery(
     records_found = 0
     try:
         for entry in entries:
-            provider = _clean_text(entry.get("provider")) or "Unknown"
+            provider = canonical_provider_name(_clean_text(entry.get("provider")) or "Unknown")
             entry_source_url = _clean_text(entry.get("source_url"))
             entry_roles = _normalise_model_roles(entry.get("model_roles"), default=(MODEL_ROLE_GENERATOR,))
             for item in model_discovery.catalog_discovery_models(entry):
@@ -3522,11 +3527,12 @@ def _should_update_release_date(row: dict[str, Any], values: dict[str, Any]) -> 
 
 
 def _source_metadata_provider(source_id: str, metadata: dict[str, Any]) -> str | None:
+    provider_name: str | None = None
     if source_id == "chatbot_arena":
-        return _clean_text(metadata.get("organization") or metadata.get("modelOrganization"))
-    if source_id == "ifeval":
-        return _clean_text(metadata.get("organization_name"))
-    return None
+        provider_name = _clean_text(metadata.get("organization") or metadata.get("modelOrganization"))
+    elif source_id == "ifeval":
+        provider_name = _clean_text(metadata.get("organization_name"))
+    return canonical_provider_name(provider_name) if provider_name else None
 
 
 def _source_metadata_context_tokens(source_id: str, metadata: dict[str, Any]) -> int | None:
@@ -3860,7 +3866,7 @@ def _ensure_model(
         return resolved
 
     candidate_model_id = _choose_model_id(raw_model_name, raw_model_key)
-    provider = _infer_provider(metadata, raw_model_name) or "Unknown"
+    provider = canonical_provider_name(_infer_provider(metadata, raw_model_name) or "Unknown")
     discovered_at = utc_now_iso()
     with ENGINE.begin() as conn:
         provider_id = _ensure_provider_row(provider, conn=conn)
@@ -3928,6 +3934,7 @@ def _ensure_discovered_catalog_model(
     if not name:
         raise ValueError("Catalog discovery item is missing a name.")
 
+    provider = canonical_provider_name(provider)
     model_id = _clean_text(item.get("id")) or _choose_model_id(name, _clean_text(item.get("catalog_model_id")))
     roles = _normalise_model_roles(item.get("model_roles"), default=entry_roles or (MODEL_ROLE_GENERATOR,))
     model_type = _clean_text(item.get("model_type")) or _clean_text(entry.get("model_type")) or "proprietary"
@@ -4096,6 +4103,7 @@ def _ensure_discovered_huggingface_model(
     size_values: dict[str, Any],
     timestamp_values: dict[str, Any],
 ) -> tuple[str, str]:
+    provider = canonical_provider_name(provider)
     existing_model_id = _resolve_huggingface_model_id(repo_id, display_name, provider)
     if existing_model_id:
         with ENGINE.begin() as conn:
@@ -4268,9 +4276,10 @@ def _sync_provider_directory() -> None:
         )
 
         pending_provider_rows: list[dict[str, Any]] = []
-        pending_model_updates: list[tuple[str, str]] = []
+        pending_model_updates: list[tuple[str, str, str]] = []
         for row in model_rows:
-            provider_name = str(row.get("provider") or "").strip()
+            raw_provider_name = str(row.get("provider") or "").strip()
+            provider_name = canonical_provider_name(raw_provider_name)
             if not provider_name or provider_name == "Unknown":
                 continue
 
@@ -4293,24 +4302,60 @@ def _sync_provider_directory() -> None:
                     }
                 )
 
-            if str(row.get("provider_id") or "").strip() != provider_id:
-                pending_model_updates.append((str(row["id"]), provider_id))
+            if str(row.get("provider_id") or "").strip() != provider_id or raw_provider_name != provider_name:
+                pending_model_updates.append((str(row["id"]), provider_id, provider_name))
 
         if pending_provider_rows:
             stmt = sqlite_insert(providers_table).values(pending_provider_rows)
             stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
             conn.execute(stmt)
 
-        for model_id, provider_id in pending_model_updates:
+        for model_id, provider_id, provider_name in pending_model_updates:
             conn.execute(
                 update(models_table)
                 .where(models_table.c.id == model_id)
-                .values(provider_id=provider_id)
+                .values(provider_id=provider_id, provider=provider_name)
             )
 
 
+def _canonicalize_provider_aliases() -> None:
+    with ENGINE.begin() as conn:
+        provider_rows = fetch_all(conn, select(providers_table))
+        for row in provider_rows:
+            current_id = str(row.get("id") or "").strip()
+            current_name = str(row.get("name") or "").strip()
+            canonical_name = canonical_provider_name(current_name)
+            if not current_id or not canonical_name:
+                continue
+
+            canonical_id = provider_id_from_name(canonical_name)
+            if canonical_name == current_name and current_id == canonical_id:
+                continue
+
+            canonical_row = fetch_one(conn, select(providers_table).where(providers_table.c.id == canonical_id))
+            if canonical_row is None:
+                payload = {key: row.get(key) for key in row.keys()}
+                payload.update(id=canonical_id, name=canonical_name, active=1)
+                stmt = sqlite_insert(providers_table).values(payload)
+                stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
+                conn.execute(stmt)
+
+            if current_id != canonical_id:
+                conn.execute(
+                    update(providers_table)
+                    .where(providers_table.c.id == current_id)
+                    .values(active=0)
+                )
+            else:
+                conn.execute(
+                    update(providers_table)
+                    .where(providers_table.c.id == current_id)
+                    .values(name=canonical_name, active=1)
+                )
+
+
 def _ensure_provider_row(provider_name: str | None, *, conn: Any | None = None) -> str | None:
-    cleaned = str(provider_name or "").strip()
+    cleaned = canonical_provider_name(str(provider_name or "").strip())
     if not cleaned or cleaned == "Unknown":
         return None
 
@@ -5409,14 +5454,17 @@ def _openrouter_provider_name(item: dict[str, Any]) -> str:
     if ":" in name:
         provider_name = name.split(":", 1)[0].strip()
         if provider_name:
-            return provider_name
+            return canonical_provider_name(provider_name)
 
     model_id = str(item.get("id") or "").strip()
     provider_slug = model_id.split("/", 1)[0].strip().lower() if "/" in model_id else ""
     provider_map = {
+        "amazon": "Amazon",
         "anthropic": "Anthropic",
+        "azure": "Microsoft",
         "openai": "OpenAI",
         "google": "Google",
+        "microsoft": "Microsoft",
         "x-ai": "xAI",
         "xai": "xAI",
         "moonshotai": "Moonshot",
@@ -5424,7 +5472,7 @@ def _openrouter_provider_name(item: dict[str, Any]) -> str:
         "z-ai": "Z AI",
         "zhipu": "Zhipu AI",
     }
-    return provider_map.get(provider_slug, provider_slug or "Unknown")
+    return canonical_provider_name(provider_map.get(provider_slug, provider_slug or "Unknown"))
 
 
 def _should_import_openrouter_exact_release(
@@ -6783,16 +6831,16 @@ def _infer_provider(metadata: dict[str, Any], raw_model_name: str) -> str | None
     ):
         value = metadata.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            return canonical_provider_name(value.strip())
 
     name_hint = _provider_hint_from_name(raw_model_name)
     if name_hint:
-        return name_hint
+        return canonical_provider_name(name_hint)
 
     for key in ("organization", "submission_organization"):
         value = metadata.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            return canonical_provider_name(value.strip())
     return None
 
 

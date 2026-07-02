@@ -126,7 +126,8 @@ flowchart LR
 
 1. `python -m backend bootstrap` is local-only. It creates or repairs the
    SQLite schema, seeds benchmark/provider/model reference rows, applies tracked
-   baselines, recovers interrupted updates, and refreshes local identity state.
+   baselines, canonicalizes provider aliases, recovers interrupted updates, and
+   refreshes local identity state.
 2. `python -m backend update` selects adapters, creates an `update_log`, and
    runs each adapter through `fetch_raw()` and `normalize()`.
 3. Each adapter produces raw source records and normalized score candidates.
@@ -175,7 +176,7 @@ flowchart LR
 | OpenRouter market | `_refresh_openrouter_market_signals()` | Global and programming rank, total tokens, share, change ratio, request count, volume snapshots. | Ranking page payloads are optional and can change shape; failures are nonfatal warnings and appear in freshness/degraded export context. |
 | Hugging Face model cards | `_refresh_model_card_metadata()` | Model-card URL/source, docs/repo/paper URLs, license, base models, languages, capabilities, intended use, limitations, training data, cutoff. | Only models with `huggingface_repo_id`; README extraction can be incomplete or noisy. |
 | Hyperscaler catalogs | `sync_inference_catalog()` | AWS Bedrock, Azure AI Foundry, and Google Vertex AI availability, regions, deployment modes, pricing, source links, sync status. | AWS/GCP richer catalog data needs credentials; Azure public pricing can rate-limit. |
-| Repo baselines | `provider_origin_baseline.json`, `model_curation_baseline.json`, `model_license_baseline.json` | Durable manual provider origin, family/canonical curation, exact/family/provider license policy. | Manual and only refreshed when exported. |
+| Repo baselines | `provider_origin_baseline.json`, `model_curation_baseline.json`, `model_license_baseline.json` | Durable manual provider origin, family/canonical curation, exact/family/provider license policy. Provider aliases such as Amazon Nova/AWS/Bedrock and Azure/Microsoft Azure/Azure AI Foundry collapse to their parent provider rows. | Manual and only refreshed when exported. |
 
 ## Implemented Source-Review Outcomes
 

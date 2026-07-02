@@ -20,6 +20,27 @@ class InferenceCatalogTests(unittest.TestCase):
         self.assertEqual(destination_ids, ["azure-ai-foundry"])
         self.assertEqual(model["inference_summary"]["destination_count"], 1)
 
+    def test_provider_aliases_surface_parent_cloud_destinations(self) -> None:
+        nova = attach_inference_catalog(
+            {
+                "id": "nova-pro",
+                "name": "Nova Pro",
+                "provider": "Amazon Nova",
+                "family_id": "amazon::nova",
+            }
+        )
+        phi = attach_inference_catalog(
+            {
+                "id": "phi-4",
+                "name": "Phi 4",
+                "provider": "Microsoft Azure",
+                "family_id": "microsoft::phi",
+            }
+        )
+
+        self.assertEqual([destination["id"] for destination in nova["inference_destinations"]], ["aws-bedrock"])
+        self.assertEqual([destination["id"] for destination in phi["inference_destinations"]], ["azure-ai-foundry"])
+
     def test_newer_claude_families_surface_bedrock_and_vertex(self) -> None:
         model = attach_inference_catalog(
             {

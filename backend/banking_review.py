@@ -27,7 +27,7 @@ from .database import (
 )
 from .model_taxonomy import infer_model_identity
 from .recommendation_engine import PROFILE_AUSTRALIAN_BANK, sync_recommendation_proposals
-from .seed_data import provider_id_from_name
+from .seed_data import canonical_provider_name, provider_id_from_name
 
 CATALOG_STATUS_TRACKED = "tracked"
 CATALOG_STATUS_PROVISIONAL = "provisional"
@@ -134,7 +134,7 @@ def add_model_to_listing(
     """Add a manually curated model row to the local listing."""
     update_engine.bootstrap()
     cleaned_name = _required_text(name, "name")
-    cleaned_provider = _required_text(provider, "provider")
+    cleaned_provider = canonical_provider_name(_required_text(provider, "provider"))
     normalized_status = _validate_catalog_status(catalog_status)
     normalized_roles = _normalise_model_roles(model_roles)
     normalized_model_id = _normalise_model_id(model_id) if model_id else _available_model_id(cleaned_name)

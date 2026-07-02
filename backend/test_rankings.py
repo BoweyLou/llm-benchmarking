@@ -667,6 +667,81 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(claude["provider_id"], "anthropic")
         self.assertEqual(claude["provider_country_code"], "US")
 
+    def test_provider_aliases_are_canonicalized_for_models_and_provider_facets(self) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                providers_table.insert(),
+                [
+                    {
+                        "id": "amazon-nova",
+                        "name": "Amazon Nova",
+                        "country_code": "US",
+                        "country_name": "United States",
+                        "origin_countries_json": "[]",
+                        "active": 1,
+                    },
+                    {
+                        "id": "microsoft-azure",
+                        "name": "Microsoft Azure",
+                        "country_code": "US",
+                        "country_name": "United States",
+                        "origin_countries_json": "[]",
+                        "active": 1,
+                    },
+                ],
+            )
+            conn.execute(
+                models_table.insert(),
+                [
+                    {
+                        "id": "nova-provider-alias",
+                        "name": "Nova Pro",
+                        "provider_id": "amazon-nova",
+                        "provider": "Amazon Nova",
+                        "type": "proprietary",
+                        "family_id": "amazon-nova::nova",
+                        "family_name": "Nova",
+                        "canonical_model_id": "amazon-nova::nova-pro",
+                        "canonical_model_name": "Nova Pro",
+                        "model_roles_json": json.dumps(["generator"], ensure_ascii=True),
+                        "active": 1,
+                    },
+                    {
+                        "id": "phi-provider-alias",
+                        "name": "Phi 4",
+                        "provider_id": "microsoft-azure",
+                        "provider": "Microsoft Azure",
+                        "type": "proprietary",
+                        "family_id": "microsoft-azure::phi",
+                        "family_name": "Phi",
+                        "canonical_model_id": "microsoft-azure::phi-4",
+                        "canonical_model_name": "Phi 4",
+                        "model_roles_json": json.dumps(["generator"], ensure_ascii=True),
+                        "active": 1,
+                    },
+                ],
+            )
+
+        update_engine._sync_provider_directory()
+        update_engine._canonicalize_provider_aliases()
+        update_engine._refresh_model_identity_metadata()
+
+        models = update_engine.list_models()
+        nova = next(model for model in models if model["id"] == "nova-provider-alias")
+        phi = next(model for model in models if model["id"] == "phi-provider-alias")
+        self.assertEqual(nova["provider"], "Amazon")
+        self.assertEqual(nova["provider_id"], "amazon")
+        self.assertEqual(nova["family_id"], "amazon::nova-pro")
+        self.assertEqual(phi["provider"], "Microsoft")
+        self.assertEqual(phi["provider_id"], "microsoft")
+        self.assertEqual(phi["family_id"], "microsoft::phi-4")
+
+        provider_names = {provider["name"] for provider in update_engine.list_providers()}
+        self.assertIn("Amazon", provider_names)
+        self.assertIn("Microsoft", provider_names)
+        self.assertNotIn("Amazon Nova", provider_names)
+        self.assertNotIn("Microsoft Azure", provider_names)
+
     def test_list_providers_returns_seeded_provider_origin(self) -> None:
         providers = update_engine.list_providers()
 

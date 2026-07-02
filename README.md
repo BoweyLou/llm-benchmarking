@@ -115,6 +115,9 @@ manual-recommendation, use-case approval, family, catalog-status, model-role,
 and small-model filters; a sortable model table; family and needs-decision
 views; and a detail inspector for model approval plus per-use-case approval
 notes, manual ratings, generated blockers, warnings, and required controls.
+Provider filters use canonical parent providers: for example, Amazon Nova,
+AWS, and Amazon Bedrock are shown under Amazon, while Azure, Microsoft Azure,
+and Azure AI Foundry are shown under Microsoft.
 
 On tablet-width screens, the workbench keeps the filters and table usable first
 and moves the inspector below the table so review controls remain reachable.

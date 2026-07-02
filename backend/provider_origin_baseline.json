@@ -112,20 +112,6 @@
     "active": true
   },
   {
-    "id": "amazon-nova",
-    "name": "Amazon Nova",
-    "origin_countries": [
-      {
-        "code": "US",
-        "name": "United States"
-      }
-    ],
-    "origin_basis": "Amazon Nova is an AWS/Amazon product, and Amazon's official headquarters materials place the company in Seattle, Washington, United States.",
-    "source_url": "https://aws.amazon.com/nova/",
-    "verified_at": "2026-04-07T00:00:00Z",
-    "active": true
-  },
-  {
     "id": "anthropic",
     "name": "Anthropic",
     "origin_countries": [
@@ -392,20 +378,6 @@
     ],
     "origin_basis": "Microsoft's official facts page lists Microsoft Corporation at One Microsoft Way in Redmond, Washington, USA.",
     "source_url": "https://news.microsoft.com/facts-about-microsoft/",
-    "verified_at": "2026-04-07T00:00:00Z",
-    "active": true
-  },
-  {
-    "id": "microsoft-azure",
-    "name": "Microsoft Azure",
-    "origin_countries": [
-      {
-        "code": "US",
-        "name": "United States"
-      }
-    ],
-    "origin_basis": "Azure's official legal/certified-program agreement is with Microsoft Corporation, and Microsoft's facts page places the company in Redmond, Washington, USA.",
-    "source_url": "https://azure.microsoft.com/en-us/support/legal/marketplace/certified-program-agreement",
     "verified_at": "2026-04-07T00:00:00Z",
     "active": true
   },

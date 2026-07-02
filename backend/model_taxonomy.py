@@ -528,6 +528,11 @@ def _variant_label(raw_name: str, canonical_name: str) -> str | None:
 
 def _provider_slug(provider_norm: str) -> str:
     tokens = set(provider_norm.split())
+    compact = "".join(provider_norm.split())
+    if "amazon" in tokens or "aws" in tokens or compact in {"amazonnova", "amazonbedrock", "amazonwebservices"}:
+        return "amazon"
+    if "microsoft" in tokens or "azure" in tokens or compact in {"microsoftazure", "azureaifoundry"}:
+        return "microsoft"
     if "anthropic" in tokens:
         return "anthropic"
     if "openai" in tokens:

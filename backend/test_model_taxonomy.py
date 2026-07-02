@@ -36,6 +36,13 @@ class ModelTaxonomyTests(unittest.TestCase):
 
         self.assertEqual(identity.canonical_model_name, "Phi 3 Mini Instruct")
 
+    def test_provider_aliases_use_parent_provider_family_slug(self) -> None:
+        azure_identity = infer_model_identity("Phi 4", "Microsoft Azure")
+        nova_identity = infer_model_identity("Nova Pro", "Amazon Nova")
+
+        self.assertEqual(azure_identity.family_id, "microsoft::phi-4")
+        self.assertEqual(nova_identity.family_id, "amazon::nova-pro")
+
     def test_numeric_suffixes_with_letters_render_as_decimals(self) -> None:
         identity = infer_model_identity("GLM-4.1V w/ Thinking", "Unknown")
 

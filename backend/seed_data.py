@@ -18,9 +18,34 @@ PROVIDER_ORIGIN_VERIFIED_AT = "2026-04-02T00:00:00Z"
 PROVIDER_ORIGIN_BASELINE_PATH = Path(__file__).with_name("provider_origin_baseline.json")
 INTERNAL_VIEW_BENCHMARK_ID = "internal_view"
 
+PROVIDER_CANONICAL_NAME_ALIASES = {
+    "amazon": "Amazon",
+    "amazonbedrock": "Amazon",
+    "amazonnova": "Amazon",
+    "amazonwebservices": "Amazon",
+    "aws": "Amazon",
+    "azure": "Microsoft",
+    "azureaifoundry": "Microsoft",
+    "azureopenai": "Microsoft",
+    "microsoft": "Microsoft",
+    "microsoftazure": "Microsoft",
+}
+
+
+def _provider_alias_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.strip().lower())
+
+
+def canonical_provider_name(name: str | None) -> str:
+    cleaned = str(name or "").strip()
+    if not cleaned:
+        return cleaned
+    return PROVIDER_CANONICAL_NAME_ALIASES.get(_provider_alias_key(cleaned), cleaned)
+
 
 def provider_id_from_name(name: str) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    canonical_name = canonical_provider_name(name)
+    normalized = re.sub(r"[^a-z0-9]+", "-", canonical_name.strip().lower()).strip("-")
     return normalized or "unknown-provider"
 
 
@@ -99,6 +124,10 @@ def load_provider_origin_baseline(path: Path | None = None) -> list[dict[str, An
         provider_name = _clean_optional_text(item.get("name"))
         if provider_id is None or provider_name is None:
             continue
+        canonical_name = canonical_provider_name(provider_name)
+        if canonical_name != provider_name:
+            provider_name = canonical_name
+            provider_id = provider_id_from_name(provider_name)
         origin_countries = normalize_origin_countries(
             item.get("origin_countries"),
             _clean_optional_text(item.get("country_code")),
@@ -1876,6 +1905,7 @@ __all__ = [
     "SEED_SCORES",
     "USE_CASES",
     "apply_provider_origin_baseline",
+    "canonical_provider_name",
     "derive_provider_origin_fields",
     "export_provider_origin_baseline",
     "load_provider_origin_baseline",

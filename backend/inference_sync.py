@@ -40,6 +40,7 @@ from .inference_catalog import (
 )
 from .model_taxonomy import infer_model_identity
 from .name_resolution import name_signatures, normalize_text
+from .seed_data import canonical_provider_name
 
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; LLMBenchmarkingBot/0.1; +https://localhost)",
@@ -63,8 +64,17 @@ GCP_PUBLISHER_MAP = {
     "mistralai": "mistralai",
 }
 PROVIDER_EQUIVALENTS = {
+    "amazon": {"amazon", "amazonnova", "amazonbedrock", "amazonwebservices", "aws"},
+    "amazonbedrock": {"amazon", "amazonnova", "amazonbedrock", "amazonwebservices", "aws"},
+    "amazonnova": {"amazon", "amazonnova", "amazonbedrock", "amazonwebservices", "aws"},
+    "aws": {"amazon", "amazonnova", "amazonbedrock", "amazonwebservices", "aws"},
+    "azure": {"microsoft", "microsoftazure", "azure", "azureaifoundry", "azureopenai"},
+    "azureaifoundry": {"microsoft", "microsoftazure", "azure", "azureaifoundry", "azureopenai"},
+    "azureopenai": {"microsoft", "microsoftazure", "azure", "azureaifoundry", "azureopenai"},
     "googledeepmind": {"google", "googledeepmind", "deepmind"},
     "metaai": {"meta", "metaai"},
+    "microsoft": {"microsoft", "microsoftazure", "azure", "azureaifoundry", "azureopenai"},
+    "microsoftazure": {"microsoft", "microsoftazure", "azure", "azureaifoundry", "azureopenai"},
     "mistralai": {"mistral", "mistralai"},
 }
 
@@ -950,15 +960,18 @@ def _azure_model_name(entry: dict[str, Any]) -> str | None:
 
 
 def _azure_model_provider(entry: dict[str, Any]) -> str | None:
+    provider_name: str | None = None
     model = entry.get("model")
     if isinstance(model, dict):
-        return _clean_optional_text(model.get("publisher") or model.get("provider"))
-    properties = entry.get("properties")
-    if isinstance(properties, dict):
+        provider_name = _clean_optional_text(model.get("publisher") or model.get("provider"))
+    if provider_name is None and isinstance(entry.get("properties"), dict):
+        properties = entry["properties"]
         inner_model = properties.get("model")
         if isinstance(inner_model, dict):
-            return _clean_optional_text(inner_model.get("publisher") or inner_model.get("provider"))
-    return _clean_optional_text(entry.get("publisher"))
+            provider_name = _clean_optional_text(inner_model.get("publisher") or inner_model.get("provider"))
+    if provider_name is None:
+        provider_name = _clean_optional_text(entry.get("publisher"))
+    return canonical_provider_name(provider_name) if provider_name else None
 
 
 def _azure_model_resource_name(entry: dict[str, Any]) -> str | None:
@@ -1505,11 +1518,15 @@ def _provider_slug(value: Any) -> str:
 
 def _provider_display_name(value: Any) -> str:
     text = str(value or "").strip()
-    return text or "Unknown"
+    return canonical_provider_name(text) or "Unknown"
 
 
 def _provider_from_text(value: str) -> str | None:
     normalized = normalize_text(value)
+    if "amazon" in normalized or "aws" in normalized or "nova" in normalized:
+        return "Amazon"
+    if "microsoft" in normalized or "azure" in normalized:
+        return "Microsoft"
     for provider in ("anthropic", "cohere", "google", "meta", "mistral", "openai"):
         if provider in normalized:
             return provider.title() if provider != "openai" else "OpenAI"
@@ -1536,10 +1553,19 @@ def _provider_from_model_name(model_name: str) -> str | None:
 def _publisher_provider_name(value: Any) -> str | None:
     slug = _provider_slug(value)
     mapping = {
+        "amazon": "Amazon",
+        "amazonbedrock": "Amazon",
+        "amazonnova": "Amazon",
+        "aws": "Amazon",
+        "azure": "Microsoft",
+        "azureaifoundry": "Microsoft",
+        "azureopenai": "Microsoft",
         "anthropic": "Anthropic",
         "cohere": "Cohere",
         "google": "Google",
         "meta": "Meta",
+        "microsoft": "Microsoft",
+        "microsoftazure": "Microsoft",
         "mistralai": "Mistral AI",
     }
     return mapping.get(slug)

@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-048: P1 Canonicalize provider product/platform aliases
+  - Source: Human request 2026-07-02 after seeing Amazon and Amazon Nova, plus Microsoft and Azure, as separate provider filters in the review workbench.
+  - Problem: product/platform labels from sources and the provider-origin baseline could become active provider rows, splitting provider facets and provider-origin review.
+  - Scope: add canonical provider aliases for Amazon Nova/AWS/Bedrock to Amazon and Azure/Microsoft Azure/Azure AI Foundry to Microsoft, repair existing model/provider rows during bootstrap, remove duplicate baseline provider rows, and keep inference destination matching compatible with old alias labels.
+  - Acceptance: review/catalog provider facets show Amazon and Microsoft as parent providers while existing models, families, and inference destinations continue to resolve.
+  - Validation: provider-directory repair regression, taxonomy alias regression, inference-catalog alias regression, full backend tests, docs/version checks, local and Proxmox catalog verification.
+  - Completed: 2026-07-02. Provider alias canonicalization now runs during bootstrap and update paths.
+
 - [x] LBM-047: P1 Add NVIDIA and IBM retrieval catalog discovery
   - Source: Human request 2026-07-02 after noticing NVIDIA and IBM embedding catalog gaps in the banking review workbench.
   - Problem: MTEB surfaced only some NVIDIA/IBM retrieval rows and did not cover provider-hosted catalog models such as NVIDIA NIM EmbedQA/RerankQA or IBM watsonx Slate; Hugging Face discovery also forced discovered rows into generator roles.
