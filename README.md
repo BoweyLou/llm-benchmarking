@@ -115,6 +115,9 @@ filters; a sortable model table; family and needs-decision views; and a detail
 inspector for per-use-case approval notes, manual ratings, generated blockers,
 warnings, and required controls.
 
+On tablet-width screens, the workbench keeps the filters and table usable first
+and moves the inspector below the table so review controls remain reachable.
+
 ```bash
 uvicorn backend.main:app --reload --port 8000
 open http://127.0.0.1:8000/review
@@ -132,6 +135,22 @@ Saved decisions write to SQLite:
   `provisional`, or `deprecated`.
 - `model_use_case_recommendation_proposals` remains generated policy output and
   can be regenerated without overwriting manual decisions.
+
+Use-case recommendations are reviewed through the active use case. Switch to
+`Use-case review`, choose a use case in the left filter or right inspector, then
+read the table columns as:
+
+- `Proposed`: generated banking-profile recommendation.
+- `Manual`: the reviewer override saved in SQLite.
+- `Effective`: the value used by review/export surfaces. Manual wins when set,
+  otherwise hard blockers win, otherwise the generated proposal is used.
+- `Approval`: the separate approved/not-approved decision for that model and use
+  case.
+
+Select a model to review blockers, warnings, required controls, and notes in the
+right inspector. Change `Manual rating` and `Approval`, then save. For many
+models, filter first, use `Select all filtered` when needed, and apply the bulk
+recommendation or approval action to the exact selected model IDs.
 
 The workbench can export and import a JSON review snapshot. Use that snapshot
 when rebuilding a database so manual listings, deprecation markers, and

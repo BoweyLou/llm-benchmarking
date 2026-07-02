@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-043: P2 Improve review workbench iPad layout and use-case context
+  - Source: Human request 2026-07-02 after using the deployed workbench on an iPad-resolution device and asking how use-case recommendations should be used.
+  - Problem: the review workbench retained desktop column assumptions at tablet widths, making filters, table actions, inspector controls, and save context hard to fit or understand on iPad-sized screens.
+  - Scope: responsive review-workbench CSS, wrapped table/bulk controls, tablet/portrait grid layouts, active use-case context in the table and save status, click-through use-case selection syncing, README workflow notes, changelog entry, live Proxmox redeploy, and browser smoke verification.
+  - Acceptance: iPad-width layouts keep the filter rail, model table, inspector, and bottom actions reachable; use-case card selection makes the active save target explicit; docs explain Proposed, Manual, Effective, and Approval.
+  - Validation: inline script parse, backend review tests, docs/version checks, in-app browser smoke at iPad landscape and portrait widths, live Proxmox HTML check, and service health check.
+  - Completed: 2026-07-02. Tablet layouts and active use-case review context are clearer in the banking review workbench.
+
 - [x] LBM-042: P1 Split bulk approval clearing from recommendation clearing in the review workbench
   - Source: Human bug report 2026-07-02 after a bulk clear operation appeared to sync but approved rows remained approved after reload.
   - Problem: the frontend `Clear` bulk action only sent `recommendation_status=unrated`; it did not send `approved_for_use=false`, so the API correctly saved a recommendation clear while leaving approval state unchanged.

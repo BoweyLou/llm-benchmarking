@@ -35,7 +35,7 @@
 
     body {
       margin: 0;
-      min-width: 1120px;
+      min-width: 0;
       background: var(--bg);
       color: var(--text);
       font-size: 13px;
@@ -239,9 +239,11 @@
       padding: 0 14px;
       border-bottom: 1px solid var(--line);
       background: #fbfcfe;
+      overflow-x: auto;
     }
 
     .tab {
+      flex: 0 0 auto;
       height: 48px;
       padding: 0 12px;
       border: 0;
@@ -296,6 +298,8 @@
     .table-actions {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
       gap: 8px;
     }
 
@@ -310,6 +314,7 @@
     .bulk-actions {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: 9px;
       padding: 10px 12px;
       border-bottom: 1px solid var(--line);
@@ -318,6 +323,7 @@
     .bulk-note {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: 14px;
       padding: 8px 12px;
       color: var(--muted);
@@ -483,6 +489,19 @@
     .badge.gray {
       color: #455063;
       background: #f3f5f8;
+    }
+
+    .context-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border: 1px solid #b9d4ff;
+      border-radius: 4px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 650;
     }
 
     .pager {
@@ -723,6 +742,165 @@
       color: var(--muted);
       text-align: center;
     }
+
+    @media (max-width: 1180px) {
+      .app {
+        grid-template-rows: auto auto auto;
+      }
+
+      .topbar {
+        grid-template-columns: minmax(220px, 1fr) minmax(280px, 2fr);
+      }
+
+      .brand {
+        min-height: 58px;
+      }
+
+      .sync-strip {
+        min-height: 58px;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        gap: 10px 14px;
+        padding: 10px 16px;
+        border-left: 1px solid var(--line);
+      }
+
+      .header-actions {
+        grid-column: 1 / -1;
+        min-height: 46px;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        padding: 8px 16px;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .main {
+        grid-template-columns: 224px minmax(0, 1fr);
+        grid-template-areas:
+          "filters content"
+          "inspector inspector";
+      }
+
+      .filters {
+        grid-area: filters;
+        min-height: 640px;
+      }
+
+      .content {
+        grid-area: content;
+      }
+
+      .inspector {
+        grid-area: inspector;
+        min-height: 520px;
+        border-top: 1px solid var(--line);
+        border-left: 0;
+      }
+
+      .bottom-hint {
+        min-height: 46px;
+        height: auto;
+        flex-wrap: wrap;
+        padding: 8px 16px;
+      }
+
+      .family-row {
+        grid-template-columns: minmax(180px, 1fr) 82px 96px 100px;
+      }
+
+      .family-row span:last-child {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 820px) {
+      .topbar {
+        grid-template-columns: 1fr;
+      }
+
+      .brand {
+        border-right: 0;
+      }
+
+      .sync-strip {
+        border-left: 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .main {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "filters"
+          "content"
+          "inspector";
+      }
+
+      .filters {
+        min-height: 0;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .filter-scroll {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0 12px;
+        overflow: visible;
+        flex: none;
+      }
+
+      .filter-foot {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .filter-foot span {
+        grid-column: 1 / -1;
+      }
+
+      .content {
+        grid-template-rows: auto auto minmax(420px, 1fr) 48px;
+      }
+
+      .table-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .table-actions {
+        justify-content: flex-start;
+        width: 100%;
+      }
+
+      .bulkbar {
+        margin: 8px 10px;
+      }
+
+      .meta-grid,
+      .form-grid,
+      .control-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .family-row {
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+
+      .bottom-hint {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .bottom-hint .btn {
+        width: 100%;
+      }
+
+      dialog {
+        width: calc(100vw - 28px);
+        max-width: 420px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -826,6 +1004,7 @@
             <div class="table-title">
               <span id="modelCount">0 models</span>
               <span id="selectedCount">0 selected</span>
+              <span id="activeUseCaseLabel" class="context-chip"></span>
               <button class="btn small" id="selectAllFiltered">Select all filtered</button>
               <button class="linkish" id="clearSelection">Clear selection</button>
             </div>
@@ -966,6 +1145,7 @@
       inspectorBody: document.getElementById("inspectorBody"),
       modelCount: document.getElementById("modelCount"),
       selectedCount: document.getElementById("selectedCount"),
+      activeUseCaseLabel: document.getElementById("activeUseCaseLabel"),
       bulkTarget: document.getElementById("bulkTarget"),
       bulkScope: document.getElementById("bulkScope"),
       selectAllFiltered: document.getElementById("selectAllFiltered"),
@@ -1146,6 +1326,8 @@
         : "No rows are selected. Actions apply to the filtered list.";
       els.selectAllFiltered.textContent = `Select all filtered (${models.length})`;
       els.showingCount.textContent = `Showing ${models.length} of ${state.catalog.summary.model_count} models`;
+      const useCase = state.catalog.use_cases.find((item) => item.id === (state.filters.useCase || state.activeUseCaseId));
+      els.activeUseCaseLabel.textContent = useCase ? `Use case: ${useCase.label}` : "Use case: All";
       document.getElementById("applyFiltered").textContent = `Select all filtered (${models.length})`;
     }
 
@@ -1272,6 +1454,8 @@
       const approvals = model.use_case_approvals || {};
       const activeUseCaseId = state.activeUseCaseId || Object.keys(approvals)[0] || "";
       const activeApproval = approvals[activeUseCaseId] || {};
+      const activeUseCase = state.catalog.use_cases.find((item) => item.id === activeUseCaseId) || {};
+      const activeUseCaseLabel = activeUseCase.label || activeUseCaseId || "selected use case";
       els.inspectorHead.innerHTML = `
         <h2>${escapeHtml(model.name)}</h2>
         <div class="subtle">${escapeHtml(model.id)}</div>
@@ -1313,6 +1497,7 @@
             <textarea class="textarea" id="decisionNotes" placeholder="Add notes to explain this decision...">${escapeHtml(activeApproval.recommendation_notes || activeApproval.approval_notes || "")}</textarea>
           </label>
         </div>`;
+      els.saveStatus.textContent = `Changes apply to ${activeUseCaseLabel}.`;
     }
 
     function renderUseCaseCard(useCase, approval, active) {
@@ -1705,7 +1890,10 @@
         const card = event.target.closest("[data-use-case]");
         if (!card) return;
         state.activeUseCaseId = card.dataset.useCase;
-        renderInspector();
+        state.filters.useCase = state.activeUseCaseId;
+        els.useCaseFilter.value = state.activeUseCaseId;
+        state.page = 1;
+        render();
       });
       document.querySelectorAll("[data-action]").forEach((button) => {
         button.addEventListener("click", () => applyBulk(button.dataset.action));
