@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-055: P1 Fix review workbench inspector tabs
+  - Source: Human bug report 2026-07-02 while using the banking review workbench.
+  - Problem: the right inspector showed `Use cases`, `Controls`, `Activity`, and `Notes` as tabs, but only `Use cases` rendered content and the other labels did not switch panels.
+  - Scope: add inspector tab state, tab click handling, separate panels for controls/activity/notes, a per-panel use-case selector, and static/regression coverage.
+  - Acceptance: reviewers can switch between right-inspector tabs, see controls and activity for the active use case, and edit notes/manual decisions in the Notes tab.
+  - Validation: static workbench coverage, JavaScript syntax check, focused review-workbench tests, rendered local browser smoke, docs/version checks, and live Proxmox redeploy.
+  - Completed: 2026-07-02. Inspector tabs now switch to usable review panels.
+
 - [x] LBM-054: P2 Add review workbench update runner
   - Source: Human request 2026-07-02 while using the Proxmox-hosted banking review workbench.
   - Problem: `Sync now` only reloaded the current SQLite catalog, so reviewers could not start a full catalog/benchmark update or see progress from inside the interactive UI.

@@ -673,8 +673,10 @@
     }
 
     .model-approval-panel,
+    .inspector-panel,
     .usecase-card,
     .control-card,
+    .activity-row,
     .family-row {
       border: 1px solid var(--line);
       border-radius: 7px;
@@ -682,7 +684,8 @@
       margin-bottom: 8px;
     }
 
-    .model-approval-panel {
+    .model-approval-panel,
+    .inspector-panel {
       padding: 10px;
     }
 
@@ -710,7 +713,7 @@
 
     .control-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
       gap: 8px;
       margin-top: 12px;
     }
@@ -727,10 +730,26 @@
       font-size: 12px;
     }
 
+    .list-stack {
+      display: grid;
+      gap: 8px;
+    }
+
+    .activity-row {
+      display: grid;
+      gap: 4px;
+      padding: 10px;
+      color: #263140;
+      font-size: 12px;
+    }
+
+    .activity-row strong {
+      font-size: 13px;
+    }
+
     .decision-form {
       display: grid;
       gap: 10px;
-      padding-top: 12px;
     }
 
     .form-grid {
@@ -1186,11 +1205,11 @@
       <aside class="inspector">
         <div class="inspector-head" id="inspectorHead"></div>
         <div>
-          <div class="inspector-tabs">
-            <button class="active">Use cases</button>
-            <button>Controls</button>
-            <button>Activity</button>
-            <button>Notes</button>
+          <div class="inspector-tabs" id="inspectorTabs" role="tablist" aria-label="Model inspector">
+            <button class="active" data-inspector-tab="usecases" role="tab" aria-selected="true">Use cases</button>
+            <button data-inspector-tab="controls" role="tab" aria-selected="false">Controls</button>
+            <button data-inspector-tab="activity" role="tab" aria-selected="false">Activity</button>
+            <button data-inspector-tab="notes" role="tab" aria-selected="false">Notes</button>
           </div>
           <div class="inspector-body" id="inspectorBody"></div>
         </div>
@@ -1253,6 +1272,7 @@
       selected: new Set(),
       activeModelId: null,
       activeUseCaseId: null,
+      inspectorTab: "usecases",
       sort: { key: "name", direction: "asc" },
       page: 1,
       pageSize: 50,
@@ -1289,6 +1309,7 @@
       smallOnly: document.getElementById("smallOnly"),
       tabs: document.getElementById("tabs"),
       mainTable: document.getElementById("mainTable"),
+      inspectorTabs: document.getElementById("inspectorTabs"),
       inspectorHead: document.getElementById("inspectorHead"),
       inspectorBody: document.getElementById("inspectorBody"),
       modelCount: document.getElementById("modelCount"),
@@ -1306,6 +1327,8 @@
       updateProgressCount: document.getElementById("updateProgressCount"),
       updateProgressBar: document.getElementById("updateProgressBar"),
       updateProgressSteps: document.getElementById("updateProgressSteps"),
+      saveDecision: document.getElementById("saveDecision"),
+      saveNext: document.getElementById("saveNext"),
       saveStatus: document.getElementById("saveStatus"),
       toast: document.getElementById("toast"),
       addModelDialog: document.getElementById("addModelDialog"),
@@ -1835,13 +1858,15 @@
 
     function renderInspector() {
       const model = activeModel();
+      renderInspectorTabState();
       if (!model) {
         els.inspectorHead.innerHTML = `<h2>No model selected</h2><p class="subtle">Adjust filters to show models.</p>`;
         els.inspectorBody.innerHTML = "";
+        setInspectorFooter(false, "Select a model to review.");
         return;
       }
       const approvals = model.use_case_approvals || {};
-      const activeUseCaseId = state.activeUseCaseId || Object.keys(approvals)[0] || "";
+      const activeUseCaseId = normalizeActiveUseCaseId(approvals);
       const activeApproval = approvals[activeUseCaseId] || {};
       const activeUseCase = state.catalog.use_cases.find((item) => item.id === activeUseCaseId) || {};
       const activeUseCaseLabel = activeUseCase.label || activeUseCaseId || "selected use case";
@@ -1860,33 +1885,113 @@
           <div><span>Context window</span>${escapeHtml(model.context_window || model.context_window_tokens || "-")}</div>
           <div><span>Data residency</span>${escapeHtml((model.inference_summary && (model.inference_summary.platform_names || []).join(", ")) || "-")}</div>
         </div>`;
-      els.inspectorBody.innerHTML = `
-        <div class="model-approval-panel">
-          <div class="form-grid">
-            <label>General model approval
-              <select class="select" id="modelApproval">
-                <option value="approved" ${model.general_approved_for_use ? "selected" : ""}>Approved</option>
-                <option value="not_approved" ${!model.general_approved_for_use ? "selected" : ""}>Not approved</option>
-              </select>
-            </label>
-            <label>Last updated
-              <input class="field" value="${escapeAttr(model.general_approval_updated_at ? new Date(model.general_approval_updated_at).toLocaleString() : "-")}" readonly>
-            </label>
-          </div>
-          <label>General approval notes
-            <textarea class="textarea" id="modelApprovalNotes" placeholder="Add model-level approval notes...">${escapeHtml(model.general_approval_notes || "")}</textarea>
-          </label>
-          <button class="btn small" id="saveModelApproval">Save model approval</button>
-        </div>
+      if (state.inspectorTab === "controls") {
+        els.inspectorBody.innerHTML = renderControlsPanel(activeUseCaseId, activeApproval);
+        setInspectorFooter(false, `Viewing controls for ${activeUseCaseLabel}.`);
+      } else if (state.inspectorTab === "activity") {
+        els.inspectorBody.innerHTML = renderActivityPanel(model, activeUseCaseId, activeApproval);
+        setInspectorFooter(false, `Viewing activity for ${activeUseCaseLabel}.`);
+      } else if (state.inspectorTab === "notes") {
+        els.inspectorBody.innerHTML = renderNotesPanel(model, activeUseCaseId, activeApproval);
+        setInspectorFooter(true, `Changes apply to ${activeUseCaseLabel}.`);
+      } else {
+        state.inspectorTab = "usecases";
+        renderInspectorTabState();
+        els.inspectorBody.innerHTML = renderUseCasesPanel(model, approvals, activeUseCaseId);
+        setInspectorFooter(false, `Select a use case, then switch to Notes to edit ${activeUseCaseLabel}.`);
+      }
+    }
+
+    function renderInspectorTabState() {
+      els.inspectorTabs.querySelectorAll("[data-inspector-tab]").forEach((button) => {
+        const active = button.dataset.inspectorTab === state.inspectorTab;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+      });
+    }
+
+    function setInspectorFooter(canSave, statusText) {
+      els.saveDecision.disabled = !canSave;
+      els.saveNext.disabled = !canSave;
+      els.saveStatus.textContent = statusText;
+    }
+
+    function normalizeActiveUseCaseId(approvals) {
+      const useCaseIds = (state.catalog.use_cases || []).map((item) => item.id).filter(Boolean);
+      if (state.activeUseCaseId && useCaseIds.includes(state.activeUseCaseId)) return state.activeUseCaseId;
+      if (state.filters.useCase && useCaseIds.includes(state.filters.useCase)) {
+        state.activeUseCaseId = state.filters.useCase;
+      } else {
+        state.activeUseCaseId = Object.keys(approvals).find((id) => useCaseIds.includes(id)) || useCaseIds[0] || "";
+      }
+      return state.activeUseCaseId;
+    }
+
+    function renderUseCasesPanel(model, approvals, activeUseCaseId) {
+      return `
+        ${renderModelApprovalPanel(model)}
         <div>
           ${state.catalog.use_cases.map((useCase) => renderUseCaseCard(useCase, approvals[useCase.id] || {}, useCase.id === activeUseCaseId)).join("")}
-        </div>
+        </div>`;
+    }
+
+    function renderControlsPanel(activeUseCaseId, activeApproval) {
+      return `
+        ${renderUseCasePicker(activeUseCaseId)}
         <div class="control-grid">
-          ${controlCard("Blockers", activeApproval.proposed_recommendation_blockers || [], "red")}
-          ${controlCard("Warnings", activeApproval.proposed_recommendation_warnings || [], "orange")}
-          ${controlCard("Required controls", activeApproval.proposed_recommendation_required_controls || [], "blue")}
+          ${controlCard("Blockers", activeApproval.proposed_recommendation_blockers || [], "red", 99)}
+          ${controlCard("Warnings", activeApproval.proposed_recommendation_warnings || [], "orange", 99)}
+          ${controlCard("Required controls", activeApproval.proposed_recommendation_required_controls || [], "blue", 99)}
+          ${controlCard("Proposal reasons", activeApproval.proposed_recommendation_reasons || [], "gray", 99)}
         </div>
-        <div class="decision-form">
+        ${renderInferenceRoutes(activeApproval)}`;
+    }
+
+    function renderActivityPanel(model, activeUseCaseId, activeApproval) {
+      const entries = [
+        {
+          title: "General model approval",
+          when: model.general_approval_updated_at,
+          detail: model.general_approved_for_use ? "Approved" : "Not approved"
+        },
+        {
+          title: "Use-case approval",
+          when: activeApproval.approval_updated_at,
+          detail: activeApproval.approved_for_use ? "Approved" : "Not approved"
+        },
+        {
+          title: "Manual recommendation",
+          when: activeApproval.recommendation_updated_at,
+          detail: labelStatus(activeApproval.recommendation_status || "unrated")
+        },
+        {
+          title: "Recommendation proposal",
+          when: activeApproval.proposed_recommendation_computed_at,
+          detail: labelStatus(activeApproval.proposed_recommendation_status || "unrated")
+        },
+        {
+          title: "Model metadata verified",
+          when: model.metadata_verified_at,
+          detail: model.metadata_source_name || "Catalog metadata"
+        }
+      ].filter((entry) => entry.when || entry.detail);
+      return `
+        ${renderUseCasePicker(activeUseCaseId)}
+        <div class="list-stack">
+          ${entries.map((entry) => `
+            <div class="activity-row">
+              <strong>${escapeHtml(entry.title)}</strong>
+              <span>${escapeHtml(entry.detail || "-")}</span>
+              <span class="subtle">${escapeHtml(formatDateTime(entry.when))}</span>
+            </div>`).join("") || '<div class="empty">No saved activity for this model yet.</div>'}
+        </div>`;
+    }
+
+    function renderNotesPanel(model, activeUseCaseId, activeApproval) {
+      return `
+        ${renderUseCasePicker(activeUseCaseId)}
+        ${renderModelApprovalPanel(model)}
+        <div class="inspector-panel decision-form">
           <div class="form-grid">
             <label>Manual rating
               <select class="select" id="decisionRecommendation">
@@ -1904,7 +2009,54 @@
             <textarea class="textarea" id="decisionNotes" placeholder="Add notes to explain this decision...">${escapeHtml(activeApproval.recommendation_notes || activeApproval.approval_notes || "")}</textarea>
           </label>
         </div>`;
-      els.saveStatus.textContent = `Changes apply to ${activeUseCaseLabel}.`;
+    }
+
+    function renderModelApprovalPanel(model) {
+      return `
+        <div class="model-approval-panel">
+          <div class="form-grid">
+            <label>General model approval
+              <select class="select" id="modelApproval">
+                <option value="approved" ${model.general_approved_for_use ? "selected" : ""}>Approved</option>
+                <option value="not_approved" ${!model.general_approved_for_use ? "selected" : ""}>Not approved</option>
+              </select>
+            </label>
+            <label>Last updated
+              <input class="field" value="${escapeAttr(formatDateTime(model.general_approval_updated_at))}" readonly>
+            </label>
+          </div>
+          <label>General approval notes
+            <textarea class="textarea" id="modelApprovalNotes" placeholder="Add model-level approval notes...">${escapeHtml(model.general_approval_notes || "")}</textarea>
+          </label>
+          <button class="btn small" id="saveModelApproval">Save model approval</button>
+        </div>`;
+    }
+
+    function renderUseCasePicker(activeUseCaseId) {
+      return `
+        <div class="inspector-panel">
+          <label>Use case
+            <select class="select" id="inspectorUseCaseSelect">
+              ${state.catalog.use_cases.map((useCase) => `<option value="${escapeAttr(useCase.id)}" ${useCase.id === activeUseCaseId ? "selected" : ""}>${escapeHtml(useCase.label)}</option>`).join("")}
+            </select>
+          </label>
+        </div>`;
+    }
+
+    function renderInferenceRoutes(activeApproval) {
+      const routes = activeApproval.inference_route_approvals || [];
+      if (!routes.length) return "";
+      return `<div class="inspector-panel">
+        <h3>Approved inference routes</h3>
+        <div class="list-stack">
+          ${routes.map((route) => `
+            <div class="activity-row">
+              <strong>${escapeHtml(route.location_label || route.platform_name || route.provider || "Inference route")}</strong>
+              <span>${escapeHtml(route.approved_for_use ? "Approved" : "Not approved")}</span>
+              <span class="subtle">${escapeHtml(route.approval_notes || formatDateTime(route.approval_updated_at))}</span>
+            </div>`).join("")}
+        </div>
+      </div>`;
     }
 
     function renderUseCaseCard(useCase, approval, active) {
@@ -1925,8 +2077,8 @@
       </button>`;
     }
 
-    function controlCard(title, items, tone) {
-      const display = items.length ? items.slice(0, 3) : ["No items"];
+    function controlCard(title, items, tone, limit = 3) {
+      const display = items.length ? items.slice(0, limit) : ["No items"];
       return `<div class="control-card">
         <h3>${escapeHtml(title)} ${badge(String(items.length), tone)}</h3>
         <ul>${display.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
@@ -1936,9 +2088,17 @@
     async function saveDecision(nextAfterSave = false) {
       const model = activeModel();
       if (!model || !state.activeUseCaseId) return;
-      const approved = document.getElementById("decisionApproval").value === "approved";
-      const recommendation = document.getElementById("decisionRecommendation").value;
-      const notes = document.getElementById("decisionNotes").value;
+      const approvalSelect = document.getElementById("decisionApproval");
+      const recommendationSelect = document.getElementById("decisionRecommendation");
+      const notesInput = document.getElementById("decisionNotes");
+      if (!approvalSelect || !recommendationSelect || !notesInput) {
+        state.inspectorTab = "notes";
+        renderInspector();
+        return;
+      }
+      const approved = approvalSelect.value === "approved";
+      const recommendation = recommendationSelect.value;
+      const notes = notesInput.value;
       await request("/api/review/decisions", {
         method: "POST",
         body: JSON.stringify({
@@ -2237,9 +2397,15 @@
       return "gray";
     }
 
+    function formatDateTime(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    }
+
     function formatUpdated(approval) {
       const value = approval && (approval.recommendation_updated_at || approval.approval_updated_at);
-      return value ? new Date(value).toLocaleString() : "-";
+      return formatDateTime(value);
     }
 
     function toast(message) {
@@ -2326,6 +2492,12 @@
         state.page = 1;
         render();
       });
+      els.inspectorTabs.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-inspector-tab]");
+        if (!button) return;
+        state.inspectorTab = button.dataset.inspectorTab;
+        renderInspector();
+      });
       els.mainTable.addEventListener("click", (event) => {
         const sort = event.target.closest("[data-sort]");
         if (sort) {
@@ -2383,6 +2555,12 @@
         state.page = 1;
         render();
       });
+      els.inspectorBody.addEventListener("change", (event) => {
+        const useCaseSelect = event.target.closest("#inspectorUseCaseSelect");
+        if (!useCaseSelect) return;
+        state.activeUseCaseId = useCaseSelect.value;
+        renderInspector();
+      });
       document.querySelectorAll("[data-action]").forEach((button) => {
         button.addEventListener("click", () => {
           const action = button.dataset.action;
@@ -2406,8 +2584,8 @@
       });
       document.getElementById("syncNow").addEventListener("click", loadCatalog);
       els.runUpdates.addEventListener("click", () => startUpdateRun().catch(handleUpdatePollingError));
-      document.getElementById("saveDecision").addEventListener("click", () => saveDecision(false).catch((error) => toast(error.message)));
-      document.getElementById("saveNext").addEventListener("click", () => saveDecision(true).catch((error) => toast(error.message)));
+      els.saveDecision.addEventListener("click", () => saveDecision(false).catch((error) => toast(error.message)));
+      els.saveNext.addEventListener("click", () => saveDecision(true).catch((error) => toast(error.message)));
       document.getElementById("applyFiltered").addEventListener("click", selectAllFiltered);
       document.getElementById("addModelButton").addEventListener("click", () => els.addModelDialog.showModal());
       els.addModelForm.addEventListener("submit", (event) => {

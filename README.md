@@ -176,10 +176,12 @@ Use `Country` to filter by provider-origin country across providers. When a
 provider has multiple origin countries, the model appears under each listed
 country.
 
-Select a model to review blockers, warnings, required controls, and notes in the
-right inspector. Change `Manual rating` and use-case `Approval`, then save. For
-many models, filter first, use `Select all filtered` when needed, and apply the
-bulk recommendation or approval action to the exact selected model IDs.
+Select a model to review it in the right inspector. Use the inspector tabs to
+choose a use case, read blockers/warnings/required controls, review timestamp
+activity, or edit notes and manual decisions. Change `Manual rating` and
+use-case `Approval` in `Notes`, then save. For many models, filter first, use
+`Select all filtered` when needed, and apply the bulk recommendation or approval
+action to the exact selected model IDs.
 Use `Restricted` for limited-audience access decisions and record who may use
 the model in the recommendation notes.
 Use `Effective recommendation` to filter the final status shown in exports and
