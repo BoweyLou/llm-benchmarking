@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-061: P2 Add leaderboard bulk selection to review workbench rankings
+  - Source: Human request 2026-07-03 after using the deployed banking review workbench Rankings tab.
+  - Problem: benchmark and ranking views could inspect top models, but reviewers could not select those ranked rows and apply the same bulk approval or recommendation actions available in the model table.
+  - Scope: add ranking-row checkboxes, ranked-page selection, ranking-scoped bulk action dispatch, static UI coverage, README guidance, changelog entry, and patch version bump.
+  - Acceptance: reviewers can select individual ranked rows or the visible ranked page from a use-case ranking or benchmark leaderboard and bulk apply model-level or active-use-case decisions to those selected model IDs.
+  - Validation: static workbench coverage, JavaScript syntax check, focused review-workbench tests, docs/version checks, rendered browser smoke, and live Proxmox redeploy.
+  - Completed: 2026-07-03. The review workbench Rankings tab now supports bulk selection and actions for ranked leaderboard rows.
+
 - [x] LBM-058: P2 Add role-aware benchmark rankings to review workbench
   - Source: Human approval 2026-07-02 after planning benchmark ranking views for generative, embedding, and reranker models.
   - Problem: reviewers needed benchmark rankings somewhere in the interactive workbench, but a single mixed leaderboard would incorrectly compare embeddings, rerankers, and generative models.

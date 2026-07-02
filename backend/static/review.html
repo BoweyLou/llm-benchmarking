@@ -1957,27 +1957,35 @@
         ? state.catalog.use_cases.find((item) => item.id === state.filters.useCase)
         : null;
       els.activeUseCaseLabel.textContent = useCase ? `Use case: ${useCase.label}` : "Use case: All";
+      document.getElementById("selectFiltered").textContent = "Select all filtered";
       document.getElementById("applyFiltered").textContent = `Select all filtered (${models.length})`;
     }
 
     function renderRankingCounts(rows) {
+      const pageRows = rankingPageRows(rows);
+      const selectedIds = selectedRankingModelIds(rows);
+      const offRankingSelections = Math.max(0, state.selected.size - selectedIds.length);
       els.tableActions.hidden = true;
-      els.bulkbar.hidden = true;
-      els.selectAllFiltered.hidden = true;
-      document.getElementById("clearSelection").hidden = true;
+      els.bulkbar.hidden = false;
+      els.selectAllFiltered.hidden = !pageRows.length;
+      document.getElementById("clearSelection").hidden = false;
       els.modelCount.textContent = `${rows.length} ranked`;
-      els.selectedCount.textContent = state.rankings.mode === "benchmark" ? "Benchmark leaderboard" : "Use-case ranking";
+      els.selectedCount.textContent = `${selectedIds.length} selected`;
       els.activeUseCaseLabel.textContent = rankingContextLabel();
+      els.bulkTarget.textContent = selectedIds.length ? `${selectedIds.length} selected ranked` : "No ranked rows selected";
+      els.bulkScope.textContent = selectedIds.length
+        ? `Actions apply to selected ranked rows. Use-case actions target ${bulkUseCaseLabel()}.${offRankingSelections ? ` ${offRankingSelections} selected row${offRankingSelections === 1 ? "" : "s"} outside this ranking will be ignored.` : ""}`
+        : `Select ranked rows first. Model-level actions apply directly; use-case actions target ${bulkUseCaseLabel()}.`;
+      els.selectAllFiltered.textContent = `Select ranked page (${pageRows.length})`;
       els.showingCount.textContent = `Showing ${rows.length} ranked rows`;
       els.pageLabel.textContent = rows.length ? `1-${Math.min(state.pageSize, rows.length)} of ${rows.length}` : "No ranked rows";
-      document.getElementById("applyFiltered").textContent = "Select all filtered";
+      document.getElementById("selectFiltered").textContent = `Select ranked page (${pageRows.length})`;
+      document.getElementById("applyFiltered").textContent = `Select ranked page (${pageRows.length})`;
     }
 
     function renderRankingsView(rows) {
-      const totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
-      if (state.page > totalPages) state.page = totalPages;
+      const pageRows = rankingPageRows(rows);
       const start = (state.page - 1) * state.pageSize;
-      const pageRows = rows.slice(start, start + state.pageSize);
       els.pageLabel.textContent = rows.length
         ? `${start + 1}-${Math.min(start + state.pageSize, rows.length)} of ${rows.length}`
         : "No ranked rows";
@@ -1992,6 +2000,11 @@
         </div>
         ${renderRankingSummary(rows)}
         ${pageRows.length ? renderRankingTable(pageRows) : renderRankingEmpty()}`;
+      const selectRankingPage = document.getElementById("selectRankingPage");
+      if (selectRankingPage) {
+        const selectedOnPage = pageRows.filter((row) => state.selected.has(rankingModelId(row))).length;
+        selectRankingPage.indeterminate = selectedOnPage > 0 && selectedOnPage < pageRows.length;
+      }
     }
 
     function renderRankingUseCaseSelect() {
@@ -2038,10 +2051,12 @@
     }
 
     function renderRankingTable(rows) {
+      const allPageRowsSelected = rows.length > 0 && rows.every((row) => state.selected.has(rankingModelId(row)));
       return `
         <table>
           <colgroup>
-            <col style="width: 48px">
+            <col style="width: 34px">
+            <col style="width: 54px">
             <col style="width: 172px">
             <col style="width: 86px">
             <col style="width: 74px">
@@ -2052,6 +2067,7 @@
           </colgroup>
           <thead>
             <tr>
+              <th><input type="checkbox" id="selectRankingPage" ${allPageRowsSelected ? "checked" : ""}></th>
               <th>Rank</th>
               <th>Model</th>
               <th>Provider</th>
@@ -2068,13 +2084,15 @@
 
     function renderRankingRow(row) {
       const model = row.localModel || row.model || {};
+      const selected = state.selected.has(model.id);
       const releaseInfo = modelReleaseInfo(model);
       const evidence = row.type === "benchmark"
         ? `${benchmarkLabel(row.benchmark_id)} ${row.verified ? "verified" : "unverified"}`
         : `${(row.breakdown || []).length} benchmarks${row.missing_benchmarks && row.missing_benchmarks.length ? `, ${row.missing_benchmarks.length} missing` : ""}`;
       const scoreLabel = row.type === "benchmark" ? formatNumber(row.raw_value) : formatNumber(row.score);
       const secondaryLabel = row.type === "benchmark" ? (row.metric || "-") : formatPercent(row.coverage);
-      return `<tr class="${state.activeModelId === model.id ? "selected" : ""}" data-model-id="${escapeAttr(model.id)}">
+      return `<tr class="${selected || state.activeModelId === model.id ? "selected" : ""}" data-model-id="${escapeAttr(model.id)}">
+        <td><input type="checkbox" class="row-select" data-model-id="${escapeAttr(model.id)}" aria-label="Select ${escapeAttr(model.name || row.model.name || "ranked model")}" ${selected ? "checked" : ""}></td>
         <td><strong>${escapeHtml(row.rank)}</strong></td>
         <td><div class="model-name">${escapeHtml(model.name || row.model.name || "")}</div><div class="subtle">${escapeHtml(model.id || row.model.id || "")}</div></td>
         <td>${escapeHtml(model.provider || row.model.provider || "")}</td>
@@ -2098,6 +2116,31 @@
 
     function rankingRows() {
       return state.rankings.mode === "benchmark" ? benchmarkRankingRows() : useCaseRankingRows();
+    }
+
+    function rankingPageRows(rows) {
+      const totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
+      if (state.page > totalPages) state.page = totalPages;
+      const start = (state.page - 1) * state.pageSize;
+      return rows.slice(start, start + state.pageSize);
+    }
+
+    function rankingModelId(row) {
+      const model = row.localModel || row.model || {};
+      return model.id || ((row.model || {}).id) || "";
+    }
+
+    function selectedRankingModelIds(rows = rankingRows()) {
+      const rankedIds = new Set(rows.map(rankingModelId).filter(Boolean));
+      return Array.from(state.selected).filter((modelId) => rankedIds.has(modelId));
+    }
+
+    function selectRankingPage() {
+      const rows = rankingPageRows(rankingRows());
+      const ids = rows.map(rankingModelId).filter(Boolean);
+      state.selected = new Set(ids);
+      render();
+      toast(`Selected ${ids.length} ranked ${ids.length === 1 ? "row" : "rows"}`);
     }
 
     function useCaseRankingRows() {
@@ -2785,7 +2828,7 @@
       const models = filteredModels();
       const modelIds = explicitModelIds || (state.selected.size ? Array.from(state.selected) : models.map((model) => model.id));
       if (!modelIds.length) return toast("No models to update");
-      const useCaseId = state.filters.useCase || state.activeUseCaseId || (state.catalog.use_cases[0] || {}).id;
+      const useCaseId = bulkUseCaseId();
       const payload = { model_ids: modelIds, use_case_ids: useCaseId ? [useCaseId] : [] };
       if (action === "approve") payload.approved_for_use = true;
       if (action === "not_approved") payload.approved_for_use = false;
@@ -2801,8 +2844,24 @@
       await loadCatalog();
     }
 
+    async function applyRankingBulk(action) {
+      const modelIds = selectedRankingModelIds();
+      if (!modelIds.length) return toast("Select ranked rows before applying a bulk action");
+      return isModelApprovalAction(action) ? applyModelApproval(action, modelIds) : applyBulk(action, modelIds);
+    }
+
     function isModelApprovalAction(action) {
       return action === "approve_model" || action === "reject_model";
+    }
+
+    function bulkUseCaseId() {
+      return state.filters.useCase || state.activeUseCaseId || (state.catalog.use_cases[0] || {}).id || "";
+    }
+
+    function bulkUseCaseLabel() {
+      const useCaseId = bulkUseCaseId();
+      const useCase = state.catalog.use_cases.find((item) => item.id === useCaseId);
+      return useCase ? useCase.label : "no use case";
     }
 
     function bulkActionLabel(action) {
@@ -2981,6 +3040,10 @@
     }
 
     function selectAllFiltered() {
+      if (state.tab === "rankings") {
+        selectRankingPage();
+        return;
+      }
       const models = filteredModels();
       state.selected = new Set(models.map((model) => model.id));
       render();
@@ -3268,6 +3331,15 @@
           }
           return render();
         }
+        const selectRankingPage = event.target.closest("#selectRankingPage");
+        if (selectRankingPage) {
+          const rows = rankingPageRows(rankingRows());
+          rows.forEach((row) => {
+            const modelId = rankingModelId(row);
+            if (modelId) selectRankingPage.checked ? state.selected.add(modelId) : state.selected.delete(modelId);
+          });
+          return render();
+        }
         const rowSelect = event.target.closest(".row-select");
         if (rowSelect) {
           const modelId = rowSelect.dataset.modelId;
@@ -3341,7 +3413,9 @@
       document.querySelectorAll("[data-action]").forEach((button) => {
         button.addEventListener("click", () => {
           const action = button.dataset.action;
-          const task = isModelApprovalAction(action) ? applyModelApproval(action) : applyBulk(action);
+          const task = state.tab === "rankings"
+            ? applyRankingBulk(action)
+            : (isModelApprovalAction(action) ? applyModelApproval(action) : applyBulk(action));
           task.catch((error) => toast(error.message));
         });
       });

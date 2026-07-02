@@ -200,8 +200,11 @@ use-case `Approval` in `Notes`, then save. For many models, filter first, use
 action to the exact selected model IDs.
 In `Rankings`, select a use-case ranking or a benchmark leaderboard, then select
 a ranked row to inspect score, coverage, missing evidence, and raw benchmark
-details. Ranking evidence is read-only; use the review tabs for approval and
-recommendation decisions.
+details. Use the row checkboxes, the page checkbox, or `Select ranked page` to
+select the current top ranked rows, then use the same bulk actions as the model
+table. Model-level actions apply directly to the selected ranked model IDs;
+use-case approval and recommendation actions apply to the active use case shown
+in the bulk action note.
 Use `Restricted` for limited-audience access decisions and record who may use
 the model in the recommendation notes.
 Use `Effective recommendation` to filter the final status shown in exports and

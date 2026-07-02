@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2 - 2026-07-03
+
+- Added selectable rows and ranking-scoped bulk actions to the review workbench `Rankings` tab so benchmark leaderboard rows can be selected and approved, rejected, recommended, restricted, deprecated, or cleared in bulk.
+
 ## 0.3.1 - 2026-07-03
 
 - Added a review workbench header timestamp for the latest database update job, separate from the latest catalog sync time.
