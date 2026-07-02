@@ -143,6 +143,11 @@ contains the model listing fields plus the active use-case approval,
 manual/proposed/effective recommendation, proposal blockers, warnings, and
 required controls.
 
+Bulk review actions can target the current visible page with the table checkbox
+or the full filtered result set with `Select all filtered`. Selecting all
+filtered rows replaces the current selection with the exact filtered model IDs
+before a bulk action is saved.
+
 To run the workbench on the Proxmox tailnet host, use the deploy script:
 
 ```bash

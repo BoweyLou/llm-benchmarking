@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-041: P2 Make all-filtered selection explicit for review bulk operations
+  - Source: Human request 2026-07-02 after using bulk operations in the review workbench.
+  - Problem: the page checkbox selected only the visible 50 rows, making it unclear how to bulk-apply a decision to every row matching the current filters.
+  - Scope: table-toolbar `Select all filtered` action, count-labelled filtered selection, exact replacement of selected IDs with the filtered result set, page checkbox indeterminate state, README docs, changelog entry, Proxmox redeploy, and smoke verification.
+  - Acceptance: reviewers can select all rows matching the current filters, not just the visible page; the selection count reflects the full filtered list; bulk operations still write explicit selected model IDs.
+  - Validation: inline script parse, backend tests, docs/version checks, live Proxmox HTML check, and service health check.
+  - Completed: 2026-07-02. Bulk selection can now target the full filtered result set from the workbench toolbar.
+
 - [x] LBM-040: P2 Add browser CSV export scopes to the banking review workbench
   - Source: Human request 2026-07-02 after using the deployed interactive review workbench.
   - Problem: reviewers needed quick CSV exports from the front end for the whole catalog, the current filtered list, or selected rows without dropping back to the CLI.

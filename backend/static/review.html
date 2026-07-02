@@ -288,7 +288,8 @@
     .table-title {
       display: flex;
       align-items: center;
-      gap: 18px;
+      flex-wrap: wrap;
+      gap: 10px;
       font-weight: 720;
     }
 
@@ -825,6 +826,7 @@
             <div class="table-title">
               <span id="modelCount">0 models</span>
               <span id="selectedCount">0 selected</span>
+              <button class="btn small" id="selectAllFiltered">Select all filtered</button>
               <button class="linkish" id="clearSelection">Clear selection</button>
             </div>
             <div class="table-actions">
@@ -854,7 +856,7 @@
             </div>
             <div class="bulk-note">
               <span id="bulkScope">Actions apply to selected rows. If none are selected, they apply to the filtered list.</span>
-              <button class="linkish" id="selectFiltered">Select filtered list</button>
+              <button class="linkish" id="selectFiltered">Select all filtered</button>
             </div>
           </div>
         </div>
@@ -965,6 +967,7 @@
       selectedCount: document.getElementById("selectedCount"),
       bulkTarget: document.getElementById("bulkTarget"),
       bulkScope: document.getElementById("bulkScope"),
+      selectAllFiltered: document.getElementById("selectAllFiltered"),
       showingCount: document.getElementById("showingCount"),
       pageLabel: document.getElementById("pageLabel"),
       lastSynced: document.getElementById("lastSynced"),
@@ -1140,8 +1143,9 @@
       els.bulkScope.textContent = selectedCount
         ? "Actions apply to selected rows."
         : "No rows are selected. Actions apply to the filtered list.";
+      els.selectAllFiltered.textContent = `Select all filtered (${models.length})`;
       els.showingCount.textContent = `Showing ${models.length} of ${state.catalog.summary.model_count} models`;
-      document.getElementById("applyFiltered").textContent = `Select filtered list (${targetCount})`;
+      document.getElementById("applyFiltered").textContent = `Select all filtered (${models.length})`;
     }
 
     function renderTable(models) {
@@ -1190,6 +1194,11 @@
             ${pageModels.map(renderRow).join("")}
           </tbody>
         </table>`;
+      const selectPage = document.getElementById("selectPage");
+      if (selectPage) {
+        const selectedOnPage = pageModels.filter((model) => state.selected.has(model.id)).length;
+        selectPage.indeterminate = selectedOnPage > 0 && selectedOnPage < pageModels.length;
+      }
     }
 
     function header(key, label) {
@@ -1514,6 +1523,13 @@
       render();
     }
 
+    function selectAllFiltered() {
+      const models = filteredModels();
+      state.selected = new Set(models.map((model) => model.id));
+      render();
+      toast(`Selected ${models.length} filtered ${models.length === 1 ? "row" : "rows"}`);
+    }
+
     function badge(value, tone = "gray") {
       return `<span class="badge ${tone}">${escapeHtml(labelStatus(value))}</span>`;
     }
@@ -1680,10 +1696,8 @@
       document.querySelectorAll("[data-action]").forEach((button) => {
         button.addEventListener("click", () => applyBulk(button.dataset.action));
       });
-      document.getElementById("selectFiltered").addEventListener("click", () => {
-        filteredModels().forEach((model) => state.selected.add(model.id));
-        render();
-      });
+      document.getElementById("selectFiltered").addEventListener("click", selectAllFiltered);
+      els.selectAllFiltered.addEventListener("click", selectAllFiltered);
       document.getElementById("clearSelection").addEventListener("click", () => {
         state.selected.clear();
         render();
@@ -1699,11 +1713,7 @@
       document.getElementById("syncNow").addEventListener("click", loadCatalog);
       document.getElementById("saveDecision").addEventListener("click", () => saveDecision(false).catch((error) => toast(error.message)));
       document.getElementById("saveNext").addEventListener("click", () => saveDecision(true).catch((error) => toast(error.message)));
-      document.getElementById("applyFiltered").addEventListener("click", () => {
-        filteredModels().forEach((model) => state.selected.add(model.id));
-        render();
-        toast("Filtered rows selected. Choose a bulk action to save.");
-      });
+      document.getElementById("applyFiltered").addEventListener("click", selectAllFiltered);
       document.getElementById("addModelButton").addEventListener("click", () => els.addModelDialog.showModal());
       els.addModelForm.addEventListener("submit", (event) => {
         if (event.submitter && event.submitter.value === "save") {
