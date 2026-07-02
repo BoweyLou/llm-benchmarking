@@ -203,6 +203,9 @@ models = Table(
     Column("variant_label", String),
     Column("discovered_at", String),
     Column("discovered_update_log_id", Integer),
+    Column("general_approved_for_use", Integer, nullable=False, server_default=text("0")),
+    Column("general_approval_notes", Text),
+    Column("general_approval_updated_at", String),
     Column("approved_for_use", Integer, nullable=False, server_default=text("0")),
     Column("approval_notes", Text),
     Column("approval_updated_at", String),
@@ -518,6 +521,9 @@ def _create_schema_sql() -> list[str]:
             variant_label TEXT,
             discovered_at TEXT,
             discovered_update_log_id INTEGER REFERENCES update_log(id),
+            general_approved_for_use INTEGER NOT NULL DEFAULT 0,
+            general_approval_notes TEXT,
+            general_approval_updated_at TEXT,
             approved_for_use INTEGER NOT NULL DEFAULT 0,
             approval_notes TEXT,
             approval_updated_at TEXT,
@@ -925,6 +931,9 @@ def _migration_20260701_schema_repairs(conn: Connection) -> None:
         "variant_label": "ALTER TABLE models ADD COLUMN variant_label TEXT",
         "discovered_at": "ALTER TABLE models ADD COLUMN discovered_at TEXT",
         "discovered_update_log_id": "ALTER TABLE models ADD COLUMN discovered_update_log_id INTEGER",
+        "general_approved_for_use": "ALTER TABLE models ADD COLUMN general_approved_for_use INTEGER NOT NULL DEFAULT 0",
+        "general_approval_notes": "ALTER TABLE models ADD COLUMN general_approval_notes TEXT",
+        "general_approval_updated_at": "ALTER TABLE models ADD COLUMN general_approval_updated_at TEXT",
         "approved_for_use": "ALTER TABLE models ADD COLUMN approved_for_use INTEGER NOT NULL DEFAULT 0",
         "approval_notes": "ALTER TABLE models ADD COLUMN approval_notes TEXT",
         "approval_updated_at": "ALTER TABLE models ADD COLUMN approval_updated_at TEXT",
@@ -1179,12 +1188,28 @@ def _migration_20260702_model_age_metadata(conn: Connection) -> None:
             conn.exec_driver_sql(statement)
 
 
+def _migration_20260702_general_model_approvals(conn: Connection) -> None:
+    model_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(models)").fetchall()
+    }
+    expected_model_columns = {
+        "general_approved_for_use": "ALTER TABLE models ADD COLUMN general_approved_for_use INTEGER NOT NULL DEFAULT 0",
+        "general_approval_notes": "ALTER TABLE models ADD COLUMN general_approval_notes TEXT",
+        "general_approval_updated_at": "ALTER TABLE models ADD COLUMN general_approval_updated_at TEXT",
+    }
+    for column_name, statement in expected_model_columns.items():
+        if column_name not in model_columns:
+            conn.exec_driver_sql(statement)
+
+
 SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
     ("20260701_002_model_roles", _migration_20260701_model_roles),
     ("20260701_003_recommendation_proposals", _migration_20260701_recommendation_proposals),
     ("20260701_004_model_size_metadata", _migration_20260701_model_size_metadata),
     ("20260702_001_model_age_metadata", _migration_20260702_model_age_metadata),
+    ("20260702_002_general_model_approvals", _migration_20260702_general_model_approvals),
 )
 
 

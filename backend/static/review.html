@@ -339,7 +339,7 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 894px;
+      min-width: 960px;
       table-layout: fixed;
     }
 
@@ -584,6 +584,7 @@
       padding: 14px 12px 18px;
     }
 
+    .model-approval-panel,
     .usecase-card,
     .control-card,
     .family-row {
@@ -591,6 +592,10 @@
       border-radius: 7px;
       background: #fff;
       margin-bottom: 8px;
+    }
+
+    .model-approval-panel {
+      padding: 10px;
     }
 
     .usecase-card {
@@ -944,6 +949,14 @@
             <select id="useCaseFilter" class="select"></select>
           </div>
           <div class="filter-group">
+            <label for="generalApprovalFilter">General approval</label>
+            <select id="generalApprovalFilter" class="select">
+              <option value="">All general approvals</option>
+              <option value="approved">Approved</option>
+              <option value="not_approved">Not approved</option>
+            </select>
+          </div>
+          <div class="filter-group">
             <label for="recommendationFilter">Effective recommendation</label>
             <select id="recommendationFilter" class="select">
               <option value="">All effective recommendations</option>
@@ -964,7 +977,7 @@
             </select>
           </div>
           <div class="filter-group">
-            <label for="approvalFilter">Approval</label>
+            <label for="approvalFilter">Use-case approval</label>
             <select id="approvalFilter" class="select">
               <option value="">All approvals</option>
               <option value="approved">Approved</option>
@@ -1036,8 +1049,10 @@
           <div class="bulkbar">
             <div class="bulk-actions">
               <strong id="bulkTarget">0 selected</strong>
-              <button class="btn green" data-action="approve">Approve</button>
-              <button class="btn orange" data-action="not_approved">Not approved</button>
+              <button class="btn green" data-action="approve_model">Approve model</button>
+              <button class="btn orange" data-action="reject_model">Reject model</button>
+              <button class="btn green" data-action="approve">Approve use case</button>
+              <button class="btn orange" data-action="not_approved">Not approved use case</button>
               <button class="btn green" data-action="recommended">Recommended</button>
               <button class="btn orange" data-action="not_recommended">Not recommended</button>
               <button class="btn red" data-action="discouraged">Discouraged</button>
@@ -1114,6 +1129,7 @@
         search: "",
         provider: "",
         useCase: "",
+        generalApproval: "",
         recommendation: "",
         manualRecommendation: "",
         approval: "",
@@ -1144,6 +1160,7 @@
       search: document.getElementById("search"),
       providerFilter: document.getElementById("providerFilter"),
       useCaseFilter: document.getElementById("useCaseFilter"),
+      generalApprovalFilter: document.getElementById("generalApprovalFilter"),
       recommendationFilter: document.getElementById("recommendationFilter"),
       manualRecommendationFilter: document.getElementById("manualRecommendationFilter"),
       approvalFilter: document.getElementById("approvalFilter"),
@@ -1244,6 +1261,10 @@
         if (state.filters.role && !(model.model_roles || []).includes(state.filters.role)) return false;
         if (state.filters.smallOnly && !model.small_model_candidate) return false;
         if (useCaseId && !approvals[useCaseId]) return false;
+        if (state.filters.generalApproval) {
+          const generalApproved = model.general_approved_for_use ? "approved" : "not_approved";
+          if (generalApproved !== state.filters.generalApproval) return false;
+        }
         if (state.filters.recommendation) {
           const status = approval ? approval.effective_recommendation_status || "unrated" : "unrated";
           if (status !== state.filters.recommendation) return false;
@@ -1275,6 +1296,7 @@
       if (key === "manual") return statusFor(model).manual;
       if (key === "proposed") return statusFor(model).proposed;
       if (key === "approval") return statusFor(model).approved ? "approved" : "not";
+      if (key === "general_approval") return model.general_approved_for_use ? "approved" : "not";
       return model[key] || "";
     }
 
@@ -1365,6 +1387,7 @@
             <col style="width: 74px">
             <col style="width: 84px">
             <col style="width: 64px">
+            <col style="width: 74px">
             <col style="width: 68px">
             <col style="width: 84px">
             <col style="width: 64px">
@@ -1381,10 +1404,11 @@
               ${header("family_name", "Family")}
               <th>Roles</th>
               ${header("catalog_status", "Catalog")}
+              ${header("general_approval", "General")}
               ${header("proposed", "Proposed")}
               ${header("manual", "Manual")}
               ${header("effective", "Effective")}
-              ${header("approval", "Approval")}
+              ${header("approval", "Use-case")}
               <th>Controls</th>
               ${header("approval_updated_at", "Updated")}
             </tr>
@@ -1415,6 +1439,7 @@
         <td><button class="linkish family-link" data-family-id="${escapeAttr(model.family_id || "")}">${escapeHtml(model.family_name || model.family_id || "")}</button></td>
         <td><span class="subtle">${escapeHtml((model.model_roles || []).join(", "))}</span></td>
         <td>${compactCatalogBadge(model.catalog_status || "tracked", catalogClass(model.catalog_status))}</td>
+        <td>${badge(model.general_approved_for_use ? "Approved" : "Pending", model.general_approved_for_use ? "green" : "orange")}</td>
         <td>${compactBadge(status.proposed, recommendationClass(status.proposed))}</td>
         <td>${status.manual === "unrated" ? '<span class="subtle">-</span>' : compactBadge(status.manual, recommendationClass(status.manual))}</td>
         <td>${compactBadge(status.effective, recommendationClass(status.effective))}</td>
@@ -1440,7 +1465,9 @@
           <span>${family.needs_decision_count || 0} need decision</span>
           <span>${family.deprecated_count || 0} deprecated</span>
           <span>
-            <button class="btn small green family-action" data-family="${escapeAttr(family.family_id)}" data-action="approve">Approve family</button>
+            <button class="btn small green family-action" data-family="${escapeAttr(family.family_id)}" data-action="approve_model">Approve models</button>
+            <button class="btn small orange family-action" data-family="${escapeAttr(family.family_id)}" data-action="reject_model">Reject models</button>
+            <button class="btn small green family-action" data-family="${escapeAttr(family.family_id)}" data-action="approve">Use-case ok</button>
             <button class="btn small orange family-action" data-family="${escapeAttr(family.family_id)}" data-action="not_recommended">Not rec.</button>
           </span>
         </div>`).join("") || '<div class="empty">No families match the current view.</div>'}</div>`;
@@ -1479,6 +1506,7 @@
           ${badge(model.provider || "Unknown", "gray")}
           ${badge(`Family: ${model.family_name || model.family_id || "Unknown"}`, "blue")}
           ${badge(`Catalog: ${model.catalog_status || "tracked"}`, catalogClass(model.catalog_status))}
+          ${badge(`General: ${model.general_approved_for_use ? "Approved" : "Pending"}`, model.general_approved_for_use ? "green" : "orange")}
         </div>
         <div class="meta-grid">
           <div><span>Model type</span>${escapeHtml(model.type || "")}</div>
@@ -1487,6 +1515,23 @@
           <div><span>Data residency</span>${escapeHtml((model.inference_summary && (model.inference_summary.platform_names || []).join(", ")) || "-")}</div>
         </div>`;
       els.inspectorBody.innerHTML = `
+        <div class="model-approval-panel">
+          <div class="form-grid">
+            <label>General model approval
+              <select class="select" id="modelApproval">
+                <option value="approved" ${model.general_approved_for_use ? "selected" : ""}>Approved</option>
+                <option value="not_approved" ${!model.general_approved_for_use ? "selected" : ""}>Not approved</option>
+              </select>
+            </label>
+            <label>Last updated
+              <input class="field" value="${escapeAttr(model.general_approval_updated_at ? new Date(model.general_approval_updated_at).toLocaleString() : "-")}" readonly>
+            </label>
+          </div>
+          <label>General approval notes
+            <textarea class="textarea" id="modelApprovalNotes" placeholder="Add model-level approval notes...">${escapeHtml(model.general_approval_notes || "")}</textarea>
+          </label>
+          <button class="btn small" id="saveModelApproval">Save model approval</button>
+        </div>
         <div>
           ${state.catalog.use_cases.map((useCase) => renderUseCaseCard(useCase, approvals[useCase.id] || {}, useCase.id === activeUseCaseId)).join("")}
         </div>
@@ -1564,6 +1609,40 @@
       if (nextAfterSave) selectNextModel();
     }
 
+    async function saveModelApproval() {
+      const model = activeModel();
+      if (!model) return;
+      const approved = document.getElementById("modelApproval").value === "approved";
+      const notes = document.getElementById("modelApprovalNotes").value;
+      await request("/api/review/model-approvals", {
+        method: "POST",
+        body: JSON.stringify({
+          model_ids: [model.id],
+          approved_for_use: approved,
+          approval_notes: notes
+        })
+      });
+      toast("Model approval saved");
+      await loadCatalog();
+    }
+
+    async function applyModelApproval(action, explicitModelIds = null) {
+      const models = filteredModels();
+      const modelIds = explicitModelIds || (state.selected.size ? Array.from(state.selected) : models.map((model) => model.id));
+      if (!modelIds.length) return toast("No models to update");
+      const approved = action === "approve_model";
+      await request("/api/review/model-approvals", {
+        method: "POST",
+        body: JSON.stringify({
+          model_ids: modelIds,
+          approved_for_use: approved
+        })
+      });
+      toast(`Saved ${approved ? "model approved" : "model not approved"} for ${modelIds.length} models`);
+      state.selected.clear();
+      await loadCatalog();
+    }
+
     async function applyBulk(action, explicitModelIds = null) {
       const models = filteredModels();
       const modelIds = explicitModelIds || (state.selected.size ? Array.from(state.selected) : models.map((model) => model.id));
@@ -1583,8 +1662,14 @@
       await loadCatalog();
     }
 
+    function isModelApprovalAction(action) {
+      return action === "approve_model" || action === "reject_model";
+    }
+
     function bulkActionLabel(action) {
       return {
+        approve_model: "model approved",
+        reject_model: "model not approved",
         approve: "approved",
         not_approved: "not approved",
         recommended: "recommended",
@@ -1651,6 +1736,9 @@
         ["family_id", (model) => model.family_id],
         ["family_name", (model) => model.family_name],
         ["catalog_status", (model) => model.catalog_status],
+        ["general_approved_for_use", (model) => Boolean(model.general_approved_for_use)],
+        ["general_approval_updated_at", (model) => model.general_approval_updated_at],
+        ["general_approval_notes", (model) => model.general_approval_notes],
         ["model_roles", (model) => joinList(model.model_roles)],
         ["small_model_candidate", (model) => Boolean(model.small_model_candidate)],
         ["model_size_class", (model) => model.model_size_class],
@@ -1821,6 +1909,7 @@
         [els.search, "search"],
         [els.providerFilter, "provider"],
         [els.useCaseFilter, "useCase"],
+        [els.generalApprovalFilter, "generalApproval"],
         [els.recommendationFilter, "recommendation"],
         [els.manualRecommendationFilter, "manualRecommendation"],
         [els.approvalFilter, "approval"],
@@ -1845,6 +1934,7 @@
           search: "",
           provider: "",
           useCase: "",
+          generalApproval: "",
           recommendation: "",
           manualRecommendation: "",
           approval: "",
@@ -1854,6 +1944,7 @@
           smallOnly: false
         });
         els.search.value = "";
+        els.generalApprovalFilter.value = "";
         els.recommendationFilter.value = "";
         els.manualRecommendationFilter.value = "";
         els.approvalFilter.value = "";
@@ -1896,7 +1987,15 @@
         const familyAction = event.target.closest(".family-action");
         if (familyAction) {
           const family = state.catalog.families.find((item) => item.family_id === familyAction.dataset.family);
-          if (family) applyBulk(familyAction.dataset.action, family.model_ids);
+          if (family) {
+            const visibleIds = new Set(filteredModels().map((model) => model.id));
+            const modelIds = (family.model_ids || []).filter((modelId) => visibleIds.has(modelId));
+            if (isModelApprovalAction(familyAction.dataset.action)) {
+              applyModelApproval(familyAction.dataset.action, modelIds).catch((error) => toast(error.message));
+            } else {
+              applyBulk(familyAction.dataset.action, modelIds).catch((error) => toast(error.message));
+            }
+          }
           return;
         }
         const row = event.target.closest("tr[data-model-id]");
@@ -1906,6 +2005,11 @@
         }
       });
       els.inspectorBody.addEventListener("click", (event) => {
+        const saveModelButton = event.target.closest("#saveModelApproval");
+        if (saveModelButton) {
+          saveModelApproval().catch((error) => toast(error.message));
+          return;
+        }
         const card = event.target.closest("[data-use-case]");
         if (!card) return;
         state.activeUseCaseId = card.dataset.useCase;
@@ -1915,7 +2019,11 @@
         render();
       });
       document.querySelectorAll("[data-action]").forEach((button) => {
-        button.addEventListener("click", () => applyBulk(button.dataset.action));
+        button.addEventListener("click", () => {
+          const action = button.dataset.action;
+          const task = isModelApprovalAction(action) ? applyModelApproval(action) : applyBulk(action);
+          task.catch((error) => toast(error.message));
+        });
       });
       document.getElementById("selectFiltered").addEventListener("click", selectAllFiltered);
       els.selectAllFiltered.addEventListener("click", selectAllFiltered);

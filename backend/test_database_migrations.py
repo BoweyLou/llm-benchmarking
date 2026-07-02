@@ -31,6 +31,9 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("model_size_source_name", model_columns)
         self.assertIn("model_size_source_url", model_columns)
         self.assertIn("model_size_verified_at", model_columns)
+        self.assertIn("general_approved_for_use", model_columns)
+        self.assertIn("general_approval_notes", model_columns)
+        self.assertIn("general_approval_updated_at", model_columns)
         self.assertIsNotNone(latest_scores_view)
 
     def test_legacy_schema_upgrade_adds_missing_columns_once(self) -> None:
@@ -65,6 +68,9 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("model_size_source_name", model_columns)
         self.assertIn("model_size_source_url", model_columns)
         self.assertIn("model_size_verified_at", model_columns)
+        self.assertIn("general_approved_for_use", model_columns)
+        self.assertIn("general_approval_notes", model_columns)
+        self.assertIn("general_approval_updated_at", model_columns)
         self.assertIn("resolution_status", raw_record_columns)
         self.assertIn("recommendation_status", approval_columns)
         self.assertIn("model_use_case_recommendation_proposals", table_names)

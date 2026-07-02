@@ -342,6 +342,9 @@ class ModelOut(APIModel):
     variant_label: str | None = None
     discovered_at: datetime | None = None
     discovered_update_log_id: int | None = None
+    general_approved_for_use: bool = False
+    general_approval_notes: str | None = None
+    general_approval_updated_at: datetime | None = None
     approved_for_use: bool = False
     approval_use_case_count: int = 0
     use_case_approvals: dict[str, UseCaseApprovalOut] = Field(default_factory=dict)
@@ -435,6 +438,9 @@ class ModelSummaryOut(APIModel):
     variant_label: str | None = None
     discovered_at: datetime | None = None
     discovered_update_log_id: int | None = None
+    general_approved_for_use: bool = False
+    general_approval_notes: str | None = None
+    general_approval_updated_at: datetime | None = None
     approved_for_use: bool = False
     approval_use_case_count: int = 0
     use_case_approvals: dict[str, UseCaseApprovalOut] = Field(default_factory=dict)
@@ -481,6 +487,12 @@ class ReviewDecisionIn(APIModel):
     catalog_status: CatalogStatusIn | None = None
 
 
+class ReviewModelApprovalIn(APIModel):
+    model_ids: list[str] = Field(default_factory=list)
+    approved_for_use: bool = False
+    approval_notes: str | None = None
+
+
 class ReviewModelCreateIn(APIModel):
     name: str
     provider: str
@@ -495,6 +507,7 @@ class ReviewSnapshotIn(APIModel):
     schema_version: int
     exported_at: str | None = None
     catalog_statuses: list[dict[str, Any]] = Field(default_factory=list)
+    model_approvals: list[dict[str, Any]] = Field(default_factory=list)
     manual_models: list[dict[str, Any]] = Field(default_factory=list)
     decisions: list[dict[str, Any]] = Field(default_factory=list)
 

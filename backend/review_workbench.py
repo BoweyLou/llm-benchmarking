@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from . import update_engine
@@ -112,6 +112,40 @@ def apply_review_decisions(
     }
 
 
+def apply_model_approvals(
+    *,
+    model_ids: Iterable[str],
+    approved_for_use: bool,
+    approval_notes: str | None = None,
+) -> dict[str, Any]:
+    """Save model-level general approval without touching use-case decisions."""
+    normalized_model_ids = _unique_clean(model_ids)
+    if not normalized_model_ids:
+        raise ValueError("At least one model id is required.")
+    _ensure_models_exist(normalized_model_ids)
+
+    cleaned_notes = _clean_text(approval_notes)
+    updated_at = utc_now_iso()
+    with update_engine.ENGINE.begin() as conn:
+        result = conn.execute(
+            update(models_table)
+            .where(models_table.c.active == 1)
+            .where(models_table.c.id.in_(normalized_model_ids))
+            .values(
+                general_approved_for_use=1 if approved_for_use else 0,
+                general_approval_notes=cleaned_notes,
+                general_approval_updated_at=updated_at,
+            )
+        )
+
+    return {
+        "model_ids": normalized_model_ids,
+        "updated_count": int(result.rowcount or 0),
+        "approved_for_use": bool(approved_for_use),
+        "saved_at": updated_at,
+    }
+
+
 def add_review_model(
     *,
     name: str,
@@ -157,6 +191,24 @@ def export_review_snapshot() -> dict[str, Any]:
             .where(models_table.c.catalog_status != CATALOG_STATUS_TRACKED)
             .order_by(models_table.c.provider.asc(), models_table.c.name.asc()),
         )
+        model_approval_rows = fetch_all(
+            conn,
+            select(
+                models_table.c.id,
+                models_table.c.general_approved_for_use,
+                models_table.c.general_approval_notes,
+                models_table.c.general_approval_updated_at,
+            )
+            .where(models_table.c.active == 1)
+            .where(
+                or_(
+                    models_table.c.general_approved_for_use != 0,
+                    models_table.c.general_approval_notes.is_not(None),
+                    models_table.c.general_approval_updated_at.is_not(None),
+                )
+            )
+            .order_by(models_table.c.provider.asc(), models_table.c.name.asc()),
+        )
         manual_model_rows = fetch_all(
             conn,
             select(
@@ -177,6 +229,7 @@ def export_review_snapshot() -> dict[str, Any]:
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "exported_at": utc_now_iso(),
         "catalog_statuses": [_row_to_dict(row) for row in catalog_status_rows],
+        "model_approvals": [_row_to_dict(row) for row in model_approval_rows],
         "manual_models": [_row_to_dict(row) for row in manual_model_rows],
         "decisions": [_row_to_dict(row) for row in decision_rows],
     }
@@ -212,11 +265,13 @@ def import_review_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
 
     catalog_status_updated_count = _import_catalog_statuses(snapshot.get("catalog_statuses") or [])
     decision_summary = _import_decisions(snapshot.get("decisions") or [])
+    model_approval_updated_count = _import_model_approvals(snapshot.get("model_approvals") or [])
     return {
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "created_manual_model_count": created_manual_models,
         "skipped_manual_model_count": skipped_manual_models,
         "catalog_status_updated_count": catalog_status_updated_count,
+        "model_approval_updated_count": model_approval_updated_count,
         "decision_import_count": decision_summary["imported_count"],
         "decision_skipped_count": decision_summary["skipped_count"],
         "imported_at": utc_now_iso(),
@@ -257,8 +312,13 @@ def _build_facets(
     catalog_counts = _count_values(model.get("catalog_status") for model in models)
     role_counts: dict[str, int] = {}
     recommendation_counts: dict[str, int] = {}
+    general_approval_counts = {"approved": 0, "not_approved": 0}
     approval_counts = {"approved": 0, "not_approved": 0}
     for model in models:
+        if model.get("general_approved_for_use"):
+            general_approval_counts["approved"] += 1
+        else:
+            general_approval_counts["not_approved"] += 1
         for role in model.get("model_roles") or []:
             role_counts[str(role)] = role_counts.get(str(role), 0) + 1
         approvals = model.get("use_case_approvals")
@@ -285,6 +345,7 @@ def _build_facets(
         ],
         "catalog_statuses": _counts_to_list(catalog_counts),
         "model_roles": _counts_to_list(role_counts),
+        "general_approvals": _counts_to_list(general_approval_counts),
         "recommendations": _counts_to_list(recommendation_counts),
         "approvals": _counts_to_list(approval_counts),
     }
@@ -337,6 +398,28 @@ def _import_catalog_statuses(rows: Iterable[Any]) -> int:
                     catalog_status=catalog_status,
                     approval_notes=_clean_text(row.get("approval_notes")),
                     approval_updated_at=_clean_text(row.get("approval_updated_at")) or utc_now_iso(),
+                )
+            )
+            updated += int(result.rowcount or 0)
+    return updated
+
+
+def _import_model_approvals(rows: Iterable[Any]) -> int:
+    updated = 0
+    with update_engine.ENGINE.begin() as conn:
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            model_id = _clean_text(row.get("id"))
+            if not model_id or not _model_exists(model_id, conn=conn):
+                continue
+            result = conn.execute(
+                update(models_table)
+                .where(models_table.c.id == model_id)
+                .values(
+                    general_approved_for_use=1 if bool(row.get("general_approved_for_use")) else 0,
+                    general_approval_notes=_clean_text(row.get("general_approval_notes")),
+                    general_approval_updated_at=_clean_text(row.get("general_approval_updated_at")) or utc_now_iso(),
                 )
             )
             updated += int(result.rowcount or 0)
@@ -503,6 +586,7 @@ __all__ = [
     "CATALOG_STATUS_TRACKED",
     "SNAPSHOT_SCHEMA_VERSION",
     "add_review_model",
+    "apply_model_approvals",
     "apply_review_decisions",
     "build_review_catalog",
     "export_review_snapshot",

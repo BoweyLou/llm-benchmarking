@@ -1842,7 +1842,14 @@ def seed_reference_data(target: Connection | Engine, *, include_seed_scores: boo
             }
             for row in MODELS
         ],
-        preserve_columns=("approved_for_use", "approval_notes", "approval_updated_at"),
+        preserve_columns=(
+            "general_approved_for_use",
+            "general_approval_notes",
+            "general_approval_updated_at",
+            "approved_for_use",
+            "approval_notes",
+            "approval_updated_at",
+        ),
     )
 
     if include_seed_scores and not _has_rows(conn, scores):

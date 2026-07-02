@@ -63,12 +63,16 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Effective recommendation", app_response.text)
         self.assertIn("Manual recommendation", app_response.text)
         self.assertIn("manualRecommendationFilter", app_response.text)
+        self.assertIn("General approval", app_response.text)
+        self.assertIn("approve_model", app_response.text)
         self.assertEqual(catalog_response.status_code, 200)
         payload = catalog_response.json()
         self.assertGreaterEqual(payload["summary"]["model_count"], 1)
         self.assertIn("models", payload)
         self.assertIn("families", payload)
         self.assertIn("facets", payload)
+        model = next(model for model in payload["models"] if model["id"] == "catalog-model")
+        self.assertFalse(model["general_approved_for_use"])
 
     def test_review_decision_route_requires_admin_token(self) -> None:
         self._insert_review_model("guard-model")
@@ -147,6 +151,60 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertFalse(approval["approved_for_use"])
         self.assertEqual(approval["recommendation_status"], "recommended")
 
+    def test_review_model_approval_route_updates_general_state_only(self) -> None:
+        os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
+        self._insert_review_model("general-model")
+
+        with patch("backend.main.bootstrap"):
+            response = TestClient(main.app).post(
+                "/api/review/model-approvals",
+                json={
+                    "model_ids": ["general-model"],
+                    "approved_for_use": True,
+                    "approval_notes": "Generally approved for model catalog use.",
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["updated_count"], 1)
+        with self.engine.begin() as conn:
+            model_row = conn.execute(
+                models_table.select().where(models_table.c.id == "general-model")
+            ).mappings().one()
+            approval_rows = conn.execute(
+                model_use_case_approvals_table.select().where(
+                    model_use_case_approvals_table.c.model_id == "general-model"
+                )
+            ).mappings().all()
+        self.assertEqual(model_row["general_approved_for_use"], 1)
+        self.assertEqual(model_row["general_approval_notes"], "Generally approved for model catalog use.")
+        self.assertEqual(approval_rows, [])
+
+        review_workbench.apply_review_decisions(
+            model_ids=["general-model"],
+            use_case_ids=["customer_support"],
+            approved_for_use=False,
+            recommendation_status="not_recommended",
+        )
+        model = next(model for model in review_workbench.build_review_catalog()["models"] if model["id"] == "general-model")
+        self.assertTrue(model["general_approved_for_use"])
+        self.assertFalse(model["use_case_approvals"]["customer_support"]["approved_for_use"])
+
+    def test_seed_reapply_preserves_general_model_approval(self) -> None:
+        review_workbench.apply_model_approvals(
+            model_ids=["gpt-5-4"],
+            approved_for_use=True,
+            approval_notes="General approval survives seed refresh.",
+        )
+
+        with self.engine.begin() as conn:
+            seed_reference_data(conn, include_seed_scores=False)
+
+        model = next(model for model in update_engine.list_models() if model["id"] == "gpt-5-4")
+        self.assertTrue(model["general_approved_for_use"])
+        self.assertEqual(model["general_approval_notes"], "General approval survives seed refresh.")
+
     def test_add_model_route_creates_manual_listing(self) -> None:
         os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
 
@@ -205,6 +263,11 @@ class ReviewWorkbenchTests(unittest.TestCase):
             recommendation_status="not_recommended",
             recommendation_notes="Snapshot decision.",
         )
+        review_workbench.apply_model_approvals(
+            model_ids=["snapshot-manual-model"],
+            approved_for_use=True,
+            approval_notes="Snapshot general model approval.",
+        )
 
         with patch("backend.main.bootstrap"):
             client = TestClient(main.app)
@@ -215,6 +278,7 @@ class ReviewWorkbenchTests(unittest.TestCase):
             )
         self.assertEqual(export_response.status_code, 200)
         snapshot = export_response.json()
+        self.assertEqual(len(snapshot["model_approvals"]), 1)
 
         second_tempdir = tempfile.TemporaryDirectory()
         second_engine = get_engine(f"sqlite:///{Path(second_tempdir.name) / 'import.sqlite'}")
@@ -235,10 +299,13 @@ class ReviewWorkbenchTests(unittest.TestCase):
                 )
             self.assertEqual(import_response.status_code, 200)
             self.assertEqual(import_response.json()["created_manual_model_count"], 1)
+            self.assertEqual(import_response.json()["model_approval_updated_count"], 1)
             imported_model = next(
                 model for model in update_engine.list_models() if model["id"] == "snapshot-manual-model"
             )
             self.assertEqual(imported_model["catalog_status"], "deprecated")
+            self.assertTrue(imported_model["general_approved_for_use"])
+            self.assertEqual(imported_model["general_approval_notes"], "Snapshot general model approval.")
             approval = imported_model["use_case_approvals"]["customer_support"]
             self.assertTrue(approval["approved_for_use"])
             self.assertEqual(approval["recommendation_status"], "not_recommended")

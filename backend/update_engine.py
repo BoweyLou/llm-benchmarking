@@ -6112,6 +6112,9 @@ def _serialize_model(
     )
     payload["discovered_at"] = payload.get("discovered_at")
     payload["discovered_update_log_id"] = payload.get("discovered_update_log_id")
+    payload["general_approved_for_use"] = bool(payload.get("general_approved_for_use", 0))
+    payload["general_approval_notes"] = _clean_text(payload.get("general_approval_notes"))
+    payload["general_approval_updated_at"] = payload.get("general_approval_updated_at")
     payload.update(_model_age_payload(payload))
     payload["use_case_approvals"] = {
         use_case_id: dict(approval)

@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-045: P1 Separate general model approval from use-case approval in review workbench
+  - Source: Human request 2026-07-02 after clarifying that reviewers need to approve a model in general and then approve individual use cases separately.
+  - Problem: the review workbench exposed use-case approval clearly, but model-level approval was still ambiguous and the legacy `models.approved_for_use` column is synchronized from use-case rows.
+  - Scope: add durable `models.general_*` approval fields, review API endpoint, snapshot export/import support, review-workbench general approval filter/table column/inspector panel/bulk actions, browser CSV columns, docs, and focused persistence tests.
+  - Acceptance: reviewers can approve or reject selected, filtered, or family-visible models generally without changing `model_use_case_approvals`; use-case approval remains a separate active-use-case action.
+  - Validation: inline script parse, review workbench tests, full backend suite, docs/version checks, browser smoke, live Proxmox HTML/API checks, and service health check.
+  - Completed: 2026-07-02. General model approval is separate from use-case approval in storage, API, snapshots, exports, and UI.
+
 - [x] LBM-044: P2 Add manual recommendation filtering to review workbench
   - Source: Human request 2026-07-02 after clarifying that `Clear rating` affects manual recommendation but not approval state.
   - Problem: the left-rail recommendation filter only targeted effective recommendation status, so reviewers could not directly find rows by saved manual override or cleared manual rating.

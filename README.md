@@ -110,11 +110,11 @@ Each use-case approval can then carry:
 
 For interactive banking review, run the FastAPI app locally and open
 `/review`. The workbench shows the model catalog with provider, use-case,
-effective-recommendation, manual-recommendation, approval, family,
-catalog-status, model-role, and small-model filters; a sortable model table;
-family and needs-decision views; and a detail inspector for per-use-case
-approval notes, manual ratings, generated blockers, warnings, and required
-controls.
+general-approval, effective-recommendation, manual-recommendation, use-case
+approval, family, catalog-status, model-role, and small-model filters; a
+sortable model table; family and needs-decision views; and a detail inspector
+for model approval plus per-use-case approval notes, manual ratings, generated
+blockers, warnings, and required controls.
 
 On tablet-width screens, the workbench keeps the filters and table usable first
 and moves the inspector below the table so review controls remain reachable.
@@ -130,6 +130,9 @@ paste that value into the workbench token field. Without a token or trusted
 tailnet mode, the workbench can read the catalog but cannot save decisions.
 Saved decisions write to SQLite:
 
+- `models.general_approved_for_use`, `models.general_approval_notes`, and
+  `models.general_approval_updated_at` store model-level approval independent
+  of use-case decisions.
 - `model_use_case_approvals` stores use-case approval, manual recommendation
   status, and notes.
 - `models.catalog_status` stores listing state such as `tracked`,
@@ -148,21 +151,27 @@ read the table columns as:
 - `Approval`: the separate approved/not-approved decision for that model and use
   case.
 
+General model approval is reviewed separately in the top panel of the right
+inspector. Use `Approve model` or `Reject model` for model-level decisions.
+Use `Approve use case` or `Not approved use case` only for the active use-case
+approval.
+
 Select a model to review blockers, warnings, required controls, and notes in the
-right inspector. Change `Manual rating` and `Approval`, then save. For many
-models, filter first, use `Select all filtered` when needed, and apply the bulk
-recommendation or approval action to the exact selected model IDs.
+right inspector. Change `Manual rating` and use-case `Approval`, then save. For
+many models, filter first, use `Select all filtered` when needed, and apply the
+bulk recommendation or approval action to the exact selected model IDs.
 Use `Effective recommendation` to filter the final status shown in exports and
 use `Manual recommendation` to filter only reviewer-saved overrides, including
 rows where the manual rating has been cleared to `Unrated`.
 
 The workbench can export and import a JSON review snapshot. Use that snapshot
 when rebuilding a database so manual listings, deprecation markers, and
-approval/recommendation rows can be restored.
+general model approvals plus use-case approval/recommendation rows can be
+restored.
 
 The model table can also export CSV directly from the browser. Choose filtered,
 selected, or all rows in the table toolbar, then use `Export CSV`. The CSV
-contains the model listing fields plus the active use-case approval,
+contains the model listing fields, general model approval, active use-case approval,
 manual/proposed/effective recommendation, proposal blockers, warnings, and
 required controls.
 
@@ -170,8 +179,9 @@ Bulk review actions can target the current visible page with the table checkbox
 or the full filtered result set with `Select all filtered`. Selecting all
 filtered rows replaces the current selection with the exact filtered model IDs
 before a bulk action is saved.
-Use `Not approved` to clear approval state in bulk. Use `Clear rating` only when
-you want to reset the manual recommendation rating to `unrated` while leaving
+Use `Reject model` to clear model-level approval in bulk. Use `Not approved use
+case` to clear approval for the active use case. Use `Clear rating` only when you
+want to reset the manual recommendation rating to `unrated` while leaving
 approval state unchanged.
 
 To run the workbench on the Proxmox tailnet host, use the deploy script:
@@ -312,6 +322,7 @@ Metadata and catalog enrichments:
 
 The approval model is more than a global allow-list:
 
+- general model approval is stored separately from use-case approval
 - approval is stored per `model x use case`
 - recommendation is stored separately from approval
 - recommendation proposals are regenerated policy output stored separately from manual ratings
@@ -387,7 +398,7 @@ The core API is in [backend/main.py](backend/main.py). High-level groups:
 - model list: `/` and `/api/models`
 - catalog metadata: `/api/providers`, `/api/benchmarks`, `/api/use-cases`
 - rankings: `/api/rankings`
-- review workbench: `/review`, `/api/review/catalog`, `/api/review/decisions`, `/api/review/models`, `/api/review/snapshots/export`, and `/api/review/snapshots/import`
+- review workbench: `/review`, `/api/review/catalog`, `/api/review/decisions`, `/api/review/model-approvals`, `/api/review/models`, `/api/review/snapshots/export`, and `/api/review/snapshots/import`
 - admin edits for provider metadata, approvals, inference-route approvals, manual benchmark scores, and model curation
 - update operations: `/api/update`, `/api/update/status/{log_id}`, `/api/update/history`, source-run detail, raw source records, and audit output
 - market snapshots: `/api/market-snapshots`
