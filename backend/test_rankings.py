@@ -228,8 +228,9 @@ class RankingTests(unittest.TestCase):
         self.add_model("generator-a", "Generator A", model_roles=["generator"])
         self.add_model("embedding-a", "Embedding A", model_roles=["embedding"])
         self.add_model("reranker-a", "Reranker A", model_roles=["reranker"])
+        self.add_model("tts-a", "TTS A", model_roles=["text_to_speech"])
 
-        for model_id, score in (("generator-a", 75.0), ("embedding-a", 99.0)):
+        for model_id, score in (("generator-a", 75.0), ("embedding-a", 99.0), ("tts-a", 100.0)):
             self.add_score(model_id, "gpqa_diamond", score)
             self.add_score(model_id, "aa_intelligence", score)
             self.add_score(model_id, "chatbot_arena", score)
@@ -239,24 +240,33 @@ class RankingTests(unittest.TestCase):
         self.add_score("reranker-a", "mteb_reranking", 64.0)
         self.add_score("reranker-a", "mteb_retrieval_reranking", 58.0)
         self.add_score("generator-a", "mteb_retrieval", 100.0)
+        self.add_score("tts-a", "aa_tts_quality_elo", 1213.0)
+        self.add_score("tts-a", "aa_tts_generation_time", 2.0)
+        self.add_score("tts-a", "aa_tts_price_per_1m_chars", 18.0)
+        self.add_score("generator-a", "aa_tts_quality_elo", 9999.0)
 
         reasoning = update_engine.get_rankings("general_reasoning")
         retrieval = update_engine.get_rankings("retrieval_embeddings")
         reranking = update_engine.get_rankings("retrieval_reranking")
+        tts = update_engine.get_rankings("text_to_speech")
 
         self.assertIsNotNone(reasoning)
         self.assertIsNotNone(retrieval)
         self.assertIsNotNone(reranking)
+        self.assertIsNotNone(tts)
 
         self.assertEqual(reasoning["use_case"]["model_roles"], ["generator"])
         self.assertEqual(retrieval["use_case"]["model_roles"], ["embedding"])
         self.assertEqual(reranking["use_case"]["model_roles"], ["reranker"])
+        self.assertEqual(tts["use_case"]["model_roles"], ["text_to_speech"])
 
         self.assertEqual([row["model"]["name"] for row in reasoning["rankings"]], ["Generator A"])
         self.assertEqual([row["model"]["name"] for row in retrieval["rankings"]], ["Embedding A"])
         self.assertEqual([row["model"]["name"] for row in reranking["rankings"]], ["Reranker A"])
+        self.assertEqual([row["model"]["name"] for row in tts["rankings"]], ["TTS A"])
         self.assertEqual(retrieval["rankings"][0]["model"]["model_roles"], ["embedding"])
         self.assertEqual(reranking["rankings"][0]["model"]["model_roles"], ["reranker"])
+        self.assertEqual(tts["rankings"][0]["model"]["model_roles"], ["text_to_speech"])
 
     def test_coding_prefers_stronger_swebench_when_other_edges_are_smaller(self) -> None:
         self.add_model("flash", "Flash")
@@ -539,6 +549,13 @@ class RankingTests(unittest.TestCase):
                     "catalog_model_id": "ibm/slate-30m-english-rtrvr",
                     "model_roles": ["embedding"],
                     "parameter_count_b": 0.03,
+                    "context_window_tokens": 8192,
+                    "max_output_tokens": 1024,
+                    "price_input_per_mtok": 0.25,
+                    "price_output_per_mtok": 1.25,
+                    "release_date": "2026-06-15",
+                    "release_date_precision": "day",
+                    "release_date_confidence": "high",
                     "model_card_url": "https://example.test/slate-card",
                     "capabilities": ["embedding", "retrieval", "watsonx"],
                 }
@@ -556,6 +573,12 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(model["metadata_source_name"], "catalog_model_discovery")
         self.assertEqual(model["model_card_url"], "https://example.test/slate-card")
         self.assertEqual(model["parameter_count_b"], 0.03)
+        self.assertEqual(model["context_window_tokens"], 8192)
+        self.assertEqual(model["max_output_tokens"], 1024)
+        self.assertEqual(model["price_input_per_mtok"], 0.25)
+        self.assertEqual(model["price_output_per_mtok"], 1.25)
+        self.assertEqual(model["release_date"], "2026-06-15")
+        self.assertEqual(model["release_date_confidence"], "high")
 
         with get_connection(self.engine) as conn:
             score_rows = fetch_all(conn, select(scores_table))
@@ -1588,6 +1611,65 @@ class RankingTests(unittest.TestCase):
         self.assertIn("image-input", nova["capabilities"])
         self.assertIn("tool-use", nova["capabilities"])
         self.assertIn("structured-output", nova["capabilities"])
+
+    def test_refresh_openrouter_model_metadata_tags_transcription_models(self) -> None:
+        self.add_model("gpt-4o-transcribe", "GPT-4o Transcribe", provider="OpenAI")
+
+        openrouter_items = [
+            {
+                "id": "openai/gpt-4o-transcribe",
+                "canonical_slug": "openai/gpt-4o-transcribe",
+                "name": "OpenAI: GPT-4o Transcribe",
+                "created": 1775592472,
+                "architecture": {
+                    "modality": "audio->transcription",
+                    "input_modalities": ["audio"],
+                    "output_modalities": ["transcription"],
+                },
+                "supported_parameters": [],
+                "top_provider": {},
+                "pricing": {},
+            }
+        ]
+
+        with patch.object(update_engine, "_fetch_openrouter_models", return_value=openrouter_items):
+            update_engine._refresh_openrouter_model_metadata()
+
+        models = update_engine.list_models()
+        model = next(model for model in models if model["id"] == "gpt-4o-transcribe")
+        self.assertEqual(model["model_roles"], ["speech_to_text"])
+        self.assertIn("audio-input", model["capabilities"])
+        self.assertIn("transcription-output", model["capabilities"])
+
+    def test_refresh_openrouter_model_metadata_tags_text_to_speech_models(self) -> None:
+        self.add_model("gemini-3-1-flash-tts", "Gemini 3.1 Flash TTS", provider="Google")
+
+        openrouter_items = [
+            {
+                "id": "google/gemini-3-1-flash-tts",
+                "canonical_slug": "google/gemini-3-1-flash-tts",
+                "name": "Google: Gemini 3.1 Flash TTS",
+                "created": 1780800472,
+                "architecture": {
+                    "modality": "text->speech",
+                    "input_modalities": ["text"],
+                    "output_modalities": ["speech"],
+                },
+                "supported_parameters": [],
+                "top_provider": {},
+                "pricing": {},
+            }
+        ]
+
+        with patch.object(update_engine, "_fetch_openrouter_models", return_value=openrouter_items):
+            update_engine._refresh_openrouter_model_metadata()
+
+        models = update_engine.list_models()
+        model = next(model for model in models if model["id"] == "gemini-3-1-flash-tts")
+        self.assertEqual(model["model_roles"], ["text_to_speech"])
+        self.assertNotIn("speech_to_text", model["model_roles"])
+        self.assertIn("text->speech", model["capabilities"])
+        self.assertIn("speech-output", model["capabilities"])
 
     def test_persist_source_result_promotes_missing_chatbot_arena_metadata(self) -> None:
         self.add_model("acme-model", "Acme Model", provider="Unknown")

@@ -27,6 +27,7 @@ from .database import (
     models as models_table,
     utc_now_iso,
 )
+from .model_evidence import enrich_models_with_selection_evidence
 
 SNAPSHOT_SCHEMA_VERSION = 1
 
@@ -37,6 +38,8 @@ def build_review_catalog() -> dict[str, Any]:
     for model in models:
         model["general_approval_status"] = _general_approval_status(model)
     use_cases = update_engine.list_use_cases()
+    benchmarks = update_engine.list_benchmarks()
+    enrich_models_with_selection_evidence(models, use_cases=use_cases, benchmarks=benchmarks)
     providers = update_engine.list_providers()
     families = _build_family_summaries(models)
     facets = _build_facets(models, providers, families)
@@ -327,6 +330,7 @@ def _build_facets(
     hyperscaler_model_count = 0
     no_hyperscaler_model_count = 0
     role_counts: dict[str, int] = {}
+    capability_counts: dict[str, int] = {}
     recommendation_counts: dict[str, int] = {}
     general_approval_counts = {"approved": 0, "not_approved": 0, "unreviewed": 0}
     approval_counts = {"approved": 0, "not_approved": 0}
@@ -345,6 +349,10 @@ def _build_facets(
             no_hyperscaler_model_count += 1
         for role in model.get("model_roles") or []:
             role_counts[str(role)] = role_counts.get(str(role), 0) + 1
+        for capability in model.get("capabilities") or []:
+            capability_text = str(capability).strip()
+            if capability_text:
+                capability_counts[capability_text] = capability_counts.get(capability_text, 0) + 1
         approvals = model.get("use_case_approvals")
         if not isinstance(approvals, dict):
             continue
@@ -384,6 +392,7 @@ def _build_facets(
         ],
         "catalog_statuses": _counts_to_list(catalog_counts),
         "model_roles": _counts_to_list(role_counts),
+        "capabilities": _counts_to_list(capability_counts),
         "general_approvals": _counts_to_list(general_approval_counts),
         "recommendations": _counts_to_list(recommendation_counts),
         "approvals": _counts_to_list(approval_counts),

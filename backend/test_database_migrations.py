@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from sqlalchemy.engine import Connection
 
-from backend.database import SCHEMA_MIGRATIONS, get_engine, init_db
+from backend import database
+from backend.database import SCHEMA_MIGRATIONS, get_engine, init_db, models as models_table
 
 
 class DatabaseMigrationTests(unittest.TestCase):
@@ -78,6 +80,72 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("approval_updated_at", inference_approval_columns)
         self.assertIn("current_step_key", update_log_columns)
         self.assertIn("steps_json", update_log_columns)
+
+    def test_speech_to_text_role_migration_backfills_transcription_capabilities(self) -> None:
+        engine = init_db(get_engine("sqlite:///:memory:"))
+        with engine.begin() as conn:
+            conn.execute(
+                models_table.insert(),
+                {
+                    "id": "gpt-4o-transcribe",
+                    "name": "GPT-4o Transcribe",
+                    "provider": "OpenAI",
+                    "type": "proprietary",
+                    "model_roles_json": json.dumps(["generator"], ensure_ascii=True),
+                    "capabilities_json": json.dumps(["audio-input", "transcription-output"], ensure_ascii=True),
+                    "active": 1,
+                },
+            )
+            database._migration_20260703_speech_to_text_roles(conn)
+            row = conn.execute(
+                models_table.select().where(models_table.c.id == "gpt-4o-transcribe"),
+            ).mappings().one()
+
+        self.assertEqual(json.loads(str(row["model_roles_json"])), ["speech_to_text"])
+
+    def test_text_to_speech_role_migration_backfills_speech_output_capabilities(self) -> None:
+        engine = init_db(get_engine("sqlite:///:memory:"))
+        with engine.begin() as conn:
+            conn.execute(
+                models_table.insert(),
+                {
+                    "id": "gemini-3-1-flash-tts",
+                    "name": "Gemini 3.1 Flash TTS",
+                    "provider": "Google",
+                    "type": "proprietary",
+                    "model_roles_json": json.dumps(["generator"], ensure_ascii=True),
+                    "capabilities_json": json.dumps(["text->speech", "text-input", "speech-output"], ensure_ascii=True),
+                    "active": 1,
+                },
+            )
+            database._migration_20260703_text_to_speech_roles(conn)
+            row = conn.execute(
+                models_table.select().where(models_table.c.id == "gemini-3-1-flash-tts"),
+            ).mappings().one()
+
+        self.assertEqual(json.loads(str(row["model_roles_json"])), ["text_to_speech"])
+
+    def test_speech_to_text_role_migration_does_not_backfill_tts_name_only_rows(self) -> None:
+        engine = init_db(get_engine("sqlite:///:memory:"))
+        with engine.begin() as conn:
+            conn.execute(
+                models_table.insert(),
+                {
+                    "id": "voxtral-tts",
+                    "name": "Voxtral TTS",
+                    "provider": "Mistral AI",
+                    "type": "open_weights",
+                    "model_roles_json": json.dumps(["generator"], ensure_ascii=True),
+                    "capabilities_json": json.dumps(["text-to-speech"], ensure_ascii=True),
+                    "active": 1,
+                },
+            )
+            database._migration_20260703_speech_to_text_roles(conn)
+            row = conn.execute(
+                models_table.select().where(models_table.c.id == "voxtral-tts"),
+            ).mappings().one()
+
+        self.assertEqual(json.loads(str(row["model_roles_json"])), ["generator"])
 
 
 def _columns(conn: Connection, table_name: str) -> set[str]:

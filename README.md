@@ -123,7 +123,8 @@ The `Rankings` view keeps benchmark comparison separate from manual review. It
 can show weighted use-case rankings from `/api/rankings` or raw benchmark
 leaderboards from the loaded score data. Ranking lanes stay model-role aware:
 generator use cases rank generator models, retrieval embeddings rank embedding
-models, and retrieval reranking ranks reranker models.
+models, retrieval reranking ranks reranker models, voice-to-text ranks
+speech-to-text models, and text-to-speech ranks synthesis models.
 The model table `Release` column shows the best available release indicator:
 trusted source release date first, then proxy dates such as Hugging Face
 repository creation, OpenRouter addition, or local catalog discovery when an
@@ -220,7 +221,15 @@ contains the model listing fields, general model approval, active use-case appro
 manual/proposed/effective recommendation, proposal blockers, warnings, and
 required controls. It includes `best_release_date`,
 `best_release_date_basis`, and `best_release_date_confidence` alongside the raw
-official release-date fields.
+official release-date fields. It also includes derived model type and selection
+evidence fields: `model_type_primary`, `model_type_tags`,
+`evidence_context_use_case_id`, `strongest_signal_kind`,
+`strongest_signal_label`, `strongest_signal_value`,
+`strongest_signal_source_url`, `ranking_rank`, `ranking_score`,
+`ranking_coverage`, `cost_signal`, `speed_signal`, `hyperscaler_signal`, and
+`inference_location_signal`. Filter `General approval` to `Approved` before
+exporting when you need the model-level approved list; use-case approval remains
+a separate field in the same CSV.
 
 Bulk review actions can target the current visible page with the table checkbox
 or the full filtered result set with `Select all filtered`. Selecting all
@@ -259,10 +268,15 @@ The default output is
 choose another file, or `--skip-sync` when you need to export the current
 database state without refreshing proposal rows.
 
-Manual curation commands write local SQLite review state:
+Manual curation commands write SQLite review state for the configured
+`DATABASE_URL`; in a local shell this defaults to the repo-local database, while
+the Proxmox service uses `/var/lib/llm-benchmarking/db.sqlite`. `add-model`
+defaults to `generator`, so include `--model-role` for embedding, reranker,
+speech-to-text, or text-to-speech rows:
 
 ```bash
 python -m backend banking-review add-model --name "Vendor Model" --provider "Vendor"
+python -m backend banking-review add-model --name "NVIDIA Embedder v2" --provider "NVIDIA" --model-role embedding
 python -m backend banking-review set --model-id vendor-model --use-case customer_support --approval approved --recommendation recommended --notes "Approved for pilot."
 python -m backend banking-review set --model-id chatgpt-5-5-cyber --use-case safety_compliance --recommendation restricted --recommendation-notes "Approved cyber team only."
 python -m backend banking-review set --family-id openai::gpt-5 --use-case coding --approval approved --recommendation recommended
@@ -312,7 +326,19 @@ Fresh SQLite databases are initialized from the current schema in [backend/datab
 Models carry explicit `model_roles` in exports and API responses. Existing
 generator models default to `["generator"]`; embedding and reranker models use
 separate roles so MTEB retrieval/reranking scores do not enter generator-model
-rankings.
+rankings. Speech-recognition and transcription models use `speech_to_text`, so
+voice-to-text models can be filtered and ranked separately from general text
+generators. Speech-synthesis models use `text_to_speech`, including rows
+inferred from OpenRouter `text->speech` or `speech-output` capabilities,
+Hugging Face `text-to-speech` pipeline tags, and trusted provider catalog
+metadata.
+
+The review catalog derives `model_type_primary` and `model_type_tags` for
+export and triage. Tags include roles such as `generator`, `embedding`, and
+`reranker`, deployment or ownership signals such as `open_weights`,
+`proprietary`, `local_sml`, `hyperscaler_available`, and `australia_route`, and
+the `frontier` tag for generator models that are not marked as small-model
+candidates.
 
 Models also carry size-aware catalog fields in exports and API responses:
 `parameter_count_b`, `active_parameter_count_b`, `model_size_class`,
@@ -339,6 +365,7 @@ Benchmark adapters:
 
 - Artificial Analysis
 - Artificial Analysis IFBench
+- Artificial Analysis Text to Speech
 - Chatbot Arena
 - AILuminate
 - Berkeley Function Calling Leaderboard
@@ -350,6 +377,7 @@ Benchmark adapters:
 - LiveCodeBench
 - MMMU
 - MTEB retrieval/reranking and RTEB Finance
+- Open ASR Leaderboard
 - RAGTruth
 - SWE-bench Verified, Lite, Full, Multilingual, and Multimodal
 - tau-bench
@@ -359,9 +387,15 @@ Benchmark adapters:
 
 Metadata and catalog enrichments:
 
-- Curated Hugging Face model discovery for official/provider-owned repos
+- Curated Hugging Face model discovery for official/provider-owned repos,
+  including selected text-to-speech repos such as Kokoro and Chatterbox
 - OpenRouter models and market/ranking signals
   Recent OpenRouter models from the last 60 days are imported as provisional rows when no exact OpenRouter ID or canonical slug is already represented.
+- Configured provider catalog rows for OpenAI, Google, ElevenLabs, Cartesia,
+  Deepgram, Amazon Polly, Azure Speech, PlayHT, Resemble, and selected
+  open-weight text-to-speech models, plus restricted-access frontier/cyber
+  rows such as Claude Mythos 5 and GPT-5.5-Cyber when official provider
+  documentation exists.
 - Hugging Face repository creation and modification timestamps from curated model discovery
 - Hugging Face model-card metadata
 - Hyperscaler inference catalogs for AWS Bedrock, Azure AI Foundry, and Google Vertex AI

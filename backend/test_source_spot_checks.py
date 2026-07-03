@@ -24,6 +24,7 @@ from backend.seed_data import seed_reference_data
 from backend.sources.ailuminate import AILuminateAdapter
 from backend.sources.artificial_analysis import ArtificialAnalysisAdapter
 from backend.sources.artificial_analysis_ifbench import ArtificialAnalysisIfbenchAdapter
+from backend.sources.artificial_analysis_tts import ArtificialAnalysisTtsAdapter
 from backend.sources.base import RawSourceRecord, SourceFetchResult
 from backend.sources.bfcl import BfclAdapter
 from backend.sources.bigcodebench import BigCodeBenchAdapter
@@ -35,6 +36,7 @@ from backend.sources.livebench import LiveBenchAdapter
 from backend.sources.livecodebench import LiveCodeBenchAdapter
 from backend.sources.mmmu import MmmuAdapter
 from backend.sources.mteb import MtebAdapter
+from backend.sources.open_asr_leaderboard import OpenAsrLeaderboardAdapter
 from backend.sources.ragtruth import RagtruthAdapter
 from backend.sources.swebench import SwebenchAdapter
 from backend.sources.taubench import TaubenchAdapter
@@ -162,6 +164,176 @@ class SourceSpotCheckTests(unittest.TestCase):
 
         raw_rows = update_engine.list_raw_source_records(source_run_id)
         self.assertEqual(len(raw_rows), 2)
+        self.assertTrue(all(row["resolution_status"] == "resolved" for row in raw_rows))
+
+    def test_open_asr_spot_check_persists_speech_to_text_scores(self) -> None:
+        adapter = OpenAsrLeaderboardAdapter()
+        raw_records = [
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="asr_english_short_wer",
+                raw_model_name="nvidia/parakeet-tdt-0.6b-v3",
+                raw_value="8.5",
+                source_url="https://huggingface.co/datasets/hf-audio/open-asr-leaderboard-results",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="nvidia/parakeet-tdt-0.6b-v3",
+                payload={"RTFx": "920.4", "AMI WER": "10.0", "LS Clean WER": "7.0"},
+                metadata={
+                    "model_provider": "NVIDIA",
+                    "model_roles": ["speech_to_text"],
+                    "capabilities": ["automatic-speech-recognition", "speech-to-text"],
+                    "asr_split": "english_short",
+                    "asr_split_label": "English short-form",
+                },
+            ),
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="asr_multilingual_wer",
+                raw_model_name="nvidia/parakeet-tdt-0.6b-v3",
+                raw_value="11.25",
+                source_url="https://huggingface.co/datasets/Steveeeeeeen/multilingual_evals",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="nvidia/parakeet-tdt-0.6b-v3",
+                payload={"RTFx": "875.2", "Avg": "11.25"},
+                metadata={
+                    "model_provider": "NVIDIA",
+                    "model_roles": ["speech_to_text"],
+                    "capabilities": ["automatic-speech-recognition", "speech-to-text"],
+                    "asr_split": "multilingual",
+                    "asr_split_label": "Multilingual",
+                },
+            ),
+        ]
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, raw_records)
+
+        candidate_values = {candidate.benchmark_id: candidate.value for candidate in candidates}
+        self.assertEqual(
+            set(candidate_values),
+            {"asr_english_short_wer", "asr_multilingual_wer", "asr_realtime_factor"},
+        )
+        self.assertAlmostEqual(candidate_values["asr_english_short_wer"], 8.5)
+        self.assertAlmostEqual(candidate_values["asr_multilingual_wer"], 11.25)
+        self.assertAlmostEqual(candidate_values["asr_realtime_factor"], 920.4)
+
+        with get_connection(self.engine) as conn:
+            model_row = fetch_one(
+                conn,
+                select(models_table).where(models_table.c.name == "nvidia/parakeet-tdt-0.6b-v3"),
+            )
+        self.assertIsNotNone(model_row)
+        model_id = str(model_row["id"])
+        self.assertEqual(json.loads(str(model_row["model_roles_json"])), ["speech_to_text"])
+
+        english = self._latest_score(model_id, "asr_english_short_wer")
+        multilingual = self._latest_score(model_id, "asr_multilingual_wer")
+        rtfx = self._latest_score(model_id, "asr_realtime_factor")
+        self.assertAlmostEqual(float(english["value"]), 8.5)
+        self.assertAlmostEqual(float(multilingual["value"]), 11.25)
+        self.assertAlmostEqual(float(rtfx["value"]), 920.4)
+        self.assertIn("Open ASR Leaderboard", str(english["notes"]))
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 2)
+        self.assertTrue(all(row["resolution_status"] == "resolved" for row in raw_rows))
+
+    def test_artificial_analysis_tts_parser_extracts_quality_price_and_generation_time(self) -> None:
+        adapter = ArtificialAnalysisTtsAdapter()
+        html = """
+        <html><head>
+        <script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"Dataset","name":"Text to Speech Arena Quality Elo","data":[{"label":"Gemini 3.1 Flash TTS","qualityElo":1213.26,"detailsUrl":"/text-to-speech/providers/gemini-3-1-tts"}]}
+        </script>
+        <script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"Dataset","name":"Price","data":[{"label":"Gemini 3.1 Flash TTS, Google","pricePer1mCharacters":18.31,"detailsUrl":"/text-to-speech/models/gemini-3-1-tts"}]}
+        </script>
+        <script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"Dataset","name":"Characters Per Second","data":[{"label":"Gemini 3.1 Flash TTS, Google","charactersPerSecond":250.0,"detailsUrl":"/text-to-speech/providers/gemini-3-1-tts"}]}
+        </script>
+        </head></html>
+        """
+
+        entries = adapter._entries_from_datasets(adapter._extract_datasets(html))
+        raw_records = adapter._build_raw_records(entries, fetched_at=FUTURE_COLLECTED_AT)
+        candidates = adapter.normalize(raw_records)
+
+        self.assertEqual(len(raw_records), 1)
+        self.assertEqual(raw_records[0].raw_model_name, "Gemini 3.1 Flash TTS")
+        self.assertEqual(raw_records[0].metadata["model_roles"], ["text_to_speech"])
+        candidate_values = {candidate.benchmark_id: candidate.value for candidate in candidates}
+        self.assertAlmostEqual(candidate_values["aa_tts_quality_elo"], 1213.26)
+        self.assertAlmostEqual(candidate_values["aa_tts_price_per_1m_chars"], 18.31)
+        self.assertAlmostEqual(candidate_values["aa_tts_generation_time"], 2.0)
+
+    def test_artificial_analysis_tts_spot_check_persists_text_to_speech_scores(self) -> None:
+        adapter = ArtificialAnalysisTtsAdapter()
+        raw_records = [
+            RawSourceRecord(
+                source_id=adapter.source_id,
+                benchmark_id="aa_tts_quality_elo",
+                raw_model_name="Gemini 3.1 Flash TTS",
+                raw_value=json.dumps(
+                    {
+                        "generation_time_seconds": 2.0,
+                        "price_per_1m_chars": 18.31,
+                        "quality_elo": 1213.26,
+                    },
+                    ensure_ascii=True,
+                    sort_keys=True,
+                ),
+                source_url="https://artificialanalysis.ai/text-to-speech/models",
+                collected_at=FUTURE_COLLECTED_AT,
+                raw_model_key="gemini-3-1-flash-tts",
+                payload={"metrics": {"quality_elo": 1213.26}},
+                metadata={
+                    "model_creator": "Google",
+                    "model_roles": ["text_to_speech"],
+                    "capabilities": ["text-to-speech", "speech-synthesis", "speech-output"],
+                    "metrics": {
+                        "generation_time_seconds": 2.0,
+                        "price_per_1m_chars": 18.31,
+                        "quality_elo": 1213.26,
+                    },
+                    "metric_source_urls": {
+                        "generation_time_seconds": "https://artificialanalysis.ai/text-to-speech/providers/gemini-3-1-tts",
+                        "price_per_1m_chars": "https://artificialanalysis.ai/text-to-speech/models/gemini-3-1-tts",
+                        "quality_elo": "https://artificialanalysis.ai/text-to-speech/providers/gemini-3-1-tts",
+                    },
+                    "release_date": "2026-04-15",
+                },
+            ),
+        ]
+
+        _, source_run_id, candidates, _ = self._persist_records(adapter, raw_records)
+
+        candidate_values = {candidate.benchmark_id: candidate.value for candidate in candidates}
+        self.assertEqual(
+            set(candidate_values),
+            {"aa_tts_generation_time", "aa_tts_price_per_1m_chars", "aa_tts_quality_elo"},
+        )
+        self.assertAlmostEqual(candidate_values["aa_tts_quality_elo"], 1213.26)
+        self.assertAlmostEqual(candidate_values["aa_tts_generation_time"], 2.0)
+        self.assertAlmostEqual(candidate_values["aa_tts_price_per_1m_chars"], 18.31)
+
+        with get_connection(self.engine) as conn:
+            model_row = fetch_one(
+                conn,
+                select(models_table).where(models_table.c.name == "Gemini 3.1 Flash TTS"),
+            )
+        self.assertIsNotNone(model_row)
+        model_id = str(model_row["id"])
+        self.assertEqual(json.loads(str(model_row["model_roles_json"])), ["text_to_speech"])
+        self.assertEqual(model_row["provider"], "Google")
+
+        quality = self._latest_score(model_id, "aa_tts_quality_elo")
+        generation_time = self._latest_score(model_id, "aa_tts_generation_time")
+        price = self._latest_score(model_id, "aa_tts_price_per_1m_chars")
+        self.assertAlmostEqual(float(quality["value"]), 1213.26)
+        self.assertAlmostEqual(float(generation_time["value"]), 2.0)
+        self.assertAlmostEqual(float(price["value"]), 18.31)
+
+        raw_rows = update_engine.list_raw_source_records(source_run_id)
+        self.assertEqual(len(raw_rows), 1)
         self.assertTrue(all(row["resolution_status"] == "resolved" for row in raw_rows))
 
     def test_mteb_spot_check_persists_rteb_finance_scores(self) -> None:

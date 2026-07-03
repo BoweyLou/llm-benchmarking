@@ -3,6 +3,7 @@
 from .ailuminate import AILuminateAdapter
 from .artificial_analysis import ArtificialAnalysisAdapter
 from .artificial_analysis_ifbench import ArtificialAnalysisIfbenchAdapter
+from .artificial_analysis_tts import ArtificialAnalysisTtsAdapter
 from .bfcl import BfclAdapter
 from .bigcodebench import BigCodeBenchAdapter
 from .chatbot_arena import ChatbotArenaAdapter
@@ -14,6 +15,7 @@ from .livebench import LiveBenchAdapter
 from .livecodebench import LiveCodeBenchAdapter
 from .mmmu import MmmuAdapter
 from .mteb import MtebAdapter
+from .open_asr_leaderboard import OpenAsrLeaderboardAdapter
 from .ragtruth import RagtruthAdapter
 from .swebench import SwebenchAdapter
 from .taubench import TaubenchAdapter
@@ -25,6 +27,7 @@ def get_phase_one_adapters():
     return [
         ArtificialAnalysisAdapter(),
         ArtificialAnalysisIfbenchAdapter(),
+        ArtificialAnalysisTtsAdapter(),
         AILuminateAdapter(),
         BfclAdapter(),
         BigCodeBenchAdapter(),
@@ -37,6 +40,7 @@ def get_phase_one_adapters():
         LiveCodeBenchAdapter(),
         MmmuAdapter(),
         MtebAdapter(),
+        OpenAsrLeaderboardAdapter(),
         RagtruthAdapter(),
         SwebenchAdapter(),
         TaubenchAdapter(),
@@ -61,6 +65,7 @@ __all__ = [
     "AILuminateAdapter",
     "ArtificialAnalysisAdapter",
     "ArtificialAnalysisIfbenchAdapter",
+    "ArtificialAnalysisTtsAdapter",
     "BfclAdapter",
     "BigCodeBenchAdapter",
     "ChatbotArenaAdapter",
@@ -72,6 +77,7 @@ __all__ = [
     "LiveCodeBenchAdapter",
     "MmmuAdapter",
     "MtebAdapter",
+    "OpenAsrLeaderboardAdapter",
     "RagtruthAdapter",
     "TerminalBenchAdapter",
     "TaubenchAdapter",

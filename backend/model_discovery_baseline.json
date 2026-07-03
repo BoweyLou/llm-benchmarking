@@ -89,6 +89,326 @@
       ]
     },
     {
+      "source": "catalog",
+      "family": "anthropic-restricted-frontier",
+      "provider": "Anthropic",
+      "model_type": "proprietary",
+      "source_url": "https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5-and-claude-mythos-5",
+      "models": [
+        {
+          "id": "claude-mythos-5",
+          "name": "Claude Mythos 5",
+          "catalog_model_id": "anthropic/claude-mythos-5",
+          "model_roles": ["generator"],
+          "catalog_status": "tracked",
+          "context_window_tokens": 1000000,
+          "max_output_tokens": 128000,
+          "price_input_per_mtok": 10.0,
+          "price_output_per_mtok": 50.0,
+          "model_card_url": "https://www.anthropic.com/claude/mythos",
+          "documentation_url": "https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5-and-claude-mythos-5",
+          "capabilities": ["text->text", "cybersecurity", "biology-research", "trusted-access", "project-glasswing", "limited-availability"],
+          "intended_use_short": "Anthropic restricted-access Mythos model for vetted cybersecurity and biology research partners through Project Glasswing."
+        }
+      ]
+    },
+    {
+      "source": "catalog",
+      "family": "openai-restricted-cyber",
+      "provider": "OpenAI",
+      "model_type": "proprietary",
+      "source_url": "https://openai.com/index/gpt-5-5-with-trusted-access-for-cyber/",
+      "models": [
+        {
+          "id": "gpt-5-5-cyber",
+          "name": "GPT-5.5-Cyber",
+          "catalog_model_id": "openai/gpt-5.5-cyber",
+          "model_roles": ["generator"],
+          "catalog_status": "tracked",
+          "model_card_url": "https://openai.com/index/daybreak-securing-the-world/",
+          "documentation_url": "https://openai.com/index/gpt-5-5-with-trusted-access-for-cyber/",
+          "capabilities": ["text->text", "cybersecurity", "defensive-security", "trusted-access-for-cyber", "limited-preview", "red-team-validation", "patch-validation"],
+          "intended_use_short": "OpenAI restricted-access cybersecurity model for verified defenders and specialized authorized security workflows."
+        }
+      ]
+    },
+    {
+      "source": "catalog",
+      "family": "openai-tts",
+      "provider": "OpenAI",
+      "model_type": "proprietary",
+      "model_roles": ["text_to_speech"],
+      "source_url": "https://platform.openai.com/docs/guides/text-to-speech",
+      "models": [
+        {
+          "id": "openai-gpt-4o-mini-tts",
+          "name": "GPT-4o mini TTS",
+          "catalog_model_id": "openai/gpt-4o-mini-tts",
+          "catalog_status": "tracked",
+          "documentation_url": "https://platform.openai.com/docs/guides/text-to-speech",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output", "streaming"],
+          "intended_use_short": "OpenAI text-to-speech model for configurable spoken audio generation."
+        },
+        {
+          "id": "openai-tts-1",
+          "name": "TTS-1",
+          "catalog_model_id": "openai/tts-1",
+          "catalog_status": "tracked",
+          "documentation_url": "https://platform.openai.com/docs/guides/text-to-speech",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output"],
+          "intended_use_short": "OpenAI text-to-speech model for lower-latency spoken audio generation."
+        },
+        {
+          "id": "openai-tts-1-hd",
+          "name": "TTS-1 HD",
+          "catalog_model_id": "openai/tts-1-hd",
+          "catalog_status": "tracked",
+          "documentation_url": "https://platform.openai.com/docs/guides/text-to-speech",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output"],
+          "intended_use_short": "OpenAI higher-quality text-to-speech model for spoken audio generation."
+        }
+      ]
+    },
+    {
+      "source": "catalog",
+      "family": "google-tts",
+      "provider": "Google",
+      "model_type": "proprietary",
+      "model_roles": ["text_to_speech"],
+      "source_url": "https://ai.google.dev/gemini-api/docs/speech-generation",
+      "models": [
+        {
+          "id": "google-gemini-3-1-flash-tts",
+          "name": "Gemini 3.1 Flash TTS",
+          "catalog_model_id": "google/gemini-3.1-flash-tts",
+          "catalog_status": "tracked",
+          "documentation_url": "https://ai.google.dev/gemini-api/docs/speech-generation",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output"],
+          "intended_use_short": "Google Gemini text-to-speech model for native speech generation."
+        },
+        {
+          "id": "google-gemini-2-5-flash-tts",
+          "name": "Gemini 2.5 Flash TTS",
+          "catalog_model_id": "google/gemini-2.5-flash-tts",
+          "catalog_status": "tracked",
+          "documentation_url": "https://ai.google.dev/gemini-api/docs/speech-generation",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output"],
+          "intended_use_short": "Google Gemini Flash text-to-speech model for fast speech generation."
+        },
+        {
+          "id": "google-gemini-2-5-pro-tts",
+          "name": "Gemini 2.5 Pro TTS",
+          "catalog_model_id": "google/gemini-2.5-pro-tts",
+          "catalog_status": "tracked",
+          "documentation_url": "https://ai.google.dev/gemini-api/docs/speech-generation",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output"],
+          "intended_use_short": "Google Gemini Pro text-to-speech model for speech generation."
+        },
+        {
+          "id": "google-chirp-3-hd",
+          "name": "Chirp 3: HD",
+          "catalog_model_id": "google/chirp-3-hd",
+          "catalog_status": "tracked",
+          "documentation_url": "https://cloud.google.com/text-to-speech/docs/chirp3-hd",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output"],
+          "intended_use_short": "Google Cloud Chirp 3 HD text-to-speech voices represented as a model family rather than per-voice rows."
+        }
+      ]
+    },
+    {
+      "source": "catalog",
+      "family": "elevenlabs-tts",
+      "provider": "ElevenLabs",
+      "model_type": "proprietary",
+      "model_roles": ["text_to_speech"],
+      "source_url": "https://elevenlabs.io/docs/models",
+      "models": [
+        {
+          "id": "elevenlabs-eleven-v3",
+          "name": "Eleven v3",
+          "catalog_model_id": "elevenlabs/eleven-v3",
+          "catalog_status": "tracked",
+          "documentation_url": "https://elevenlabs.io/docs/models",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output", "voice-controls"],
+          "intended_use_short": "ElevenLabs v3 text-to-speech model for expressive speech generation."
+        },
+        {
+          "id": "elevenlabs-flash-v2-5",
+          "name": "Flash v2.5",
+          "catalog_model_id": "elevenlabs/flash-v2.5",
+          "catalog_status": "tracked",
+          "documentation_url": "https://elevenlabs.io/docs/models",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output", "low-latency"],
+          "intended_use_short": "ElevenLabs Flash text-to-speech model for low-latency speech generation."
+        },
+        {
+          "id": "elevenlabs-multilingual-v2",
+          "name": "Multilingual v2",
+          "catalog_model_id": "elevenlabs/multilingual-v2",
+          "catalog_status": "tracked",
+          "documentation_url": "https://elevenlabs.io/docs/models",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output", "multilingual"],
+          "intended_use_short": "ElevenLabs multilingual text-to-speech model."
+        }
+      ]
+    },
+    {
+      "source": "catalog",
+      "family": "cartesia-tts",
+      "provider": "Cartesia",
+      "model_type": "proprietary",
+      "model_roles": ["text_to_speech"],
+      "source_url": "https://docs.cartesia.ai/build-with-sonic/models",
+      "models": [
+        {
+          "id": "cartesia-sonic-3-5",
+          "name": "Sonic 3.5",
+          "catalog_model_id": "cartesia/sonic-3.5",
+          "catalog_status": "tracked",
+          "documentation_url": "https://docs.cartesia.ai/build-with-sonic/models",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output", "low-latency"],
+          "intended_use_short": "Cartesia Sonic text-to-speech model for low-latency speech generation."
+        }
+      ]
+    },
+    {
+      "source": "catalog",
+      "family": "deepgram-tts",
+      "provider": "Deepgram",
+      "model_type": "proprietary",
+      "model_roles": ["text_to_speech"],
+      "source_url": "https://developers.deepgram.com/docs/tts-models",
+      "models": [
+        {
+          "id": "deepgram-aura-2",
+          "name": "Aura-2",
+          "catalog_model_id": "deepgram/aura-2",
+          "catalog_status": "tracked",
+          "documentation_url": "https://developers.deepgram.com/docs/tts-models",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output"],
+          "intended_use_short": "Deepgram Aura-2 text-to-speech model family."
+        }
+      ]
+    },
+    {
+      "source": "catalog",
+      "family": "amazon-polly-tts",
+      "provider": "Amazon",
+      "model_type": "proprietary",
+      "model_roles": ["text_to_speech"],
+      "source_url": "https://docs.aws.amazon.com/polly/latest/dg/generative-voices.html",
+      "models": [
+        {
+          "id": "amazon-polly-generative",
+          "name": "Polly Generative",
+          "catalog_model_id": "amazon/polly-generative",
+          "catalog_status": "tracked",
+          "documentation_url": "https://docs.aws.amazon.com/polly/latest/dg/generative-voices.html",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output", "aws-polly"],
+          "intended_use_short": "Amazon Polly generative text-to-speech voice family represented without per-voice rows."
+        }
+      ]
+    },
+    {
+      "source": "catalog",
+      "family": "azure-speech-tts",
+      "provider": "Microsoft",
+      "model_type": "proprietary",
+      "model_roles": ["text_to_speech"],
+      "source_url": "https://learn.microsoft.com/azure/ai-services/speech-service/text-to-speech",
+      "models": [
+        {
+          "id": "azure-speech-text-to-speech",
+          "name": "Azure Speech Text to Speech",
+          "catalog_model_id": "microsoft/azure-speech-text-to-speech",
+          "catalog_status": "tracked",
+          "documentation_url": "https://learn.microsoft.com/azure/ai-services/speech-service/text-to-speech",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output", "azure-speech"],
+          "intended_use_short": "Microsoft Azure Speech text-to-speech service represented as a model family rather than per-voice rows."
+        },
+        {
+          "id": "microsoft-mai-voice-1",
+          "name": "MAI-Voice-1",
+          "catalog_model_id": "microsoft/mai-voice-1",
+          "catalog_status": "tracked",
+          "documentation_url": "https://learn.microsoft.com/azure/ai-services/speech-service/text-to-speech",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output", "azure-speech"],
+          "intended_use_short": "Microsoft MAI Voice text-to-speech model exposed through Azure speech surfaces."
+        }
+      ]
+    },
+    {
+      "source": "catalog",
+      "family": "playht-tts",
+      "provider": "PlayHT",
+      "model_type": "proprietary",
+      "model_roles": ["text_to_speech"],
+      "source_url": "https://docs.play.ht/reference/api-generate-tts-audio",
+      "models": [
+        {
+          "id": "playht-playdialog",
+          "name": "PlayDialog",
+          "catalog_model_id": "playht/playdialog",
+          "catalog_status": "tracked",
+          "documentation_url": "https://docs.play.ht/reference/api-generate-tts-audio",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output"],
+          "intended_use_short": "PlayHT conversational text-to-speech model."
+        },
+        {
+          "id": "playht-play3-0-mini",
+          "name": "Play3.0-mini",
+          "catalog_model_id": "playht/play3.0-mini",
+          "catalog_status": "tracked",
+          "documentation_url": "https://docs.play.ht/reference/api-generate-tts-audio",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output", "low-latency"],
+          "intended_use_short": "PlayHT compact text-to-speech model for faster speech generation."
+        }
+      ]
+    },
+    {
+      "source": "catalog",
+      "family": "resemble-tts",
+      "provider": "Resemble AI",
+      "model_type": "open_weights",
+      "model_roles": ["text_to_speech"],
+      "source_url": "https://github.com/resemble-ai/chatterbox",
+      "models": [
+        {
+          "id": "resemble-chatterbox",
+          "name": "Chatterbox",
+          "catalog_model_id": "resemble/chatterbox",
+          "catalog_status": "tracked",
+          "repo_url": "https://github.com/resemble-ai/chatterbox",
+          "documentation_url": "https://github.com/resemble-ai/chatterbox",
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output", "open-weights"],
+          "intended_use_short": "Resemble AI open-weight text-to-speech model."
+        }
+      ]
+    },
+    {
+      "source": "catalog",
+      "family": "kokoro-tts",
+      "provider": "Hexgrad",
+      "model_type": "open_weights",
+      "model_roles": ["text_to_speech"],
+      "source_url": "https://huggingface.co/hexgrad/Kokoro-82M",
+      "models": [
+        {
+          "id": "hexgrad-kokoro-82m",
+          "name": "Kokoro 82M v1.0",
+          "catalog_model_id": "hexgrad/Kokoro-82M",
+          "catalog_status": "tracked",
+          "huggingface_repo_id": "hexgrad/Kokoro-82M",
+          "repo_url": "https://huggingface.co/hexgrad/Kokoro-82M",
+          "model_card_url": "https://huggingface.co/hexgrad/Kokoro-82M",
+          "documentation_url": "https://huggingface.co/hexgrad/Kokoro-82M",
+          "parameter_count_b": 0.082,
+          "capabilities": ["text-to-speech", "speech-synthesis", "speech-output", "open-weights"],
+          "intended_use_short": "Open-weight Kokoro text-to-speech model from Hugging Face."
+        }
+      ]
+    },
+    {
       "source": "huggingface",
       "family": "gemma",
       "provider": "Google",

@@ -3,10 +3,11 @@
 This map documents the current ingest pipeline, source inventory, and completed
 source-review outcomes for the benchmark catalog. It reflects the integrated
 2026-07-01 data-ingest work: backlog items `LBM-016` through `LBM-032` are now
-implemented, including model-role separation for generator, embedding, and
-reranker model rankings. It also documents the curated model-discovery lane
-that exposes official small-model candidates even when ranking evidence is not
-available yet, plus the `LBM-036` release-age evidence fields.
+implemented, including model-role separation for generator, embedding,
+reranker, speech-to-text, and text-to-speech model rankings. It also documents
+the curated model-discovery lane that exposes official small-model candidates
+and provider catalog rows even when ranking evidence is not available yet, plus
+the `LBM-036` release-age evidence fields.
 
 ## Current Flow
 
@@ -21,6 +22,7 @@ flowchart LR
     subgraph Benchmarks["Benchmark adapters"]
         AA["Artificial Analysis models and release dates"]
         AAIF["Artificial Analysis IFBench"]
+        AATTS["Artificial Analysis Text to Speech"]
         Arena["Chatbot Arena"]
         AIL["AILuminate"]
         BFCL["Berkeley Function Calling Leaderboard"]
@@ -79,6 +81,7 @@ flowchart LR
     Baselines --> Store
     AA --> Adapters
     AAIF --> Adapters
+    AATTS --> Adapters
     Arena --> Adapters
     AIL --> Adapters
     BFCL --> Adapters
@@ -154,6 +157,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | Artificial Analysis models | `ArtificialAnalysisAdapter` | Intelligence, speed, blended cost, creator/family metadata, release date. | Release dates are promoted as high-confidence model release evidence; additional AA evaluation pages should be added as separate adapters when stable. |
 | Artificial Analysis IFBench | `ArtificialAnalysisIfbenchAdapter` | IFBench score plus cost, output-token, and latency metrics. | One AA evaluation page is integrated; other AA pages remain future candidates. |
+| Artificial Analysis Text to Speech | `ArtificialAnalysisTtsAdapter` | Text-to-speech Speech Arena Elo, generation time, price per 1M characters, open-weight flags, provider/model metadata, and source links. | Used only for `text_to_speech` rankings; individual voices remain metadata unless exposed as distinct provider endpoints. |
 | Chatbot Arena | `ChatbotArenaAdapter` | Arena ELO, rank bands, votes, organization, model URL, license, price, context metadata. | Metadata promotion uses source-precedence rules and does not override higher-trust sources silently. |
 | AILuminate | `AILuminateAdapter` | Public grade plus locale and system-class companion evidence. | Risk-category detail should wait for a stable detail-page surface. |
 | Berkeley Function Calling Leaderboard | `BfclAdapter` | Overall function-calling accuracy, component scores, cost, latency, organization, license, evaluation mode. | Current catalog score is overall BFCL; component scores remain raw metadata. |
@@ -165,6 +169,7 @@ flowchart LR
 | LiveCodeBench | `LiveCodeBenchAdapter` | Code-generation Pass@1 for the default window plus difficulty, platform, release-window, and contamination metadata. | Contamination flags should be inspected before using the score as a sole coding signal. |
 | MMMU | `MmmuAdapter` | Validation overall plus stable test and MMMU-Pro companion metrics; human/random baselines are skipped. | Use validation overall as the continuity anchor; companion rows add coverage. |
 | MTEB | `MtebAdapter` | Retrieval, reranking, blended retrieval/reranking, and RTEB Finance averages from official per-task result files plus the official `mteb/results` dataset, with task, revision, language, public/private, and role metadata. | Used only for embedding/reranker model-role rankings; generator use cases remain separated. RTEB Finance is a finance-domain retrieval signal, not a generator answer-quality score. |
+| Open ASR Leaderboard | `OpenAsrLeaderboardAdapter` | English short-form, multilingual, and long-form word error rate plus RTFx speed from the Hugging Face Open ASR Leaderboard CSV datasets. | Used only for `speech_to_text` model-role rankings; WER is lower-is-better quality evidence, while RTFx is companion speed evidence. |
 | RAGTruth | `RagtruthAdapter` | Overall and task-level hallucination rates for published held-out corpus evidence. | Historical corpus evidence; lower is better. |
 | SWE-bench | `SwebenchAdapter` | Verified best single-model submission plus Lite, Full, Multilingual, and Multimodal companion split scores; submitter/scaffold metadata is preserved. | Harness and scaffold effects still require review when interpreting scores. |
 | tau-bench | `TaubenchAdapter` | Standard text and voice domain Pass^1 scores with domain, mode, retrieval, and submission metadata. | Custom or aggregate systems are skipped for model score rows. |
@@ -172,7 +177,7 @@ flowchart LR
 | FaithJudge | `FaithJudgeAdapter` | Aggregate RAG hallucination rate plus task-level FaithBench/RAGTruth summarization, QA, and data-to-text rates. | Lower is better; task rows prevent one aggregate from carrying all RAG faithfulness meaning. |
 | Vectara Hallucination | `VectaraHallucinationAdapter` | Factual consistency plus hallucination-rate and answer-rate companion metrics. | This is grounded summarization evidence, not retrieval relevance. |
 | OpenRouter models | `_refresh_openrouter_model_metadata()` | All output modalities, model IDs/slugs, canonical OpenRouter identity, context and pricing fields, Hugging Face repo links, OpenRouter addition timestamp, newly discovered provisional models. | OpenRouter addition is an age proxy, not an official release date; source precedence prevents silent overrides. |
-| Configured model discovery | `_refresh_configured_model_discovery()` | Static provider catalog rows plus curated official/provider-owned Hugging Face repos, model roles, `huggingface_repo_id`, model-card/docs links, creation and modification timestamps, model size fields, small-model candidate flag, provisional or tracked catalog rows, and raw source records. | Metadata-only discovery does not synthesize scores or relax ranking gates. The baseline covers small generator families including Google Gemma, Microsoft Phi, Meta Llama 3.2 small models, Qwen small models, Mistral/Ministral small models, and IBM Granite generators, plus NVIDIA retrieval/NIM, IBM watsonx Slate, and IBM Granite retrieval entries while excluding community quantizations/fine-tunes unless a trusted mirror is configured. |
+| Configured model discovery | `_refresh_configured_model_discovery()` | Static provider catalog rows plus curated official/provider-owned Hugging Face repos, model roles, `huggingface_repo_id`, model-card/docs links, creation and modification timestamps, model size fields, small-model candidate flag, provisional or tracked catalog rows, and raw source records. | Metadata-only discovery does not synthesize scores or relax ranking gates. The baseline covers small generator families including Google Gemma, Microsoft Phi, Meta Llama 3.2 small models, Qwen small models, Mistral/Ministral small models, and IBM Granite generators; NVIDIA retrieval/NIM, IBM watsonx Slate, and IBM Granite retrieval entries; provider/open-weight text-to-speech entries from OpenAI, Google, ElevenLabs, Cartesia, Deepgram, Amazon Polly, Azure Speech, PlayHT, Resemble, and Kokoro; and restricted-access frontier/cyber rows such as Claude Mythos 5 and GPT-5.5-Cyber when official provider documentation exists, while excluding community quantizations/fine-tunes unless a trusted mirror is configured. |
 | OpenRouter market | `_refresh_openrouter_market_signals()` | Global and programming rank, total tokens, share, change ratio, request count, volume snapshots. | Ranking page payloads are optional and can change shape; failures are nonfatal warnings and appear in freshness/degraded export context. |
 | Hugging Face model cards | `_refresh_model_card_metadata()` | Model-card URL/source, docs/repo/paper URLs, license, base models, languages, capabilities, intended use, limitations, training data, cutoff. | Only models with `huggingface_repo_id`; README extraction can be incomplete or noisy. |
 | Hyperscaler catalogs | `sync_inference_catalog()` | AWS Bedrock, Azure AI Foundry, and Google Vertex AI availability, regions, deployment modes, pricing, source links, sync status. | AWS/GCP richer catalog data needs credentials; Azure public pricing can rate-limit. |
@@ -200,6 +205,10 @@ flowchart LR
 - `LBM-036`: model exports now expose release-date provenance, model-age
   estimates, Hugging Face repository timestamps, and all-modality OpenRouter
   discovery coverage.
+- `LBM-061`: text-to-speech coverage now has a dedicated model role, Artificial
+  Analysis TTS adapter, provider catalog seeds, and role-specific ranking lane.
+- `LBM-062`: restricted-access frontier/cyber models such as Claude Mythos 5 and
+  GPT-5.5-Cyber now have official provider catalog rows.
 
 ### New Source Adapters
 
@@ -217,9 +226,12 @@ flowchart LR
 MTEB retrieval and reranking scores are intentionally isolated from generator
 model rankings. The `models.model_roles_json` schema field and serialized
 `model_roles` API/export field distinguish `generator`, `embedding`,
-`reranker`, and future `multimodal_embedding` roles. Generator use cases default
-to `["generator"]`; the new `retrieval_embeddings` and `retrieval_reranking`
-use cases rank only embedding or reranker models.
+`reranker`, `multimodal_embedding`, `speech_to_text`, and `text_to_speech`
+roles. Generator use cases default to `["generator"]`; `retrieval_embeddings`
+and `retrieval_reranking` rank only embedding or reranker models, while
+`voice_to_text` ranks only speech-to-text models and `text_to_speech` ranks
+only speech-synthesis models. tau-bench voice rows remain voice-agent evidence,
+not primary text-to-speech synthesis quality.
 
 ### Catalog Discovery Boundary
 
@@ -229,9 +241,12 @@ repos from `backend/model_discovery_baseline.json`, creates active model rows,
 stores raw source records, links `huggingface_repo_id` where available, records
 model roles such as `embedding`, `reranker`, and `multimodal_embedding`, and
 parses size markers such as `270M`, `12B`, `26B-A4B`, `E2B`, and `E4B`. The
-exported fields let downstream review find provider-hosted retrieval models and
-small-model candidates, while rankings still require the configured benchmark
-evidence for the selected use case.
+same lane now carries selected provider text-to-speech catalog rows,
+open-weight Hugging Face TTS repos, and restricted-access frontier/cyber rows
+when official provider documentation exists. The exported fields let downstream
+review find provider-hosted retrieval models, TTS synthesis models, restricted
+trusted-access models, and small-model candidates, while rankings still require
+the configured benchmark evidence for the selected use case.
 
 ### Release-age Boundary
 
@@ -253,6 +268,11 @@ proxy."
 - Artificial Analysis evaluation pages expose IFBench, LiveCodeBench details,
   token usage/cost panels, and links to other evaluation leaderboards:
   <https://artificialanalysis.ai/evaluations/ifbench>
+- Artificial Analysis Text to Speech publishes selected-voice Speech Arena Elo
+  leaders and model-level datasets for quality, price per 1M characters, and
+  generation speed:
+  <https://artificialanalysis.ai/text-to-speech/leaderboard/selected-voice>
+  and <https://artificialanalysis.ai/text-to-speech/models>
 - BFCL describes an executable function-calling evaluation and states that
   leaderboard statistics/data are Apache 2.0:
   <https://github.com/ShishirPatil/gorilla/tree/main/berkeley-function-call-leaderboard>

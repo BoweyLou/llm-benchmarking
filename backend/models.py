@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SourceType = Literal["primary", "secondary", "manual"]
-ModelRole = Literal["generator", "embedding", "reranker", "multimodal_embedding"]
+ModelRole = Literal["generator", "embedding", "reranker", "multimodal_embedding", "speech_to_text", "text_to_speech"]
 RawSourceResolutionStatus = Literal["resolved", "skipped_aggregate", "unresolved"]
 UpdateStatus = Literal["running", "completed", "failed"]
 TriggeredBy = Literal["manual", "api", "scheduled", "bootstrap", "cli"]
@@ -504,6 +504,13 @@ class ReviewModelCreateIn(APIModel):
     model_roles: list[ModelRole] = Field(default_factory=lambda: ["generator"])
     catalog_status: CatalogStatusIn = "tracked"
     notes: str | None = None
+
+    @field_validator("model_roles", mode="before")
+    @classmethod
+    def coerce_model_roles(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return [value]
+        return value
 
 
 class ReviewSnapshotIn(APIModel):

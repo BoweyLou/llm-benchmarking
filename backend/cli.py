@@ -130,7 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--model-role",
         action="append",
         dest="model_roles",
-        choices=("generator", "embedding", "reranker", "multimodal_embedding"),
+        choices=("generator", "embedding", "reranker", "multimodal_embedding", "speech_to_text", "text_to_speech"),
         help="Model role. Repeat for multiple roles. Defaults to generator.",
     )
     banking_add_parser.add_argument(

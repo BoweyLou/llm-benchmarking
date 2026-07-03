@@ -137,6 +137,20 @@ class BankingReviewTests(unittest.TestCase):
             notes="Added from banking review.",
         )
         self.assertEqual(added["model_id"], "manual-banking-model")
+        tts_added = banking_review.add_model_to_listing(
+            name="Manual TTS Model",
+            provider="Manual Provider",
+            model_roles=["text_to_speech"],
+            notes="Added from banking review.",
+        )
+        self.assertEqual(tts_added["model_id"], "manual-tts-model")
+        embedding_added = banking_review.add_model_to_listing(
+            name="Manual Embedding Model",
+            provider="Manual Provider",
+            model_roles=["embedding"],
+            notes="Added from banking review.",
+        )
+        self.assertEqual(embedding_added["model_id"], "manual-embedding-model")
 
         deprecated = banking_review.deprecate_listings(
             model_ids=["manual-banking-model"],
@@ -151,6 +165,10 @@ class BankingReviewTests(unittest.TestCase):
         self.assertTrue(model["active"])
         approval = model["use_case_approvals"]["customer_support"]
         self.assertEqual(approval["recommendation_status"], "not_recommended")
+        tts_model = next(model for model in update_engine.list_models() if model["id"] == "manual-tts-model")
+        self.assertEqual(tts_model["model_roles"], ["text_to_speech"])
+        embedding_model = next(model for model in update_engine.list_models() if model["id"] == "manual-embedding-model")
+        self.assertEqual(embedding_model["model_roles"], ["embedding"])
 
     def test_cli_banking_review_set_writes_json_summary(self) -> None:
         self._insert_review_model("cli-review-model")

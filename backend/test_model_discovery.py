@@ -139,6 +139,21 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertIn("ibm-granite-embedding", huggingface_families)
         self.assertIn("ibm-granite-reranking", huggingface_families)
 
+    def test_baseline_includes_restricted_frontier_catalog_models(self) -> None:
+        catalog_models = {
+            model["id"]: model
+            for entry in model_discovery.catalog_discovery_entries()
+            for model in model_discovery.catalog_discovery_models(entry)
+        }
+
+        mythos = catalog_models["claude-mythos-5"]
+        cyber = catalog_models["gpt-5-5-cyber"]
+
+        self.assertEqual(mythos["catalog_model_id"], "anthropic/claude-mythos-5")
+        self.assertIn("trusted-access", mythos["capabilities"])
+        self.assertEqual(cyber["catalog_model_id"], "openai/gpt-5.5-cyber")
+        self.assertIn("trusted-access-for-cyber", cyber["capabilities"])
+
 
 if __name__ == "__main__":
     unittest.main()

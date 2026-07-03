@@ -1252,7 +1252,13 @@
               <option value="embedding">Embedding</option>
               <option value="reranker">Reranker</option>
               <option value="multimodal_embedding">Multimodal embedding</option>
+              <option value="speech_to_text">Speech to text</option>
+              <option value="text_to_speech">Text to speech</option>
             </select>
+          </div>
+          <div class="filter-group">
+            <label for="capabilityFilter">Capability</label>
+            <select id="capabilityFilter" class="select"></select>
           </div>
           <div class="filter-group check-row">
             <input id="smallOnly" type="checkbox">
@@ -1353,6 +1359,14 @@
         <input class="field" name="name" placeholder="Model name" required>
         <input class="field" name="provider" placeholder="Provider" required>
         <input class="field" name="model_id" placeholder="Optional model id">
+        <select class="select" name="model_roles">
+          <option value="generator">Generator</option>
+          <option value="embedding">Embedding</option>
+          <option value="reranker">Reranker</option>
+          <option value="multimodal_embedding">Multimodal embedding</option>
+          <option value="speech_to_text">Speech to text</option>
+          <option value="text_to_speech">Text to speech</option>
+        </select>
         <select class="select" name="catalog_status">
           <option value="tracked">Tracked</option>
           <option value="provisional">Provisional</option>
@@ -1387,6 +1401,7 @@
         family: "",
         catalogStatus: "",
         role: "",
+        capability: "",
         smallOnly: false
       },
       selected: new Set(),
@@ -1435,6 +1450,7 @@
       familyFilter: document.getElementById("familyFilter"),
       catalogFilter: document.getElementById("catalogFilter"),
       roleFilter: document.getElementById("roleFilter"),
+      capabilityFilter: document.getElementById("capabilityFilter"),
       smallOnly: document.getElementById("smallOnly"),
       tabs: document.getElementById("tabs"),
       mainTable: document.getElementById("mainTable"),
@@ -1643,11 +1659,17 @@
       );
       fillSelect(els.useCaseFilter, "All use cases", state.catalog.use_cases.map((item) => [item.id, item.label]));
       fillSelect(els.familyFilter, "All families", state.catalog.families.map((item) => [item.family_id, item.family_name]));
+      fillSelect(
+        els.capabilityFilter,
+        "All capabilities",
+        ((state.catalog.facets || {}).capabilities || []).map((item) => [item.id, `${item.name} (${item.count})`])
+      );
       els.useCaseFilter.value = state.filters.useCase;
       els.providerFilter.value = state.filters.provider;
       els.countryFilter.value = state.filters.country;
       els.hyperscalerFilter.value = state.filters.hyperscaler;
       els.familyFilter.value = state.filters.family;
+      els.capabilityFilter.value = state.filters.capability;
     }
 
     function fillSelect(select, firstLabel, options) {
@@ -1691,6 +1713,7 @@
           model.provider,
           model.family_name,
           model.family_id,
+          ...(model.capabilities || []),
           ...countryLabelsFor(model),
           ...hyperscalerValuesFor(model)
         ].join(" ").toLowerCase();
@@ -1701,6 +1724,7 @@
         if (state.filters.family && model.family_id !== state.filters.family) return false;
         if (state.filters.catalogStatus && model.catalog_status !== state.filters.catalogStatus) return false;
         if (state.filters.role && !(model.model_roles || []).includes(state.filters.role)) return false;
+        if (state.filters.capability && !(model.capabilities || []).includes(state.filters.capability)) return false;
         if (state.filters.smallOnly && !model.small_model_candidate) return false;
         if (useCaseId && !approvals[useCaseId]) return false;
         if (state.filters.generalApproval) {
@@ -1744,10 +1768,14 @@
       const approvals = model.use_case_approvals || {};
       const selected = state.filters.useCase;
       if (selected && approvals[selected]) return approvals[selected];
-      const matching = matchingUseCaseApproval(model, {
-        ignoreManual: state.filters.manualRecommendation === "unrated" && !state.filters.useCase
-      });
-      if (matching) return matching;
+      if (useCaseScopedFiltersActive()) {
+        const matching = matchingUseCaseApproval(model, {
+          ignoreManual: state.filters.manualRecommendation === "unrated" && !state.filters.useCase
+        });
+        if (matching) return matching;
+      }
+      const preferred = preferredUseCaseIdForModel(model, approvals);
+      if (preferred && approvals[preferred]) return approvals[preferred];
       if (state.activeUseCaseId && approvals[state.activeUseCaseId]) return approvals[state.activeUseCaseId];
       return Object.values(approvals)[0] || null;
     }
@@ -2158,6 +2186,8 @@
       if (benchmarkId === "mteb_reranking") return ["reranker"];
       if (benchmarkId === "mteb_retrieval_reranking") return ["embedding", "reranker"];
       if (benchmarkId === "mteb_retrieval" || benchmarkId === "rteb_finance") return ["embedding"];
+      if (benchmarkId && benchmarkId.startsWith("asr_")) return ["speech_to_text"];
+      if (benchmarkId && benchmarkId.startsWith("aa_tts_")) return ["text_to_speech"];
       return ["generator"];
     }
 
@@ -2171,6 +2201,7 @@
           model.provider,
           model.family_name,
           model.family_id,
+          ...(model.capabilities || []),
           ...countryLabelsFor(model),
           ...hyperscalerValuesFor(model)
         ].join(" ").toLowerCase();
@@ -2181,6 +2212,7 @@
         if (state.filters.family && model.family_id !== state.filters.family) return false;
         if (state.filters.catalogStatus && model.catalog_status !== state.filters.catalogStatus) return false;
         if (state.filters.role && !(model.model_roles || []).includes(state.filters.role)) return false;
+        if (state.filters.capability && !(model.capabilities || []).includes(state.filters.capability)) return false;
         if (state.filters.smallOnly && !model.small_model_candidate) return false;
         if (state.filters.generalApproval && generalApprovalStatus(model) !== state.filters.generalApproval) return false;
         return true;
@@ -2378,7 +2410,7 @@
         return;
       }
       const approvals = model.use_case_approvals || {};
-      const activeUseCaseId = normalizeActiveUseCaseId(approvals);
+      const activeUseCaseId = normalizeActiveUseCaseId(model, approvals);
       const activeApproval = approvals[activeUseCaseId] || {};
       const activeUseCase = state.catalog.use_cases.find((item) => item.id === activeUseCaseId) || {};
       const activeUseCaseLabel = activeUseCase.label || activeUseCaseId || "selected use case";
@@ -2499,14 +2531,37 @@
       els.saveStatus.textContent = statusText;
     }
 
-    function normalizeActiveUseCaseId(approvals) {
+    function compatibleUseCaseIdsForModel(model) {
+      const modelRoles = model && Array.isArray(model.model_roles) && model.model_roles.length
+        ? model.model_roles
+        : ["generator"];
+      return (state.catalog.use_cases || [])
+        .filter((useCase) => {
+          const useCaseRoles = Array.isArray(useCase.model_roles) && useCase.model_roles.length
+            ? useCase.model_roles
+            : ["generator"];
+          return modelRoles.some((role) => useCaseRoles.includes(role));
+        })
+        .map((useCase) => useCase.id)
+        .filter(Boolean);
+    }
+
+    function preferredUseCaseIdForModel(model, approvals = {}) {
       const useCaseIds = (state.catalog.use_cases || []).map((item) => item.id).filter(Boolean);
-      if (state.activeUseCaseId && useCaseIds.includes(state.activeUseCaseId)) return state.activeUseCaseId;
       if (state.filters.useCase && useCaseIds.includes(state.filters.useCase)) {
-        state.activeUseCaseId = state.filters.useCase;
-      } else {
-        state.activeUseCaseId = Object.keys(approvals).find((id) => useCaseIds.includes(id)) || useCaseIds[0] || "";
+        return state.filters.useCase;
       }
+      const compatibleIds = compatibleUseCaseIdsForModel(model);
+      if (state.activeUseCaseId && compatibleIds.includes(state.activeUseCaseId)) return state.activeUseCaseId;
+      const savedCompatibleId = Object.keys(approvals).find((id) => compatibleIds.includes(id));
+      if (savedCompatibleId) return savedCompatibleId;
+      if (compatibleIds.length) return compatibleIds[0];
+      if (state.activeUseCaseId && useCaseIds.includes(state.activeUseCaseId)) return state.activeUseCaseId;
+      return Object.keys(approvals).find((id) => useCaseIds.includes(id)) || useCaseIds[0] || "";
+    }
+
+    function normalizeActiveUseCaseId(model, approvals) {
+      state.activeUseCaseId = preferredUseCaseIdForModel(model, approvals);
       return state.activeUseCaseId;
     }
 
@@ -2672,7 +2727,9 @@
 
     async function saveDecision(nextAfterSave = false) {
       const model = activeModel();
-      if (!model || !state.activeUseCaseId) return;
+      if (!model) return;
+      const activeUseCaseId = normalizeActiveUseCaseId(model, model.use_case_approvals || {});
+      if (!activeUseCaseId) return;
       const approvalSelect = document.getElementById("decisionApproval");
       const recommendationSelect = document.getElementById("decisionRecommendation");
       const notesInput = document.getElementById("decisionNotes");
@@ -2688,7 +2745,7 @@
         method: "POST",
         body: JSON.stringify({
           model_ids: [model.id],
-          use_case_ids: [state.activeUseCaseId],
+          use_case_ids: [activeUseCaseId],
           approved_for_use: approved,
           recommendation_status: recommendation,
           approval_notes: notes,
@@ -2740,7 +2797,7 @@
       const models = filteredModels();
       const modelIds = explicitModelIds || (state.selected.size ? Array.from(state.selected) : models.map((model) => model.id));
       if (!modelIds.length) return toast("No models to update");
-      const useCaseId = state.filters.useCase || state.activeUseCaseId || (state.catalog.use_cases[0] || {}).id;
+      const useCaseId = bulkUseCaseIdForModels(modelIds);
       const payload = { model_ids: modelIds, use_case_ids: useCaseId ? [useCaseId] : [] };
       if (action === "approve") payload.approved_for_use = true;
       if (action === "not_approved") payload.approved_for_use = false;
@@ -2754,6 +2811,21 @@
       toast(`Saved ${bulkActionLabel(action)} for ${modelIds.length} models`);
       state.selected.clear();
       await loadCatalog();
+    }
+
+    function bulkUseCaseIdForModels(modelIds) {
+      const useCaseIds = (state.catalog.use_cases || []).map((item) => item.id).filter(Boolean);
+      if (state.filters.useCase && useCaseIds.includes(state.filters.useCase)) return state.filters.useCase;
+      const models = modelIds.map(modelById).filter(Boolean);
+      if (!models.length) return state.activeUseCaseId || useCaseIds[0] || "";
+      const compatibleSets = models.map((model) => new Set(compatibleUseCaseIdsForModel(model)));
+      const sharedCompatibleIds = useCaseIds.filter((id) => compatibleSets.every((set) => set.has(id)));
+      if (state.activeUseCaseId && sharedCompatibleIds.includes(state.activeUseCaseId)) return state.activeUseCaseId;
+      if (sharedCompatibleIds.length) return sharedCompatibleIds[0];
+      if (models.length === 1) {
+        return preferredUseCaseIdForModel(models[0], models[0].use_case_approvals || {});
+      }
+      return state.activeUseCaseId || useCaseIds[0] || "";
     }
 
     function isModelApprovalAction(action) {
@@ -2777,6 +2849,7 @@
 
     async function addModel(form) {
       const body = Object.fromEntries(new FormData(form).entries());
+      if (body.model_roles) body.model_roles = [body.model_roles];
       if (!body.model_id) delete body.model_id;
       await request("/api/review/models", { method: "POST", body: JSON.stringify(body) });
       els.addModelDialog.close();
@@ -2836,6 +2909,8 @@
         ["general_approval_updated_at", (model) => model.general_approval_updated_at],
         ["general_approval_notes", (model) => model.general_approval_notes],
         ["model_roles", (model) => joinList(model.model_roles)],
+        ["model_type_primary", (model) => model.model_type_primary],
+        ["model_type_tags", (model) => joinList(model.model_type_tags)],
         ["small_model_candidate", (model) => Boolean(model.small_model_candidate)],
         ["model_size_class", (model) => model.model_size_class],
         ["parameter_count_b", (model) => model.parameter_count_b],
@@ -2865,6 +2940,20 @@
         ["proposal_blockers", (model) => joinList(approvalForExport(model).proposed_recommendation_blockers)],
         ["proposal_warnings", (model) => joinList(approvalForExport(model).proposed_recommendation_warnings)],
         ["required_controls", (model) => joinList(approvalForExport(model).proposed_recommendation_required_controls)],
+        ["evidence_context_use_case_id", (model) => evidenceForExport(model).evidence_context_use_case_id],
+        ["evidence_context_use_case_label", (model) => evidenceForExport(model).evidence_context_use_case_label],
+        ["strongest_signal_kind", (model) => evidenceForExport(model).strongest_signal_kind],
+        ["strongest_signal_label", (model) => evidenceForExport(model).strongest_signal_label],
+        ["strongest_signal_value", (model) => evidenceForExport(model).strongest_signal_value],
+        ["strongest_signal_source_url", (model) => evidenceForExport(model).strongest_signal_source_url],
+        ["strongest_signal_notes", (model) => evidenceForExport(model).strongest_signal_notes],
+        ["ranking_rank", (model) => evidenceForExport(model).ranking_rank],
+        ["ranking_score", (model) => evidenceForExport(model).ranking_score],
+        ["ranking_coverage", (model) => evidenceForExport(model).ranking_coverage],
+        ["cost_signal", (model) => evidenceForExport(model).cost_signal],
+        ["speed_signal", (model) => evidenceForExport(model).speed_signal],
+        ["hyperscaler_signal", (model) => evidenceForExport(model).hyperscaler_signal],
+        ["inference_location_signal", (model) => evidenceForExport(model).inference_location_signal],
         ["inference_destinations", (model) => joinList((model.inference_summary || {}).platform_names)],
         ["model_card_url", (model) => model.model_card_url],
         ["documentation_url", (model) => model.documentation_url],
@@ -2885,6 +2974,13 @@
       return state.filters.useCase
         ? { id, label: useCase.label || "" }
         : { id: "", label: "All matching use cases" };
+    }
+
+    function evidenceForExport(model) {
+      const useCaseId = state.filters.useCase;
+      const evidenceByUseCase = model.selection_evidence_by_use_case || {};
+      if (useCaseId && evidenceByUseCase[useCaseId]) return evidenceByUseCase[useCaseId];
+      return model;
     }
 
     function approvalForExport(model) {
@@ -3133,7 +3229,8 @@
         [els.approvalFilter, "approval"],
         [els.familyFilter, "family"],
         [els.catalogFilter, "catalogStatus"],
-        [els.roleFilter, "role"]
+        [els.roleFilter, "role"],
+        [els.capabilityFilter, "capability"]
       ];
       filterBindings.forEach(([element, key]) => {
         element.addEventListener("input", () => {
@@ -3161,6 +3258,7 @@
           family: "",
           catalogStatus: "",
           role: "",
+          capability: "",
           smallOnly: false
         });
         els.search.value = "";
@@ -3172,6 +3270,7 @@
         els.approvalFilter.value = "";
         els.catalogFilter.value = "";
         els.roleFilter.value = "";
+        els.capabilityFilter.value = "";
         els.smallOnly.checked = false;
         populateFilters();
         render();

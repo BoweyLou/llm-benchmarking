@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -58,6 +59,18 @@ class ReviewWorkbenchTests(unittest.TestCase):
             release_date="2026-01-15",
             release_date_confidence="high",
         )
+        self._insert_review_model(
+            "speech-catalog-model",
+            model_roles=["speech_to_text"],
+            capabilities=["automatic-speech-recognition"],
+            include_default_scores=False,
+        )
+        self._insert_review_model(
+            "tts-catalog-model",
+            model_roles=["text_to_speech"],
+            capabilities=["text-to-speech"],
+            include_default_scores=False,
+        )
         self._insert_inference_destination("catalog-model", "azure-ai-foundry", "Azure AI Foundry")
 
         with patch("backend.main.bootstrap"):
@@ -82,6 +95,11 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Run updates", app_response.text)
         self.assertIn("updateProgressPanel", app_response.text)
         self.assertIn("/api/update/status/", app_response.text)
+        self.assertIn('name="model_roles"', app_response.text)
+        self.assertIn('value="embedding"', app_response.text)
+        self.assertIn("body.model_roles = [body.model_roles]", app_response.text)
+        self.assertIn("preferredUseCaseIdForModel", app_response.text)
+        self.assertIn("bulkUseCaseIdForModels", app_response.text)
         self.assertIn('${header("release_date", "Release")}', app_response.text)
         self.assertIn("modelReleaseInfo", app_response.text)
         self.assertIn("best_release_date", app_response.text)
@@ -102,8 +120,15 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("/api/benchmarks", app_response.text)
         self.assertIn("Benchmark leaderboard", app_response.text)
         self.assertIn("benchmarkCompatibleRoles", app_response.text)
+        self.assertIn("Speech to text", app_response.text)
+        self.assertIn("Text to speech", app_response.text)
+        self.assertIn("capabilityFilter", app_response.text)
+        self.assertIn("Capability", app_response.text)
         self.assertIn("General approval", app_response.text)
         self.assertIn("approve_model", app_response.text)
+        self.assertIn("model_type_primary", app_response.text)
+        self.assertIn("strongest_signal_kind", app_response.text)
+        self.assertIn("evidenceForExport", app_response.text)
         self.assertEqual(catalog_response.status_code, 200)
         payload = catalog_response.json()
         self.assertGreaterEqual(payload["summary"]["model_count"], 1)
@@ -113,6 +138,12 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("countries", payload["facets"])
         self.assertTrue(payload["facets"]["countries"])
         self.assertIn("hyperscalers", payload["facets"])
+        capability_counts = {item["id"]: item["count"] for item in payload["facets"]["capabilities"]}
+        self.assertGreaterEqual(capability_counts.get("automatic-speech-recognition", 0), 1)
+        self.assertGreaterEqual(capability_counts.get("text-to-speech", 0), 1)
+        role_counts = {item["id"]: item["count"] for item in payload["facets"]["model_roles"]}
+        self.assertGreaterEqual(role_counts.get("speech_to_text", 0), 1)
+        self.assertGreaterEqual(role_counts.get("text_to_speech", 0), 1)
         general_approval_counts = {item["id"]: item["count"] for item in payload["facets"]["general_approvals"]}
         self.assertGreaterEqual(general_approval_counts.get("unreviewed", 0), 1)
         hyperscaler_names = {item["name"] for item in payload["facets"]["hyperscalers"]}
@@ -126,6 +157,169 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertEqual(model["release_date"], "2026-01-15")
         self.assertEqual(model["release_date_confidence"], "high")
         self.assertEqual(model["model_age_basis"], "release_date")
+        self.assertEqual(model["model_type_primary"], "frontier")
+        self.assertIn("frontier", model["model_type_tags"])
+        self.assertIn("hyperscaler_available", model["model_type_tags"])
+        self.assertEqual(model["strongest_signal_kind"], "hyperscaler")
+        self.assertEqual(model["hyperscaler_signal"], "Azure AI Foundry")
+        speech_model = next(model for model in payload["models"] if model["id"] == "speech-catalog-model")
+        self.assertEqual(speech_model["model_type_primary"], "speech_to_text")
+        self.assertEqual(speech_model["evidence_context_use_case_id"], "voice_to_text")
+        tts_model = next(model for model in payload["models"] if model["id"] == "tts-catalog-model")
+        self.assertEqual(tts_model["model_type_primary"], "text_to_speech")
+        self.assertEqual(tts_model["evidence_context_use_case_id"], "text_to_speech")
+
+    def test_review_catalog_adds_ranked_benchmark_selection_evidence(self) -> None:
+        self._insert_review_model("ranked-generator")
+        with self.engine.begin() as conn:
+            conn.execute(
+                scores_table.insert(),
+                [
+                    {
+                        "model_id": "ranked-generator",
+                        "benchmark_id": "aa_intelligence",
+                        "value": 55.0,
+                        "raw_value": "55.0",
+                        "collected_at": "2026-07-01T00:00:00Z",
+                        "source_url": "https://example.com/aa",
+                        "source_type": "primary",
+                        "verified": 1,
+                    },
+                    {
+                        "model_id": "ranked-generator",
+                        "benchmark_id": "gpqa_diamond",
+                        "value": 80.0,
+                        "raw_value": "80.0",
+                        "collected_at": "2026-07-01T00:00:00Z",
+                        "source_url": "https://example.com/gpqa",
+                        "source_type": "primary",
+                        "verified": 1,
+                    }
+                ],
+            )
+
+        model = next(model for model in review_workbench.build_review_catalog()["models"] if model["id"] == "ranked-generator")
+
+        self.assertEqual(model["model_type_primary"], "frontier")
+        self.assertEqual(model["evidence_context_use_case_id"], "general_reasoning")
+        self.assertEqual(model["strongest_signal_kind"], "benchmark")
+        self.assertEqual(model["strongest_signal_label"], "AA Intel")
+        self.assertIsNotNone(model["ranking_rank"])
+        self.assertGreater(model["ranking_score"], 0)
+        self.assertEqual(model["cost_signal"], "Cost: 0.2")
+        self.assertEqual(model["speed_signal"], "Speed: 120.0")
+        self.assertIn("general_reasoning", model["selection_evidence_by_use_case"])
+
+    def test_review_catalog_adds_embedding_reranker_and_local_sml_types(self) -> None:
+        self._insert_review_model("embedding-model", model_roles=["embedding"], include_default_scores=False)
+        self._insert_review_model("reranker-model", model_roles=["reranker"], include_default_scores=False)
+        self._insert_review_model("tts-model", model_roles=["text_to_speech"], include_default_scores=False)
+        self._insert_review_model(
+            "local-small-model",
+            model_type="open_weights",
+            model_roles=["generator"],
+            small_model_candidate=True,
+            model_size_class="small",
+            parameter_count_b=4.0,
+            include_default_scores=False,
+        )
+        with self.engine.begin() as conn:
+            conn.execute(
+                scores_table.insert(),
+                [
+                    {
+                        "model_id": "embedding-model",
+                        "benchmark_id": "mteb_retrieval",
+                        "value": 70.0,
+                        "raw_value": "70.0",
+                        "collected_at": "2026-07-01T00:00:00Z",
+                        "source_type": "primary",
+                        "verified": 1,
+                    },
+                    {
+                        "model_id": "reranker-model",
+                        "benchmark_id": "mteb_reranking",
+                        "value": 72.0,
+                        "raw_value": "72.0",
+                        "collected_at": "2026-07-01T00:00:00Z",
+                        "source_type": "primary",
+                        "verified": 1,
+                    },
+                    {
+                        "model_id": "tts-model",
+                        "benchmark_id": "aa_tts_quality_elo",
+                        "value": 1213.0,
+                        "raw_value": "1213.0",
+                        "collected_at": "2026-07-01T00:00:00Z",
+                        "source_type": "primary",
+                        "verified": 1,
+                    },
+                ],
+            )
+
+        models = {model["id"]: model for model in review_workbench.build_review_catalog()["models"]}
+
+        self.assertEqual(models["embedding-model"]["model_type_primary"], "embedding")
+        self.assertEqual(models["embedding-model"]["evidence_context_use_case_id"], "retrieval_embeddings")
+        self.assertEqual(models["embedding-model"]["strongest_signal_kind"], "benchmark")
+        self.assertEqual(models["reranker-model"]["model_type_primary"], "reranker")
+        self.assertEqual(models["reranker-model"]["evidence_context_use_case_id"], "retrieval_reranking")
+        self.assertEqual(models["reranker-model"]["strongest_signal_kind"], "benchmark")
+        self.assertEqual(models["tts-model"]["model_type_primary"], "text_to_speech")
+        self.assertEqual(models["tts-model"]["evidence_context_use_case_id"], "text_to_speech")
+        self.assertEqual(models["tts-model"]["strongest_signal_kind"], "benchmark")
+        self.assertEqual(models["local-small-model"]["model_type_primary"], "local_sml")
+        self.assertIn("local_sml", models["local-small-model"]["model_type_tags"])
+        self.assertEqual(models["local-small-model"]["strongest_signal_kind"], "local_sml")
+        self.assertEqual(models["local-small-model"]["strongest_signal_value"], "4.0B parameters")
+
+    def test_review_catalog_prefers_approved_route_before_hyperscaler_fallback(self) -> None:
+        self._insert_review_model("approved-route-model", include_default_scores=False)
+        self._insert_inference_destination(
+            "approved-route-model",
+            "azure-ai-foundry",
+            "Azure AI Foundry",
+            regions=["ap-southeast-2"],
+        )
+        update_engine.update_model_use_case_inference_approval(
+            "approved-route-model",
+            "customer_support",
+            "azure-ai-foundry",
+            "Australia",
+            True,
+            "Approved Australian route.",
+        )
+
+        model = next(model for model in review_workbench.build_review_catalog()["models"] if model["id"] == "approved-route-model")
+
+        self.assertEqual(model["strongest_signal_kind"], "approved_inference_route")
+        self.assertIn("Approved route: Azure AI Foundry", model["strongest_signal_label"])
+        self.assertEqual(model["strongest_signal_notes"], "Approved Australian route.")
+
+    def test_review_catalog_uses_australia_route_fallback(self) -> None:
+        self._insert_review_model("australia-route-model", include_default_scores=False, model_card_url=None)
+        self._insert_inference_destination(
+            "australia-route-model",
+            "aws-bedrock",
+            "AWS Bedrock",
+            hyperscaler="AWS",
+            regions=["ap-southeast-2", "us-east-1"],
+        )
+
+        model = next(model for model in review_workbench.build_review_catalog()["models"] if model["id"] == "australia-route-model")
+
+        self.assertEqual(model["strongest_signal_kind"], "inference_location")
+        self.assertEqual(model["strongest_signal_label"], "Australia inference route")
+        self.assertIn("australia_route", model["model_type_tags"])
+        self.assertIn("ap-southeast-2", model["inference_location_signal"])
+
+    def test_review_catalog_marks_models_without_selection_evidence(self) -> None:
+        self._insert_review_model("no-evidence-model", include_default_scores=False, model_card_url=None)
+
+        model = next(model for model in review_workbench.build_review_catalog()["models"] if model["id"] == "no-evidence-model")
+
+        self.assertEqual(model["strongest_signal_kind"], "insufficient_evidence")
+        self.assertEqual(model["strongest_signal_label"], "Insufficient evidence")
 
     def test_review_decision_route_requires_admin_token(self) -> None:
         self._insert_review_model("guard-model")
@@ -334,7 +528,7 @@ class ReviewWorkbenchTests(unittest.TestCase):
                 json={
                     "name": "Manual Workbench Model",
                     "provider": "Manual Provider",
-                    "model_roles": ["generator"],
+                    "model_roles": "embedding",
                     "catalog_status": "provisional",
                     "notes": "Added in the review workbench.",
                 },
@@ -345,6 +539,7 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertEqual(response.json()["model_id"], "manual-workbench-model")
         model = next(model for model in update_engine.list_models() if model["id"] == "manual-workbench-model")
         self.assertEqual(model["catalog_status"], "provisional")
+        self.assertEqual(model["model_roles"], ["embedding"])
         self.assertEqual(model["metadata_source_name"], "manual")
 
     def test_manual_decision_survives_bootstrap_and_recommendation_sync(self) -> None:
@@ -444,6 +639,14 @@ class ReviewWorkbenchTests(unittest.TestCase):
         family_name: str = "Review Model",
         release_date: str | None = None,
         release_date_confidence: str | None = None,
+        model_type: str = "proprietary",
+        model_roles: list[str] | None = None,
+        small_model_candidate: bool = False,
+        model_size_class: str | None = None,
+        parameter_count_b: float | None = None,
+        include_default_scores: bool = True,
+        model_card_url: str | None = "https://example.com/model-card",
+        capabilities: list[str] | None = None,
     ) -> None:
         with self.engine.begin() as conn:
             conn.execute(
@@ -452,26 +655,36 @@ class ReviewWorkbenchTests(unittest.TestCase):
                     "id": model_id,
                     "name": model_id,
                     "provider": "Bank Test Provider",
-                    "type": "proprietary",
+                    "type": model_type,
                     "catalog_status": "tracked",
                     "family_id": family_id,
                     "family_name": family_name,
                     "canonical_model_id": family_id,
                     "canonical_model_name": family_name,
-                    "model_card_url": "https://example.com/model-card",
-                    "model_card_verified_at": "2026-07-01T00:00:00Z",
+                    "model_roles_json": json.dumps(model_roles or ["generator"], ensure_ascii=True),
+                    "model_card_url": model_card_url,
+                    "model_card_verified_at": "2026-07-01T00:00:00Z" if model_card_url else None,
                     "release_date": release_date,
                     "release_date_precision": "day" if release_date else None,
                     "release_date_confidence": release_date_confidence,
                     "release_date_source_name": "test-fixture" if release_date else None,
                     "release_date_source_url": "https://example.com/release" if release_date else None,
                     "release_date_verified_at": "2026-07-01T00:00:00Z" if release_date else None,
+                    "parameter_count_b": parameter_count_b,
+                    "model_size_class": model_size_class,
+                    "small_model_candidate": 1 if small_model_candidate else 0,
+                    "model_size_source_name": "test-fixture" if parameter_count_b is not None or model_size_class else None,
+                    "model_size_source_url": "https://example.com/model-size" if parameter_count_b is not None or model_size_class else None,
+                    "model_size_verified_at": "2026-07-01T00:00:00Z" if parameter_count_b is not None or model_size_class else None,
                     "license_id": "apache-2.0",
                     "license_name": "Apache 2.0",
                     "training_data_summary": "Reviewed public and licensed data.",
+                    "capabilities_json": json.dumps(capabilities or [], ensure_ascii=True),
                     "active": 1,
                 },
             )
+            if not include_default_scores:
+                return
             conn.execute(
                 scores_table.insert(),
                 [
@@ -501,7 +714,9 @@ class ReviewWorkbenchTests(unittest.TestCase):
         name: str,
         *,
         hyperscaler: str = "Azure",
+        regions: list[str] | None = None,
     ) -> None:
+        resolved_regions = regions or ["eastus2"]
         with self.engine.begin() as conn:
             conn.execute(
                 model_inference_destinations_table.insert(),
@@ -513,8 +728,8 @@ class ReviewWorkbenchTests(unittest.TestCase):
                     "availability_scope": "Configured account",
                     "availability_note": "Live from configured hyperscaler catalog.",
                     "location_scope": "Configured account regions",
-                    "regions_json": '["eastus2"]',
-                    "region_count": 1,
+                    "regions_json": json.dumps(resolved_regions, ensure_ascii=True),
+                    "region_count": len(resolved_regions),
                     "deployment_modes_json": '["Provisioned"]',
                     "pricing_label": "Configured account pricing",
                     "pricing_note": "Pricing depends on configured account.",

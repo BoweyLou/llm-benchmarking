@@ -16,6 +16,30 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-063: P2 Fix manual embedding model save path
+  - Source: Human report 2026-07-03 that manual commands for embedding models such as NVIDIA Embedder v2 appeared not to save.
+  - Problem: the browser add-model form did not collect model-role metadata, and decision saves could keep a stale generator use case when reviewing embedding or reranker rows.
+  - Scope: add a model-role selector to manual model creation, accept single role strings at the review API boundary, and make save/bulk decisions choose role-compatible use cases when no explicit use-case filter is selected.
+  - Acceptance: manually added embedding rows persist as embedding models, and review decisions for embedding/reranker rows default to retrieval use cases rather than `general_reasoning`.
+  - Validation: review-workbench static/API regressions, manual curation role persistence regression, docs checks, and live Proxmox redeploy.
+  - Completed: 2026-07-03. Manual embedding curation now preserves role metadata and saves against role-compatible review lanes.
+
+- [x] LBM-062: P2 Add restricted frontier and cyber catalog rows
+  - Source: Human request 2026-07-03 after noticing Claude Mythos and ChatGPT/GPT-5.5-Cyber were absent from the review catalog.
+  - Problem: restricted-access provider models may not appear through public marketplace feeds even when official provider documentation exists, leaving approved-model review exports incomplete.
+  - Scope: add official provider catalog rows for Claude Mythos 5 and GPT-5.5-Cyber, persist static max-output/pricing metadata where provided, retain trusted-access and limited-availability capability tags, and document the configured-discovery boundary.
+  - Acceptance: both models appear in configured catalog discovery with official source URLs and do not require benchmark scores to be visible.
+  - Validation: baseline coverage regression, catalog-discovery persistence regression, focused backend tests, docs checks, and live catalog refresh.
+  - Completed: 2026-07-03. Claude Mythos 5 and GPT-5.5-Cyber are now tracked static provider catalog rows.
+
+- [x] LBM-061: P2 Add text-to-speech model coverage
+  - Source: Human request 2026-07-03 after noticing leading text-to-voice models were missing from the catalog and rankings.
+  - Problem: text-to-speech models were not a first-class model role, so leading synthesis models from Artificial Analysis, provider catalogs, OpenRouter, and Hugging Face could be absent or mixed into unrelated generator or voice-agent lanes.
+  - Scope: add `text_to_speech` model-role support, Artificial Analysis Text to Speech quality/time/price ingestion, provider/open-weight catalog discovery seeds, OpenRouter/Hugging Face role inference, review filters, export/API serialization, and a role-specific TTS ranking use case.
+  - Acceptance: TTS rows appear in the DB, review catalog, exports, and `text_to_speech` rankings without polluting generator, embedding, reranker, speech-to-text, or tau-bench voice-agent ranking lanes.
+  - Validation: Artificial Analysis TTS parser and persistence tests, OpenRouter role-inference migration/regression tests, review/API/CSV role coverage, ranking separation tests, inference-suite smoke, docs checks, and version check.
+  - Completed: 2026-07-03. Text-to-speech is now a dedicated catalog and ranking lane backed by Artificial Analysis TTS and provider discovery rows.
+
 - [x] LBM-058: P2 Add role-aware benchmark rankings to review workbench
   - Source: Human approval 2026-07-02 after planning benchmark ranking views for generative, embedding, and reranker models.
   - Problem: reviewers needed benchmark rankings somewhere in the interactive workbench, but a single mixed leaderboard would incorrectly compare embeddings, rerankers, and generative models.

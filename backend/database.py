@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
+import re
 from typing import Any, Callable, Iterator
 
 from sqlalchemy import Column, Float, ForeignKey, Integer, MetaData, String, Table, Text, create_engine, event, text
@@ -1203,6 +1205,192 @@ def _migration_20260702_general_model_approvals(conn: Connection) -> None:
             conn.exec_driver_sql(statement)
 
 
+_SPEECH_TO_TEXT_ROLE = "speech_to_text"
+_TEXT_TO_SPEECH_ROLE = "text_to_speech"
+_VALID_MODEL_ROLES = {
+    "generator",
+    "embedding",
+    "reranker",
+    "multimodal_embedding",
+    _SPEECH_TO_TEXT_ROLE,
+    _TEXT_TO_SPEECH_ROLE,
+}
+_SPEECH_TO_TEXT_CAPABILITY_MARKERS = {
+    "automatic-speech-recognition",
+    "speech-to-text",
+    "voice-to-text",
+    "transcription-output",
+    "transcription",
+    "audio-transcription",
+    "asr",
+}
+_SPEECH_TO_TEXT_NAME_RE = re.compile(
+    r"(?<![a-z0-9])(?:asr|whisper|transcribe|transcription|parakeet|mai-transcribe|(?:chirp|voxtral).*(?:asr|stt|transcri))(?![a-z0-9])",
+    re.IGNORECASE,
+)
+_TEXT_TO_SPEECH_CAPABILITY_MARKERS = {
+    "text-to-speech",
+    "speech-synthesis",
+    "text->speech",
+    "speech-output",
+    "tts",
+}
+_TEXT_GENERATION_CAPABILITY_MARKERS = {
+    "text-output",
+    "text->text",
+    "chat-completion",
+    "completion",
+    "structured-output",
+    "reasoning",
+    "tool-use",
+    "tool-choice",
+}
+_TEXT_TO_SPEECH_NAME_RE = re.compile(
+    r"(?<![a-z0-9])(?:tts|text-to-speech|speech-synthesis|gpt-4o-mini-tts|tts-1(?:-hd)?|sonic(?:[-\s]\d(?:\.\d)?)?|kokoro|orpheus|zonos|chatterbox|aura|polly|playdialog|play3|chirp(?:[-\s]*3)?[-:\s]*hd|grok-voice-tts|gemini.*tts|voxtral.*tts|mai-voice|eleven(?:labs)?|multilingual-v2|flash-v2-5|speech-\d+(?:\.\d+)?(?:[-\s](?:hd|turbo))?)(?![a-z0-9])",
+    re.IGNORECASE,
+)
+
+
+def _migration_20260703_speech_to_text_roles(conn: Connection) -> None:
+    model_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(models)").fetchall()
+    }
+    required_columns = {"id", "name", "model_roles_json", "capabilities_json"}
+    if not required_columns.issubset(model_columns):
+        return
+
+    optional_columns = [
+        column
+        for column in ("huggingface_repo_id", "openrouter_model_id", "openrouter_canonical_slug", "documentation_url")
+        if column in model_columns
+    ]
+    selected_columns = ["id", "name", "model_roles_json", "capabilities_json", *optional_columns]
+    rows = conn.exec_driver_sql(f"SELECT {', '.join(selected_columns)} FROM models").mappings().fetchall()
+    for row in rows:
+        capabilities = _migration_json_list(row.get("capabilities_json"))
+        names = [row.get("name"), *[row.get(column) for column in optional_columns]]
+        if not _migration_values_indicate_speech_to_text([*capabilities, *names]):
+            continue
+        roles = [
+            role
+            for role in _migration_json_list(row.get("model_roles_json"))
+            if role in _VALID_MODEL_ROLES
+        ] or ["generator"]
+        if set(roles) == {"generator"} and not _migration_values_indicate_text_generation(capabilities):
+            roles = []
+        if _SPEECH_TO_TEXT_ROLE in roles:
+            continue
+        roles.append(_SPEECH_TO_TEXT_ROLE)
+        conn.exec_driver_sql(
+            "UPDATE models SET model_roles_json = ? WHERE id = ?",
+            (json.dumps(sorted(dict.fromkeys(roles)), ensure_ascii=True), row["id"]),
+        )
+
+
+def _migration_20260703_text_to_speech_roles(conn: Connection) -> None:
+    model_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(models)").fetchall()
+    }
+    required_columns = {"id", "name", "model_roles_json", "capabilities_json"}
+    if not required_columns.issubset(model_columns):
+        return
+
+    optional_columns = [
+        column
+        for column in ("huggingface_repo_id", "openrouter_model_id", "openrouter_canonical_slug", "documentation_url")
+        if column in model_columns
+    ]
+    selected_columns = ["id", "name", "model_roles_json", "capabilities_json", *optional_columns]
+    rows = conn.exec_driver_sql(f"SELECT {', '.join(selected_columns)} FROM models").mappings().fetchall()
+    for row in rows:
+        capabilities = _migration_json_list(row.get("capabilities_json"))
+        names = [row.get("name"), *[row.get(column) for column in optional_columns]]
+        if not _migration_values_indicate_text_to_speech([*capabilities, *names]):
+            continue
+        roles = [
+            role
+            for role in _migration_json_list(row.get("model_roles_json"))
+            if role in _VALID_MODEL_ROLES
+        ] or ["generator"]
+        if set(roles) == {"generator"} and not _migration_values_indicate_text_generation(capabilities):
+            roles = []
+        if _TEXT_TO_SPEECH_ROLE in roles:
+            continue
+        roles.append(_TEXT_TO_SPEECH_ROLE)
+        conn.exec_driver_sql(
+            "UPDATE models SET model_roles_json = ? WHERE id = ?",
+            (json.dumps(sorted(dict.fromkeys(roles)), ensure_ascii=True), row["id"]),
+        )
+
+
+def _migration_json_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item or "").strip()]
+    if not isinstance(value, str) or not value.strip():
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if str(item or "").strip()]
+
+
+def _migration_values_indicate_speech_to_text(values: list[Any]) -> bool:
+    if _migration_values_indicate_text_to_speech(values):
+        explicit_values = [
+            value
+            for value in values
+            if str(value or "").strip().lower().replace("_", "-") in _SPEECH_TO_TEXT_CAPABILITY_MARKERS
+            or (
+                str(value or "").strip().lower().replace("_", "-").endswith("-output")
+                and "transcription" in str(value or "").strip().lower().replace("_", "-")
+            )
+        ]
+        if not explicit_values:
+            return False
+    for value in values:
+        text = str(value or "").strip().lower().replace("_", "-")
+        if not text:
+            continue
+        if text in _SPEECH_TO_TEXT_CAPABILITY_MARKERS:
+            return True
+        if text.endswith("-output") and "transcription" in text:
+            return True
+        if _SPEECH_TO_TEXT_NAME_RE.search(text):
+            return True
+    return False
+
+
+def _migration_values_indicate_text_to_speech(values: list[Any]) -> bool:
+    for value in values:
+        text = str(value or "").strip().lower().replace("_", "-")
+        if not text:
+            continue
+        if text in _TEXT_TO_SPEECH_CAPABILITY_MARKERS:
+            return True
+        if text.endswith("-output") and "speech" in text:
+            return True
+        if _TEXT_TO_SPEECH_NAME_RE.search(text):
+            return True
+    return False
+
+
+def _migration_values_indicate_text_generation(values: list[Any]) -> bool:
+    for value in values:
+        text = str(value or "").strip().lower().replace("_", "-")
+        if not text:
+            continue
+        if text in _TEXT_GENERATION_CAPABILITY_MARKERS:
+            return True
+        if text.endswith("->text") and not any(marker in text for marker in ("audio", "speech", "transcription")):
+            return True
+    return False
+
+
 SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
     ("20260701_002_model_roles", _migration_20260701_model_roles),
@@ -1210,6 +1398,8 @@ SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_004_model_size_metadata", _migration_20260701_model_size_metadata),
     ("20260702_001_model_age_metadata", _migration_20260702_model_age_metadata),
     ("20260702_002_general_model_approvals", _migration_20260702_general_model_approvals),
+    ("20260703_001_speech_to_text_roles", _migration_20260703_speech_to_text_roles),
+    ("20260703_002_text_to_speech_roles", _migration_20260703_text_to_speech_roles),
 )
 
 

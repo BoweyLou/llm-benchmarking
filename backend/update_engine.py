@@ -115,11 +115,55 @@ VALID_RECOMMENDATION_STATUSES = {
 }
 SOURCE_METADATA_PROMOTION_LABELS = {
     "artificial_analysis": "Artificial Analysis",
+    "artificial_analysis_tts": "Artificial Analysis Text to Speech",
     "chatbot_arena": "Chatbot Arena",
     "ifeval": "IFEval",
 }
 MODEL_ROLE_GENERATOR = "generator"
-VALID_MODEL_ROLES = {"generator", "embedding", "reranker", "multimodal_embedding"}
+MODEL_ROLE_SPEECH_TO_TEXT = "speech_to_text"
+MODEL_ROLE_TEXT_TO_SPEECH = "text_to_speech"
+VALID_MODEL_ROLES = {
+    "generator",
+    "embedding",
+    "reranker",
+    "multimodal_embedding",
+    MODEL_ROLE_SPEECH_TO_TEXT,
+    MODEL_ROLE_TEXT_TO_SPEECH,
+}
+SPEECH_TO_TEXT_CAPABILITY_MARKERS = {
+    "automatic-speech-recognition",
+    "speech-to-text",
+    "voice-to-text",
+    "transcription-output",
+    "transcription",
+    "audio-transcription",
+    "asr",
+}
+SPEECH_TO_TEXT_NAME_RE = re.compile(
+    r"(?<![a-z0-9])(?:asr|whisper|transcribe|transcription|parakeet|mai-transcribe|(?:chirp|voxtral).*(?:asr|stt|transcri))(?![a-z0-9])",
+    re.IGNORECASE,
+)
+TEXT_TO_SPEECH_CAPABILITY_MARKERS = {
+    "text-to-speech",
+    "speech-synthesis",
+    "text->speech",
+    "speech-output",
+    "tts",
+}
+TEXT_GENERATION_CAPABILITY_MARKERS = {
+    "text-output",
+    "text->text",
+    "chat-completion",
+    "completion",
+    "structured-output",
+    "reasoning",
+    "tool-use",
+    "tool-choice",
+}
+TEXT_TO_SPEECH_NAME_RE = re.compile(
+    r"(?<![a-z0-9])(?:tts|text-to-speech|speech-synthesis|gpt-4o-mini-tts|tts-1(?:-hd)?|sonic(?:[-\s]\d(?:\.\d)?)?|kokoro|orpheus|zonos|chatterbox|aura|polly|playdialog|play3|chirp(?:[-\s]*3)?[-:\s]*hd|grok-voice-tts|gemini.*tts|voxtral.*tts|mai-voice|eleven(?:labs)?|multilingual-v2|flash-v2-5|speech-\d+(?:\.\d+)?(?:[-\s](?:hd|turbo))?)(?![a-z0-9])",
+    re.IGNORECASE,
+)
 
 
 class OptionalSourceUnavailable(RuntimeError):
@@ -128,12 +172,14 @@ class OptionalSourceUnavailable(RuntimeError):
 
 SOURCE_STEP_LABEL_OVERRIDES = {
     "ailuminate": "AiLuminate",
+    "artificial_analysis_tts": "Artificial Analysis Text to Speech",
     "chatbot_arena": "Chatbot Arena",
     "epoch_ai": "Epoch AI",
     "faithjudge": "FaithJudge",
     "ifeval": "IFEval",
     "mmmu": "MMMU",
     "mteb": "MTEB",
+    "open_asr_leaderboard": "Open ASR Leaderboard",
     "swebench": "SWE-bench Verified",
     "terminal_bench": "Terminal-Bench",
     "vectara_hallucination": "Vectara Hallucination",
@@ -407,7 +453,145 @@ def _model_roles_from_metadata(metadata: dict[str, Any]) -> list[str]:
     raw_roles = metadata.get("model_roles")
     if raw_roles is None and metadata.get("model_role") is not None:
         raw_roles = [metadata.get("model_role")]
-    return _normalise_model_roles(raw_roles, default=())
+    roles = _normalise_model_roles(raw_roles, default=())
+    if _metadata_indicates_speech_to_text(metadata):
+        roles.append(MODEL_ROLE_SPEECH_TO_TEXT)
+    if _metadata_indicates_text_to_speech(metadata):
+        roles.append(MODEL_ROLE_TEXT_TO_SPEECH)
+    return sorted(dict.fromkeys(roles))
+
+
+def _metadata_indicates_speech_to_text(metadata: dict[str, Any]) -> bool:
+    if _metadata_indicates_text_to_speech(metadata):
+        explicit_stt_values = _metadata_audio_indicator_values(metadata, include_names=False)
+        if not _values_indicate_speech_to_text(*explicit_stt_values):
+            return False
+    return _values_indicate_speech_to_text(
+        *_metadata_audio_indicator_values(metadata),
+    )
+
+
+def _metadata_indicates_text_to_speech(metadata: dict[str, Any]) -> bool:
+    return _values_indicate_text_to_speech(
+        *_metadata_audio_indicator_values(metadata),
+    )
+
+
+def _metadata_audio_indicator_values(metadata: dict[str, Any], *, include_names: bool = True) -> list[Any]:
+    capability_values = _decode_json_string_list(metadata.get("capabilities"))
+    capability_values.extend(_decode_json_string_list(metadata.get("capabilities_json")))
+    for key in (
+        "pipeline_tag",
+        "task",
+        "modality",
+        "input_modality",
+        "output_modality",
+        "input_modalities",
+        "output_modalities",
+    ):
+        raw_value = metadata.get(key)
+        if isinstance(raw_value, list):
+            capability_values.extend(_decode_json_string_list(raw_value))
+            continue
+        value = _clean_text(raw_value)
+        if value:
+            capability_values.append(value)
+    if include_names:
+        capability_values.extend(
+            [
+                metadata.get("raw_model_name"),
+                metadata.get("model_name"),
+                metadata.get("name"),
+                metadata.get("huggingface_repo_id"),
+                metadata.get("openrouter_model_id"),
+            ]
+        )
+    return capability_values
+
+
+def _values_indicate_speech_to_text(*values: Any) -> bool:
+    for value in values:
+        for text in _iter_text_values(value):
+            normalized = text.strip().lower().replace("_", "-")
+            if normalized in SPEECH_TO_TEXT_CAPABILITY_MARKERS:
+                return True
+            if normalized.endswith("-output") and "transcription" in normalized:
+                return True
+            if SPEECH_TO_TEXT_NAME_RE.search(normalized):
+                return True
+    return False
+
+
+def _values_indicate_text_to_speech(*values: Any) -> bool:
+    for value in values:
+        for text in _iter_text_values(value):
+            normalized = text.strip().lower().replace("_", "-")
+            if normalized in TEXT_TO_SPEECH_CAPABILITY_MARKERS:
+                return True
+            if normalized.endswith("-output") and "speech" in normalized:
+                return True
+            if TEXT_TO_SPEECH_NAME_RE.search(normalized):
+                return True
+    return False
+
+
+def _values_indicate_text_generation(*values: Any) -> bool:
+    for value in values:
+        for text in _iter_text_values(value):
+            normalized = text.strip().lower().replace("_", "-")
+            if normalized in TEXT_GENERATION_CAPABILITY_MARKERS:
+                return True
+            if normalized.endswith("->text") and not any(
+                marker in normalized for marker in ("audio", "speech", "transcription")
+            ):
+                return True
+    return False
+
+
+def _iter_text_values(value: Any) -> Iterable[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in _iter_text_values(item)]
+    if isinstance(value, Iterable):
+        return [text for item in value for text in _iter_text_values(item)]
+    return [str(value)]
+
+
+def _merge_inferred_speech_to_text_role(
+    current_roles_value: Any,
+    *,
+    capabilities: Iterable[str] | None = None,
+    names: Iterable[Any] = (),
+) -> list[str]:
+    return _merge_inferred_audio_roles(
+        current_roles_value,
+        capabilities=capabilities,
+        names=names,
+    )
+
+
+def _merge_inferred_audio_roles(
+    current_roles_value: Any,
+    *,
+    capabilities: Iterable[str] | None = None,
+    names: Iterable[Any] = (),
+) -> list[str]:
+    roles = _normalise_model_roles(current_roles_value, default=(MODEL_ROLE_GENERATOR,))
+    capability_values = list(capabilities or [])
+    tts_detected = _values_indicate_text_to_speech(*capability_values, *names)
+    explicit_stt_detected = _values_indicate_speech_to_text(*capability_values)
+    stt_detected = explicit_stt_detected or (not tts_detected and _values_indicate_speech_to_text(*names))
+    if (stt_detected or tts_detected) and set(roles) == {MODEL_ROLE_GENERATOR}:
+        if not _values_indicate_text_generation(*capability_values):
+            roles = []
+    if stt_detected:
+        roles.append(MODEL_ROLE_SPEECH_TO_TEXT)
+    if tts_detected:
+        roles.append(MODEL_ROLE_TEXT_TO_SPEECH)
+    return sorted(dict.fromkeys(roles))
 
 
 def _humanize_source_name(source_name: str) -> str:
@@ -3471,7 +3655,7 @@ def _source_metadata_trust_level(
     source_type: str,
     verified: bool,
 ) -> str | None:
-    if source_id == "artificial_analysis":
+    if source_id in {"artificial_analysis", "artificial_analysis_tts"}:
         if verified and source_type == "primary":
             return "verified"
         return None
@@ -3500,7 +3684,7 @@ def _source_metadata_release_date_values(
     source_url: str | None,
     verified_at: str,
 ) -> dict[str, Any]:
-    if source_id == "artificial_analysis":
+    if source_id in {"artificial_analysis", "artificial_analysis_tts"}:
         release_date = _clean_release_date(metadata.get("release_date"))
         confidence = "high"
     elif source_id == "ifeval":
@@ -3568,6 +3752,8 @@ def _source_metadata_provider(source_id: str, metadata: dict[str, Any]) -> str |
     provider_name: str | None = None
     if source_id == "chatbot_arena":
         provider_name = _clean_text(metadata.get("organization") or metadata.get("modelOrganization"))
+    elif source_id == "artificial_analysis_tts":
+        provider_name = _clean_text(metadata.get("model_creator"))
     elif source_id == "ifeval":
         provider_name = _clean_text(metadata.get("organization_name"))
     return canonical_provider_name(provider_name) if provider_name else None
@@ -3602,11 +3788,15 @@ def _source_metadata_license_name(source_id: str, metadata: dict[str, Any]) -> s
 def _source_metadata_documentation_url(source_id: str, metadata: dict[str, Any]) -> str | None:
     if source_id == "chatbot_arena":
         return _clean_url(metadata.get("model_url") or metadata.get("modelUrl"))
+    if source_id == "artificial_analysis_tts":
+        return _clean_url(metadata.get("details_url") or metadata.get("leaderboard_url"))
     return None
 
 
 def _source_metadata_source_url(source_id: str, metadata: dict[str, Any], fallback_url: str) -> str | None:
     if source_id == "ifeval":
+        return _clean_url(metadata.get("details_url")) or _clean_url(fallback_url)
+    if source_id == "artificial_analysis_tts":
         return _clean_url(metadata.get("details_url")) or _clean_url(fallback_url)
     return _clean_url(fallback_url)
 
@@ -3990,6 +4180,12 @@ def _ensure_discovered_catalog_model(
     capabilities = _decode_json_string_list(item.get("capabilities"))
     intended_use = _clean_text(item.get("intended_use_short")) or _clean_text(item.get("description"))
     context_window_tokens = _safe_int(item.get("context_window_tokens"))
+    max_output_tokens = _safe_int(item.get("max_output_tokens"))
+    price_input_per_mtok = _safe_float(item.get("price_input_per_mtok"))
+    price_output_per_mtok = _safe_float(item.get("price_output_per_mtok"))
+    release_date = _clean_text(item.get("release_date"))
+    release_date_precision = _clean_text(item.get("release_date_precision")) or None
+    release_date_confidence = _clean_text(item.get("release_date_confidence")) or None
     parameter_count_b = _safe_float(item.get("parameter_count_b"))
     active_parameter_count_b = _safe_float(item.get("active_parameter_count_b"))
     model_size_class = _clean_text(item.get("model_size_class"))
@@ -4045,6 +4241,19 @@ def _ensure_discovered_catalog_model(
                 values["license_url"] = license_url
             if context_window_tokens and _model_field_missing(existing, "context_window_tokens"):
                 values["context_window_tokens"] = context_window_tokens
+            if max_output_tokens and _model_field_missing(existing, "max_output_tokens"):
+                values["max_output_tokens"] = max_output_tokens
+            if price_input_per_mtok is not None and _model_field_missing(existing, "price_input_per_mtok"):
+                values["price_input_per_mtok"] = price_input_per_mtok
+            if price_output_per_mtok is not None and _model_field_missing(existing, "price_output_per_mtok"):
+                values["price_output_per_mtok"] = price_output_per_mtok
+            if release_date and _model_field_missing(existing, "release_date"):
+                values["release_date"] = release_date
+                values["release_date_precision"] = release_date_precision or "day"
+                values["release_date_confidence"] = release_date_confidence or "medium"
+                values["release_date_source_name"] = source_name
+                values["release_date_source_url"] = source_url
+                values["release_date_verified_at"] = verified_at
             if parameter_count_b is not None and _model_field_missing(existing, "parameter_count_b"):
                 values["parameter_count_b"] = parameter_count_b
             if active_parameter_count_b is not None and _model_field_missing(existing, "active_parameter_count_b"):
@@ -4102,6 +4311,15 @@ def _ensure_discovered_catalog_model(
             "license_name": license_name,
             "license_url": license_url,
             "context_window_tokens": context_window_tokens,
+            "max_output_tokens": max_output_tokens,
+            "price_input_per_mtok": price_input_per_mtok,
+            "price_output_per_mtok": price_output_per_mtok,
+            "release_date": release_date,
+            "release_date_precision": release_date_precision,
+            "release_date_confidence": release_date_confidence,
+            "release_date_source_name": source_name if release_date else None,
+            "release_date_source_url": source_url if release_date else None,
+            "release_date_verified_at": verified_at if release_date else None,
             "parameter_count_b": parameter_count_b,
             "active_parameter_count_b": active_parameter_count_b,
             "model_size_class": model_size_class,
@@ -4816,6 +5034,7 @@ def _refresh_openrouter_model_metadata() -> None:
                 models_table.c.canonical_model_id,
                 models_table.c.canonical_model_name,
                 models_table.c.variant_label,
+                models_table.c.model_roles_json,
                 models_table.c.openrouter_model_id,
                 models_table.c.openrouter_canonical_slug,
             ).where(models_table.c.active == 1),
@@ -4935,7 +5154,11 @@ def _refresh_openrouter_model_metadata() -> None:
 
     with ENGINE.begin() as conn:
         for model_id, item in best_item_by_model_id.items():
-            values = _openrouter_model_values(item, verified_at=verified_at)
+            values = _openrouter_model_values(
+                item,
+                verified_at=verified_at,
+                current_model_roles=model_rows_by_id.get(model_id, {}).get("model_roles_json"),
+            )
             if not values:
                 continue
             conn.execute(
@@ -5629,7 +5852,12 @@ def _openrouter_item_is_recent_release(item: dict[str, Any], *, verified_at: str
     return created_dt >= verified_dt - timedelta(days=OPENROUTER_NEW_RELEASE_LOOKBACK_DAYS)
 
 
-def _openrouter_model_values(item: dict[str, Any], *, verified_at: str) -> dict[str, Any]:
+def _openrouter_model_values(
+    item: dict[str, Any],
+    *,
+    verified_at: str,
+    current_model_roles: Any | None = None,
+) -> dict[str, Any]:
     top_provider = item.get("top_provider") if isinstance(item.get("top_provider"), dict) else {}
     pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
     architecture = item.get("architecture") if isinstance(item.get("architecture"), dict) else {}
@@ -5671,6 +5899,13 @@ def _openrouter_model_values(item: dict[str, Any], *, verified_at: str) -> dict[
         values["price_output_per_mtok"] = output_price
     if openrouter_capabilities:
         values["capabilities_json"] = json.dumps(openrouter_capabilities, ensure_ascii=True)
+    inferred_roles = _merge_inferred_audio_roles(
+        current_model_roles if current_model_roles is not None else (MODEL_ROLE_GENERATOR,),
+        capabilities=openrouter_capabilities,
+        names=(model_id, canonical_slug, item.get("name"), huggingface_repo_id),
+    )
+    if MODEL_ROLE_SPEECH_TO_TEXT in inferred_roles or MODEL_ROLE_TEXT_TO_SPEECH in inferred_roles:
+        values["model_roles_json"] = json.dumps(inferred_roles, ensure_ascii=True)
 
     return values
 
@@ -5722,6 +5957,8 @@ def _refresh_model_card_metadata(*, force: bool = False) -> None:
             conn,
             select(
                 models_table.c.id,
+                models_table.c.name,
+                models_table.c.model_roles_json,
                 models_table.c.huggingface_repo_id,
                 models_table.c.model_card_verified_at,
                 models_table.c.model_card_url,
@@ -5764,13 +6001,22 @@ def _refresh_model_card_metadata(*, force: bool = False) -> None:
                 for row in rows:
                     merged_values = dict(values)
                     existing_capabilities = _decode_json_string_list(row.get("capabilities_json"))
+                    merged_capabilities = _decode_json_string_list(merged_values.get("capabilities_json"))
                     if existing_capabilities:
                         merged_capabilities = _merge_string_lists(
                             existing_capabilities,
-                            _decode_json_string_list(merged_values.get("capabilities_json")),
+                            merged_capabilities,
                         )
                         if merged_capabilities:
                             merged_values["capabilities_json"] = json.dumps(merged_capabilities, ensure_ascii=True)
+                    inferred_roles = _merge_inferred_audio_roles(
+                        row.get("model_roles_json"),
+                        capabilities=merged_capabilities,
+                        names=(row.get("name"), row.get("huggingface_repo_id")),
+                    )
+                    current_roles = _normalise_model_roles(row.get("model_roles_json"), default=())
+                    if inferred_roles != current_roles:
+                        merged_values["model_roles_json"] = json.dumps(inferred_roles, ensure_ascii=True)
                     conn.execute(
                         update(models_table)
                         .where(models_table.c.id == row["id"])

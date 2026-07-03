@@ -3,8 +3,13 @@
 ## 0.2.0 - Unreleased
 
 - Added the FastAPI-served `/review` banking model review workbench with filterable model/use-case/family views, token-guarded review decision APIs, manual model creation, deprecation support, and review snapshot export/import.
+- Added review-catalog selection evidence and browser CSV columns for model type, strongest selection signal, ranking score/coverage, cost, speed, hyperscaler availability, and inference-location context.
 - Changed the review workbench model table to show the best available release-date indicator instead of the use-case approval update time, and added matching browser CSV columns for that best-date value.
 - Added a review workbench `Rankings` view for role-aware use-case rankings and raw benchmark leaderboards, including score breakdowns in the right inspector.
+- Added `speech_to_text` model-role support, a `voice_to_text` use case, review-workbench capability filtering, and Hugging Face Open ASR Leaderboard ingestion for non-Whisper voice-to-text coverage.
+- Added `text_to_speech` model-role support, Artificial Analysis Text to Speech quality/time/price ingestion, a TTS ranking use case, TTS review filters, and configured provider catalog rows for leading TTS models.
+- Added restricted-access provider catalog rows for Claude Mythos 5 and GPT-5.5-Cyber, including trusted-access capability tags and official source links.
+- Fixed manual embedding/reranker review curation so browser-added models carry their selected model role and save/bulk actions default to role-compatible use cases instead of a stale generator use case.
 - Added a review workbench `Run updates` control that starts the full background update pipeline and shows live step progress from the update status API.
 - Added `Unreviewed` as an explicit general-approval triage state in the review workbench and review API.
 - Fixed the review workbench inspector tabs so `Controls`, `Activity`, and `Notes` switch to separate usable panels.
