@@ -55,7 +55,7 @@ class ChatbotArenaAdapterTests(unittest.TestCase):
         self.assertEqual(candidates[0].vote_count, 5000)
         self.assertEqual(candidates[0].rank, 2)
         self.assertTrue(candidates[0].style_control)
-        self.assertFalse(candidates[0].preliminary)
+        self.assertIsNone(candidates[0].preliminary)
         self.assertEqual(candidates[0].source_metadata["dataset_revision"], REVISION)
         self.assertTrue(records[0].metadata["existing_models_only"])
 

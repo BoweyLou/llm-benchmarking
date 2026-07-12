@@ -188,7 +188,7 @@ def run_audit(engine, update_log_id: int) -> dict[str, Any]:
                 }
                 revisions.discard("")
                 resolved_count = sum(1 for row in arena_rows if row.get("normalized_model_id"))
-                minimum_resolved = max(1, min(20, math.ceil(len(arena_rows) * 0.005)))
+                minimum_resolved = _minimum_arena_resolved_rows(len(arena_rows))
                 if missing_arena_benchmarks or unsafe_arena_names or len(revisions) != 1 or not all(
                     len(revision) == 40 and all(character in "0123456789abcdef" for character in revision)
                     for revision in revisions
@@ -772,6 +772,14 @@ def _arena_identity_is_safe(value: Any) -> bool:
         or lowered.count("anthropic") > 1
         or lowered.count("openai") > 1
     )
+
+
+def _minimum_arena_resolved_rows(record_count: int) -> int:
+    if record_count <= 0:
+        return 0
+    # Live Arena currently resolves about 10.5% of listing rows. A 5% floor
+    # allows normal catalog drift but blocks severe non-zero identity collapse.
+    return min(record_count, max(2, math.ceil(record_count * 0.05)))
 
 
 def _finding(audit_run_id: int, severity: str, check_name: str, message: str, details: dict[str, Any]) -> dict[str, Any]:

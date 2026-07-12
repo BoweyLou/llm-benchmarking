@@ -1723,6 +1723,53 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(row["metadata_source_url"], "https://arena.ai/leaderboard/text")
         self.assertEqual(row["metadata_verified_at"], "2026-04-08T00:00:00Z")
 
+    def test_same_date_new_source_revision_replaces_lower_corrected_score(self) -> None:
+        self.add_model("acme-model", "Acme Model")
+        collected_at = "2026-07-10T00:00:00Z"
+
+        def candidate(revision: str, value: float) -> ScoreCandidate:
+            return ScoreCandidate(
+                source_id="chatbot_arena",
+                benchmark_id="chatbot_arena",
+                raw_model_name="Acme Model",
+                raw_model_key="Acme Model",
+                value=value,
+                raw_value=str(value),
+                source_url=f"https://huggingface.co/revision/{revision}",
+                collected_at=collected_at,
+                source_type="primary",
+                verified=True,
+                publication_date="2026-07-10",
+                source_listing_status="listed",
+                source_metadata={"dataset_revision": revision},
+            )
+
+        _, first_outcome = update_engine._persist_score_candidate(
+            candidate("a" * 40, 1400.0), resolved_model_id="acme-model"
+        )
+        _, corrected_outcome = update_engine._persist_score_candidate(
+            candidate("b" * 40, 1390.0), resolved_model_id="acme-model"
+        )
+        _, same_revision_lower_outcome = update_engine._persist_score_candidate(
+            candidate("b" * 40, 1380.0), resolved_model_id="acme-model"
+        )
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(scores_table)
+                .where(scores_table.c.model_id == "acme-model")
+                .where(scores_table.c.benchmark_id == "chatbot_arena")
+            ).mappings().all()
+        self.assertEqual(first_outcome, "added")
+        self.assertEqual(corrected_outcome, "updated")
+        self.assertEqual(same_revision_lower_outcome, "skipped")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(float(rows[0]["value"]), 1390.0)
+        self.assertEqual(
+            json.loads(str(rows[0]["source_metadata_json"]))["dataset_revision"],
+            "b" * 40,
+        )
+
     def test_persist_source_result_does_not_override_existing_higher_trust_metadata(self) -> None:
         self.add_model("acme-model", "Acme Model", provider="OpenAI")
         with self.engine.begin() as conn:

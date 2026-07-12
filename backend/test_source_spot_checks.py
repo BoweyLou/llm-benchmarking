@@ -2090,7 +2090,14 @@ class SourceSpotCheckTests(unittest.TestCase):
             ]
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0]["details"]["resolved_count"], 1)
-            self.assertEqual(findings[0]["details"]["minimum_resolved"], 2)
+            self.assertEqual(findings[0]["details"]["minimum_resolved"], 11)
+
+    def test_chatbot_arena_resolution_floor_rejects_large_nonzero_collapse(self) -> None:
+            minimum_resolved = audit_engine._minimum_arena_resolved_rows(3596)
+
+            self.assertEqual(minimum_resolved, 180)
+            self.assertLess(20, minimum_resolved)
+            self.assertGreaterEqual(377, minimum_resolved)
 
     def test_runtime_audit_ignores_legacy_primary_swebench_history_when_latest_is_secondary(self) -> None:
             adapter = SwebenchAdapter()

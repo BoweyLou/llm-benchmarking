@@ -149,7 +149,7 @@ class ChatbotArenaAdapter(BaseSourceAdapter):
                     methodology=str(metadata.get("methodology") or "") or None,
                     source_listing_status="listed",
                     style_control=bool(metadata.get("style_control")),
-                    preliminary=bool(metadata.get("preliminary")),
+                    preliminary=None,
                     source_metadata={
                         "dataset_revision": metadata.get("dataset_revision"),
                         "dataset_split": metadata.get("dataset_split"),
@@ -285,7 +285,6 @@ class ChatbotArenaAdapter(BaseSourceAdapter):
                 "leaderboard_publish_date": latest_publish_date,
                 "methodology": "inverse_propensity_scored_agent_success" if split == "agent" else "bradley_terry_style_controlled" if "style_control" in split else "bradley_terry",
                 "style_control": "style_control" in split,
-                "preliminary": False,
                 "dataset_revision": revision,
                 "dataset_split": split,
                 # Arena listing is evidence, not global model availability. It

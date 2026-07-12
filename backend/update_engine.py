@@ -3988,6 +3988,7 @@ def _persist_score_candidate(
                 scores_table.c.source_type,
                 scores_table.c.verified,
                 scores_table.c.source_listing_status,
+                scores_table.c.source_metadata_json,
             )
             .where(
                 scores_table.c.model_id == model_id,
@@ -4013,7 +4014,16 @@ def _persist_score_candidate(
                 "value": float(candidate.value),
                 "collected_at": candidate.collected_at,
             }
-            if _is_better_benchmark_score(candidate_score, latest_score, benchmark) or (
+            latest_source_revision = _score_source_revision(
+                _decode_json_object(latest.get("source_metadata_json"))
+            )
+            candidate_source_revision = _score_source_revision(candidate.source_metadata)
+            source_revision_changed = bool(
+                latest_source_revision
+                and candidate_source_revision
+                and latest_source_revision != candidate_source_revision
+            )
+            if source_revision_changed or _is_better_benchmark_score(candidate_score, latest_score, benchmark) or (
                 candidate.source_listing_status
                 and not latest.get("source_listing_status")
             ):
@@ -4083,6 +4093,14 @@ def _persist_score_candidate(
         )
 
     return model_id, "updated" if latest is not None else "added"
+
+
+def _score_source_revision(source_metadata: dict[str, Any]) -> str | None:
+    for key in ("dataset_revision", "source_revision", "revision"):
+        revision = _clean_text(source_metadata.get(key))
+        if revision:
+            return revision
+    return None
 
 
 def _merge_model_roles(model_id: str, metadata: dict[str, Any]) -> bool:
