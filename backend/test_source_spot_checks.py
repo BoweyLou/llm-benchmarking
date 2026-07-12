@@ -17,6 +17,7 @@ from backend.database import (
     get_connection,
     get_engine,
     init_db,
+    model_source_listings as model_source_listings_table,
     models as models_table,
     scores as scores_table,
 )
@@ -1966,6 +1967,130 @@ class SourceSpotCheckTests(unittest.TestCase):
             raw_rows = update_engine.list_raw_source_records(source_run_id)
             self.assertEqual(len(raw_rows), 2)
             self.assertTrue(all(row["normalized_model_id"] == "claude-opus-4-6" for row in raw_rows))
+
+    def test_chatbot_arena_listing_does_not_create_unknown_model(self) -> None:
+            adapter = ChatbotArenaAdapter(revision="a" * 40)
+            with self.engine.begin() as conn:
+                conn.execute(
+                    model_source_listings_table.insert(),
+                    {
+                        "source_name": "chatbot_arena",
+                        "benchmark_id": "chatbot_arena",
+                        "raw_model_name": "previously-listed-model",
+                        "raw_model_key": "previously-listed-model",
+                        "model_id": None,
+                        "listing_status": "listed",
+                        "source_revision": "9" * 40,
+                        "publication_date": "2098-12-01",
+                        "first_seen_at": "2098-12-01T00:00:00Z",
+                        "last_seen_at": "2098-12-01T00:00:00Z",
+                        "metadata_json": "{}",
+                    },
+                )
+            raw_records = [
+                RawSourceRecord(
+                    source_id=adapter.source_id,
+                    benchmark_id="chatbot_arena",
+                    raw_model_name="arena-only-unknown-model",
+                    raw_model_key="arena-only-unknown-model",
+                    raw_value="1400",
+                    source_url=adapter.source_url,
+                    collected_at=FUTURE_COLLECTED_AT,
+                    payload={"model_name": "arena-only-unknown-model"},
+                    metadata={
+                        "organization": "Unknown Lab",
+                        "license": "Proprietary",
+                        "existing_models_only": True,
+                        "source_listing_status": "listed",
+                        "dataset_revision": "a" * 40,
+                        "leaderboard_publish_date": "2099-01-01",
+                        "confidence_lower": 1390.0,
+                        "confidence_upper": 1410.0,
+                        "rank": 1,
+                        "category": "overall",
+                    },
+                )
+            ]
+
+            _, source_run_id, _, outcomes = self._persist_records(adapter, raw_records)
+
+            self.assertEqual(outcomes, (0, 0))
+            with get_connection(self.engine) as conn:
+                model_row = fetch_one(
+                    conn,
+                    select(models_table).where(models_table.c.name == "arena-only-unknown-model"),
+                )
+                listing = fetch_one(
+                    conn,
+                    select(model_source_listings_table).where(
+                        model_source_listings_table.c.raw_model_key == "arena-only-unknown-model"
+                    ),
+                )
+                previous_listing = fetch_one(
+                    conn,
+                    select(model_source_listings_table).where(
+                        model_source_listings_table.c.raw_model_key == "previously-listed-model"
+                    ),
+                )
+            self.assertIsNone(model_row)
+            self.assertIsNotNone(listing)
+            self.assertIsNone(listing["model_id"])
+            self.assertEqual(listing["listing_status"], "listed")
+            self.assertEqual(previous_listing["listing_status"], "no_longer_listed")
+            self.assertEqual(previous_listing["last_seen_at"], "2098-12-01T00:00:00Z")
+            raw_rows = update_engine.list_raw_source_records(source_run_id)
+            self.assertEqual(raw_rows[0]["resolution_status"], "skipped_unmatched_listing")
+
+    def test_chatbot_arena_audit_blocks_severe_resolution_collapse(self) -> None:
+            adapter = ChatbotArenaAdapter(revision="a" * 40)
+            required_ids = [
+                "chatbot_arena_text_raw",
+                "chatbot_arena",
+                "chatbot_arena_webdev",
+                "chatbot_arena_agent",
+                "chatbot_arena_vision",
+                "chatbot_arena_document",
+                "chatbot_arena_search",
+            ]
+            raw_records = []
+            for index in range(201):
+                benchmark_id = required_ids[index] if index < len(required_ids) else "chatbot_arena"
+                name = "claude-opus-4-6" if index == 0 else f"arena-collapse-{index}"
+                raw_records.append(
+                    RawSourceRecord(
+                        source_id=adapter.source_id,
+                        benchmark_id=benchmark_id,
+                        raw_model_name=name,
+                        raw_model_key=name,
+                        raw_value="1400",
+                        source_url=adapter.source_url,
+                        collected_at=FUTURE_COLLECTED_AT,
+                        payload={"model_name": name},
+                        metadata={
+                            "existing_models_only": True,
+                            "source_listing_status": "listed",
+                            "dataset_revision": "a" * 40,
+                            "leaderboard_publish_date": "2099-01-01",
+                            "confidence_lower": 1390.0,
+                            "confidence_upper": 1410.0,
+                            "rank": index + 1,
+                            "category": "overall",
+                        },
+                    )
+                )
+            log_id, _, _, _ = self._persist_records(adapter, raw_records)
+
+            with patch.object(audit_engine, "MIN_EXPECTED_RECORDS", {}):
+                audit_result = audit_engine.run_audit(self.engine, log_id)
+
+            findings = [
+                finding
+                for finding in audit_result["findings"]
+                if finding["check_name"] == "arena_identity_contract"
+            ]
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0]["details"]["resolved_count"], 1)
+            self.assertEqual(findings[0]["details"]["minimum_resolved"], 2)
 
     def test_runtime_audit_ignores_legacy_primary_swebench_history_when_latest_is_secondary(self) -> None:
             adapter = SwebenchAdapter()

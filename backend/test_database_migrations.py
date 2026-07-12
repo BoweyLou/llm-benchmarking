@@ -55,6 +55,7 @@ class DatabaseMigrationTests(unittest.TestCase):
             approval_columns = _columns(conn, "model_use_case_approvals")
             inference_approval_columns = _columns(conn, "model_use_case_inference_approvals")
             update_log_columns = _columns(conn, "update_log")
+            score_columns = _columns(conn, "scores")
 
         self.assertEqual(migration_ids, [migration_id for migration_id, _migration in SCHEMA_MIGRATIONS])
         self.assertIn("origin_countries_json", provider_columns)
@@ -80,6 +81,25 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("approval_updated_at", inference_approval_columns)
         self.assertIn("current_step_key", update_log_columns)
         self.assertIn("steps_json", update_log_columns)
+        self.assertIn("model_source_listings", table_names)
+        self.assertTrue(
+            {
+                "confidence_lower",
+                "confidence_upper",
+                "variance",
+                "vote_count",
+                "observation_count",
+                "session_count",
+                "rank",
+                "category",
+                "publication_date",
+                "methodology",
+                "source_listing_status",
+                "style_control",
+                "preliminary",
+                "source_metadata_json",
+            }.issubset(score_columns)
+        )
 
     def test_speech_to_text_role_migration_backfills_transcription_capabilities(self) -> None:
         engine = init_db(get_engine("sqlite:///:memory:"))

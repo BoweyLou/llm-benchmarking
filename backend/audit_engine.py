@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 from sqlalchemy import insert, select, update
@@ -146,6 +147,69 @@ def run_audit(engine, update_log_id: int) -> dict[str, Any]:
                         },
                     )
                 )
+
+            arena_source_run_ids = [
+                int(row["id"])
+                for row in source_runs
+                if str(row.get("source_name") or "") == "chatbot_arena"
+            ]
+            if arena_source_run_ids:
+                arena_rows = fetch_all(
+                    conn,
+                    select(
+                        raw_source_records_table.c.benchmark_id,
+                        raw_source_records_table.c.raw_model_name,
+                        raw_source_records_table.c.normalized_model_id,
+                        raw_source_records_table.c.resolution_status,
+                        raw_source_records_table.c.notes,
+                    ).where(raw_source_records_table.c.source_run_id.in_(arena_source_run_ids)),
+                )
+                required_arena_benchmarks = {
+                    "chatbot_arena_text_raw",
+                    "chatbot_arena",
+                    "chatbot_arena_webdev",
+                    "chatbot_arena_agent",
+                    "chatbot_arena_vision",
+                    "chatbot_arena_document",
+                    "chatbot_arena_search",
+                }
+                present_arena_benchmarks = {
+                    str(row.get("benchmark_id") or "") for row in arena_rows
+                }
+                missing_arena_benchmarks = sorted(required_arena_benchmarks - present_arena_benchmarks)
+                unsafe_arena_names = [
+                    str(row.get("raw_model_name") or "")
+                    for row in arena_rows
+                    if not _arena_identity_is_safe(row.get("raw_model_name"))
+                ]
+                revisions = {
+                    str(metadata.get("dataset_revision") or "")
+                    for metadata in (_json_object(row.get("notes")) for row in arena_rows)
+                }
+                revisions.discard("")
+                resolved_count = sum(1 for row in arena_rows if row.get("normalized_model_id"))
+                minimum_resolved = max(1, min(20, math.ceil(len(arena_rows) * 0.005)))
+                if missing_arena_benchmarks or unsafe_arena_names or len(revisions) != 1 or not all(
+                    len(revision) == 40 and all(character in "0123456789abcdef" for character in revision)
+                    for revision in revisions
+                ) or resolved_count < minimum_resolved:
+                    findings.append(
+                        _finding(
+                            audit_run_id,
+                            "blocker",
+                            "arena_identity_contract",
+                            "Arena source identity or snapshot contract failed.",
+                            {
+                                "records": len(arena_rows),
+                                "resolved_count": resolved_count,
+                                "minimum_resolved": minimum_resolved,
+                                "resolved_ratio": resolved_count / len(arena_rows) if arena_rows else 0.0,
+                                "missing_required_benchmarks": missing_arena_benchmarks,
+                                "unsafe_name_sample": unsafe_arena_names[:10],
+                                "dataset_revisions": sorted(revisions),
+                            },
+                        )
+                    )
 
         duplicate_latest_rows = [
             dict(row._mapping)
@@ -357,6 +421,8 @@ def _run_source_spot_checks(conn, audit_run_id: int, source_runs: list[dict[str,
             identity = (candidate.raw_model_name, str(candidate.raw_model_key or ""))
             model_id = model_ids_by_identity.get(identity)
             if not model_id:
+                if candidate.metadata.get("existing_models_only"):
+                    continue
                 findings.append(
                     _finding(
                         audit_run_id,
@@ -681,6 +747,31 @@ def _classify_row_count_drift(previous_count: int, current_count: int) -> tuple[
             "Source row count increased sharply relative to the previous comparable run.",
         )
     return None
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _arena_identity_is_safe(value: Any) -> bool:
+    name = str(value or "").strip()
+    if not name or len(name) > 200 or any(ord(character) < 32 or ord(character) == 127 for character in name):
+        return False
+    lowered = name.lower()
+    return not (
+        " · proprietary" in lowered
+        or " · open source" in lowered
+        or lowered.count("anthropic") > 1
+        or lowered.count("openai") > 1
+    )
 
 
 def _finding(audit_run_id: int, severity: str, check_name: str, message: str, details: dict[str, Any]) -> dict[str, Any]:

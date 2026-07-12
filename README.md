@@ -9,7 +9,7 @@ python -m backend list-models
 ```
 
 That command prints a JSON array. Each model item includes the serialized metadata used by the old dashboard, including scores, source details, model roles, release-date provenance, model-age evidence, model size fields, small-model candidate visibility, provider origin, license policy, provenance policy, use-case approvals, inference destinations, OpenRouter market metadata, model-card fields, and family/duplicate curation fields.
-It also writes spreadsheet-friendly CSV output to `output/model-list.csv` by default, plus normalized companion CSVs for scores, use-case approvals, inference destinations, provider-origin countries, and source freshness. When recommendation proposals have been synced, use-case approvals include proposed and effective recommendation fields.
+It also writes spreadsheet-friendly CSV output to `output/model-list.csv` by default, plus normalized companion CSVs for scores, source listings, use-case approvals, inference destinations, provider-origin countries, and source freshness. Score exports preserve confidence, sample-size, rank, category, methodology, publication, style-control, preliminary, and source-revision evidence. When recommendation proposals have been synced, use-case approvals include proposed and effective recommendation fields.
 
 ## Stack
 
@@ -58,7 +58,15 @@ Print a pretty JSON list to stdout:
 python -m backend list-models
 ```
 
-By default this also writes `output/model-list.csv` and companion files named `model-list-scores.csv`, `model-list-use-case-approvals.csv`, `model-list-inference-destinations.csv`, `model-list-provider-origin-countries.csv`, and `model-list-source-freshness.csv`. The main CSV keeps model-level columns readable and replaces nested JSON blobs with summary columns. Use `--csv-output <path>` to choose another CSV path, `--no-csv-sidecars` to suppress companion files, or `--no-csv` to suppress the CSV bundle when a script needs stdout only.
+By default this also writes `output/model-list.csv` and companion files named `model-list-scores.csv`, `model-list-source-listings.csv`, `model-list-use-case-approvals.csv`, `model-list-inference-destinations.csv`, `model-list-provider-origin-countries.csv`, and `model-list-source-freshness.csv`. The main CSV keeps model-level columns readable and replaces nested JSON blobs with summary columns. Use `--csv-output <path>` to choose another CSV path, `--no-csv-sidecars` to suppress companion files, or `--no-csv` to suppress the CSV bundle when a script needs stdout only.
+
+LM Arena ingestion reads the official `lmarena-ai/leaderboard-dataset` Parquet
+files. Each run resolves one dataset commit SHA and uses it for all selected
+subsets, so mixed snapshots cannot enter a run. `chatbot_arena` remains the
+backward-compatible style-controlled Text Overall signal; raw Text, selected
+Text categories, WebDev, Agent, Vision, Document, and Search have distinct
+benchmark IDs and no default ranking weights. Arena listings are evidence only:
+they never create or change global model availability.
 
 Write the list to a file:
 

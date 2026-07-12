@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 - Unreleased
+
+- Replaced the fragile rendered LM Arena scrape with cross-subset revision-pinned official Parquet ingestion, distinct raw/style-controlled Text and category/WebDev/Agent/Vision/Document/Search benchmarks, generic structured score evidence, first/last-seen listing evidence, no-create identity handling, hardened audits, and a live isolated-database E2E contract.
+
 ## 0.2.0 - Unreleased
 
 - Added the FastAPI-served `/review` banking model review workbench with filterable model/use-case/family views, token-guarded review decision APIs, manual model creation, deprecation support, and review snapshot export/import.

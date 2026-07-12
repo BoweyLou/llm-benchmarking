@@ -24,6 +24,7 @@ from .database import (
     model_inference_destinations as model_inference_destinations_table,
     model_identity_overrides as model_identity_overrides_table,
     model_market_snapshots as model_market_snapshots_table,
+    model_source_listings as model_source_listings_table,
     model_use_case_inference_approvals as model_use_case_inference_approvals_table,
     model_use_case_approvals as model_use_case_approvals_table,
     model_use_case_recommendation_proposals as model_use_case_recommendation_proposals_table,
@@ -1075,6 +1076,20 @@ def list_models(*, include_recommendation_proposals: bool = True) -> list[dict[s
             benchmark_source_ids=benchmark_source_ids,
             latest_scores=latest_scores,
         )
+        source_listings_by_model_id: dict[str, list[dict[str, Any]]] = {}
+        if model_ids:
+            listing_rows = fetch_all(
+                conn,
+                select(model_source_listings_table)
+                .where(model_source_listings_table.c.model_id.in_(model_ids))
+                .order_by(
+                    model_source_listings_table.c.source_name.asc(),
+                    model_source_listings_table.c.benchmark_id.asc(),
+                ),
+            )
+            for listing in listing_rows:
+                listing["metadata"] = _decode_json_object(listing.pop("metadata_json", None))
+                source_listings_by_model_id.setdefault(str(listing["model_id"]), []).append(listing)
 
     providers_by_id = {str(row["id"]): _serialize_provider(row) for row in provider_rows}
     providers_by_name = {
@@ -1093,6 +1108,7 @@ def list_models(*, include_recommendation_proposals: bool = True) -> list[dict[s
             inference_route_approvals=inference_approvals_by_model_id.get(str(row["id"]), {}),
         )
         model["source_freshness"] = source_freshness_by_model_id.get(str(row["id"]), [])
+        model["source_listings"] = source_listings_by_model_id.get(str(row["id"]), [])
         model = attach_inference_catalog(
             model,
             synced_destinations=inference_rows_by_model.get(model["id"]),
@@ -3500,12 +3516,21 @@ def _persist_source_result(
 
     resolved_candidates: dict[tuple[str, str], tuple[str, ScoreCandidate]] = {}
     for candidate in result.candidates:
-        model_id = _ensure_model(
-            candidate.raw_model_name,
-            candidate.metadata,
-            candidate.raw_model_key,
-            discovered_update_log_id=discovered_update_log_id,
-        )
+        existing_models_only = bool(candidate.metadata.get("existing_models_only"))
+        model_id = _resolve_model_id(candidate.raw_model_name) if existing_models_only else None
+        if model_id is None and existing_models_only:
+            source_meta_by_identity[_record_identity(candidate.raw_model_name, candidate.raw_model_key)] = (
+                candidate.source_type,
+                candidate.verified,
+            )
+            continue
+        if model_id is None:
+            model_id = _ensure_model(
+                candidate.raw_model_name,
+                candidate.metadata,
+                candidate.raw_model_key,
+                discovered_update_log_id=discovered_update_log_id,
+            )
         _merge_model_roles(model_id, candidate.metadata)
         identity = _record_identity(candidate.raw_model_name, candidate.raw_model_key)
         model_ids_by_identity[identity] = model_id
@@ -3544,6 +3569,10 @@ def _persist_source_result(
             )
             _merge_model_roles(normalized_model_id, raw_record.metadata)
             model_ids_by_identity[identity] = normalized_model_id
+        elif normalized_model_id is None and raw_record.metadata.get("existing_models_only"):
+            normalized_model_id = _resolve_model_id(raw_record.raw_model_name)
+            if normalized_model_id is not None:
+                model_ids_by_identity[identity] = normalized_model_id
         resolution_status = _resolution_status_for_raw_record(
             raw_record,
             normalized_model_id=normalized_model_id,
@@ -3565,6 +3594,9 @@ def _persist_source_result(
             verified=verified,
             resolution_status=resolution_status,
         )
+        _upsert_source_listing(raw_record, normalized_model_id=normalized_model_id)
+
+    _mark_missing_source_listings(result)
 
     return scores_added, scores_updated
 
@@ -3866,6 +3898,73 @@ def _insert_raw_source_record(
         )
 
 
+def _upsert_source_listing(raw_record: RawSourceRecord, *, normalized_model_id: str | None) -> None:
+    listing_status = _clean_text(raw_record.metadata.get("source_listing_status"))
+    if not listing_status:
+        return
+    raw_key = _clean_text(raw_record.raw_model_key) or raw_record.raw_model_name
+    source_revision = _clean_text(raw_record.metadata.get("dataset_revision")) or None
+    publication_date = _clean_text(raw_record.metadata.get("leaderboard_publish_date")) or None
+    observed_at = raw_record.collected_at
+    metadata_json = json.dumps(raw_record.metadata, ensure_ascii=True, sort_keys=True)
+    statement = sqlite_insert(model_source_listings_table).values(
+        source_name=raw_record.source_id,
+        benchmark_id=raw_record.benchmark_id,
+        raw_model_name=raw_record.raw_model_name,
+        raw_model_key=raw_key,
+        model_id=normalized_model_id,
+        listing_status=listing_status,
+        source_revision=source_revision,
+        publication_date=publication_date,
+        first_seen_at=observed_at,
+        last_seen_at=observed_at,
+        metadata_json=metadata_json,
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=["source_name", "benchmark_id", "raw_model_key"],
+        set_={
+            "raw_model_name": raw_record.raw_model_name,
+            "model_id": normalized_model_id,
+            "listing_status": listing_status,
+            "source_revision": source_revision,
+            "publication_date": publication_date,
+            "last_seen_at": observed_at,
+            "metadata_json": metadata_json,
+        },
+    )
+    with ENGINE.begin() as conn:
+        conn.execute(statement)
+
+
+def _mark_missing_source_listings(result: SourceFetchResult) -> None:
+    keys_by_benchmark: dict[str, set[str]] = {
+        benchmark_id: set() for benchmark_id in result.listing_benchmark_ids
+    }
+    has_listing_evidence = False
+    for raw_record in result.raw_records:
+        if not _clean_text(raw_record.metadata.get("source_listing_status")):
+            continue
+        has_listing_evidence = True
+        keys_by_benchmark.setdefault(raw_record.benchmark_id, set()).add(
+            _clean_text(raw_record.raw_model_key) or raw_record.raw_model_name
+        )
+    if not has_listing_evidence:
+        return
+    with ENGINE.begin() as conn:
+        for benchmark_id, current_keys in keys_by_benchmark.items():
+            statement = (
+                update(model_source_listings_table)
+                .where(model_source_listings_table.c.source_name == result.source_id)
+                .where(model_source_listings_table.c.benchmark_id == benchmark_id)
+                .where(model_source_listings_table.c.listing_status == "listed")
+            )
+            if current_keys:
+                statement = statement.where(
+                    model_source_listings_table.c.raw_model_key.not_in(sorted(current_keys))
+                )
+            conn.execute(statement.values(listing_status="no_longer_listed"))
+
+
 def _persist_score_candidate(
     candidate: ScoreCandidate,
     resolved_model_id: str | None = None,
@@ -3888,6 +3987,7 @@ def _persist_score_candidate(
                 scores_table.c.collected_at,
                 scores_table.c.source_type,
                 scores_table.c.verified,
+                scores_table.c.source_listing_status,
             )
             .where(
                 scores_table.c.model_id == model_id,
@@ -3913,7 +4013,10 @@ def _persist_score_candidate(
                 "value": float(candidate.value),
                 "collected_at": candidate.collected_at,
             }
-            if _is_better_benchmark_score(candidate_score, latest_score, benchmark):
+            if _is_better_benchmark_score(candidate_score, latest_score, benchmark) or (
+                candidate.source_listing_status
+                and not latest.get("source_listing_status")
+            ):
                 conn.execute(
                     update(scores_table)
                     .where(scores_table.c.id == latest["id"])
@@ -3925,12 +4028,30 @@ def _persist_score_candidate(
                         source_type=candidate.source_type,
                         verified=1 if candidate.verified else 0,
                         notes=candidate.notes,
+                        confidence_lower=candidate.confidence_lower,
+                        confidence_upper=candidate.confidence_upper,
+                        variance=candidate.variance,
+                        vote_count=candidate.vote_count,
+                        observation_count=candidate.observation_count,
+                        session_count=candidate.session_count,
+                        rank=candidate.rank,
+                        category=candidate.category,
+                        publication_date=candidate.publication_date,
+                        methodology=candidate.methodology,
+                        source_listing_status=candidate.source_listing_status,
+                        style_control=None if candidate.style_control is None else (1 if candidate.style_control else 0),
+                        preliminary=None if candidate.preliminary is None else (1 if candidate.preliminary else 0),
+                        source_metadata_json=json.dumps(candidate.source_metadata, ensure_ascii=True, sort_keys=True),
                     )
                 )
                 return model_id, "updated"
             return model_id, "skipped"
 
-        if latest is not None and abs(float(latest["value"]) - candidate.value) <= 0.1:
+        if (
+            latest is not None
+            and abs(float(latest["value"]) - candidate.value) <= 0.1
+            and not candidate.source_listing_status
+        ):
             return model_id, "skipped"
 
         conn.execute(
@@ -3944,6 +4065,20 @@ def _persist_score_candidate(
                 source_type=candidate.source_type,
                 verified=1 if candidate.verified else 0,
                 notes=candidate.notes,
+                confidence_lower=candidate.confidence_lower,
+                confidence_upper=candidate.confidence_upper,
+                variance=candidate.variance,
+                vote_count=candidate.vote_count,
+                observation_count=candidate.observation_count,
+                session_count=candidate.session_count,
+                rank=candidate.rank,
+                category=candidate.category,
+                publication_date=candidate.publication_date,
+                methodology=candidate.methodology,
+                source_listing_status=candidate.source_listing_status,
+                style_control=None if candidate.style_control is None else (1 if candidate.style_control else 0),
+                preliminary=None if candidate.preliminary is None else (1 if candidate.preliminary else 0),
+                source_metadata_json=json.dumps(candidate.source_metadata, ensure_ascii=True, sort_keys=True),
             )
         )
 
@@ -6807,6 +6942,20 @@ def _serialize_score(row: dict[str, Any]) -> dict[str, Any]:
         "source_type": row.get("source_type", "primary"),
         "verified": bool(row.get("verified", 0)),
         "notes": row.get("notes"),
+        "confidence_lower": row.get("confidence_lower"),
+        "confidence_upper": row.get("confidence_upper"),
+        "variance": row.get("variance"),
+        "vote_count": row.get("vote_count"),
+        "observation_count": row.get("observation_count"),
+        "session_count": row.get("session_count"),
+        "rank": row.get("rank"),
+        "category": row.get("category"),
+        "publication_date": row.get("publication_date"),
+        "methodology": row.get("methodology"),
+        "source_listing_status": row.get("source_listing_status"),
+        "style_control": None if row.get("style_control") is None else bool(row.get("style_control")),
+        "preliminary": None if row.get("preliminary") is None else bool(row.get("preliminary")),
+        "source_metadata": _decode_json_object(row.get("source_metadata_json")),
         "variant_model_id": row.get("variant_model_id"),
         "variant_model_name": row.get("variant_model_name"),
     }
@@ -7295,7 +7444,10 @@ def _record_identity(raw_model_name: str, raw_model_key: str | None) -> str:
 
 
 def _should_skip_raw_model_resolution(raw_record: RawSourceRecord) -> bool:
-    return bool(raw_record.metadata.get("aggregate_submission"))
+    return bool(
+        raw_record.metadata.get("aggregate_submission")
+        or raw_record.metadata.get("existing_models_only")
+    )
 
 
 def _resolution_status_for_raw_record(
@@ -7307,6 +7459,8 @@ def _resolution_status_for_raw_record(
     if normalized_model_id:
         return "resolved"
     if skipped_resolution:
+        if raw_record.metadata.get("existing_models_only"):
+            return "skipped_unmatched_listing"
         return "skipped_aggregate"
     return "unresolved"
 

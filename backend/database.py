@@ -258,6 +258,37 @@ scores = Table(
     Column("source_type", String, nullable=False, server_default=text("'primary'")),
     Column("verified", Integer, nullable=False, server_default=text("0")),
     Column("notes", Text),
+    Column("confidence_lower", Float),
+    Column("confidence_upper", Float),
+    Column("variance", Float),
+    Column("vote_count", Integer),
+    Column("observation_count", Integer),
+    Column("session_count", Integer),
+    Column("rank", Integer),
+    Column("category", String),
+    Column("publication_date", String),
+    Column("methodology", String),
+    Column("source_listing_status", String),
+    Column("style_control", Integer),
+    Column("preliminary", Integer),
+    Column("source_metadata_json", Text),
+)
+
+model_source_listings = Table(
+    "model_source_listings",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("source_name", String, nullable=False),
+    Column("benchmark_id", String, nullable=False),
+    Column("raw_model_name", String, nullable=False),
+    Column("raw_model_key", String, nullable=False),
+    Column("model_id", String, ForeignKey("models.id")),
+    Column("listing_status", String, nullable=False),
+    Column("source_revision", String),
+    Column("publication_date", String),
+    Column("first_seen_at", String, nullable=False),
+    Column("last_seen_at", String, nullable=False),
+    Column("metadata_json", Text, nullable=False, server_default=text("'{}'")),
 )
 
 use_case_benchmark_weights = Table(
@@ -382,6 +413,7 @@ TABLES: tuple[Table, ...] = (
     model_inference_destinations,
     inference_sync_status,
     scores,
+    model_source_listings,
     use_case_benchmark_weights,
     model_market_snapshots,
     update_log,
@@ -650,7 +682,38 @@ def _create_schema_sql() -> list[str]:
             source_url TEXT,
             source_type TEXT NOT NULL DEFAULT 'primary',
             verified INTEGER NOT NULL DEFAULT 0,
-            notes TEXT
+            notes TEXT,
+            confidence_lower REAL,
+            confidence_upper REAL,
+            variance REAL,
+            vote_count INTEGER,
+            observation_count INTEGER,
+            session_count INTEGER,
+            rank INTEGER,
+            category TEXT,
+            publication_date TEXT,
+            methodology TEXT,
+            source_listing_status TEXT
+            ,style_control INTEGER
+            ,preliminary INTEGER
+            ,source_metadata_json TEXT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS model_source_listings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_name TEXT NOT NULL,
+            benchmark_id TEXT NOT NULL,
+            raw_model_name TEXT NOT NULL,
+            raw_model_key TEXT NOT NULL,
+            model_id TEXT REFERENCES models(id),
+            listing_status TEXT NOT NULL,
+            source_revision TEXT,
+            publication_date TEXT,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            UNIQUE (source_name, benchmark_id, raw_model_key)
         )
         """,
         """
@@ -775,7 +838,21 @@ SELECT
     ranked.source_url,
     ranked.source_type,
     ranked.verified,
-    ranked.notes
+    ranked.notes,
+    ranked.confidence_lower,
+    ranked.confidence_upper,
+    ranked.variance,
+    ranked.vote_count,
+    ranked.observation_count,
+    ranked.session_count,
+    ranked.rank,
+    ranked.category,
+    ranked.publication_date,
+    ranked.methodology,
+    ranked.source_listing_status
+    ,ranked.style_control
+    ,ranked.preliminary
+    ,ranked.source_metadata_json
 FROM (
     SELECT
         s.*,
@@ -1391,6 +1468,51 @@ def _migration_values_indicate_text_generation(values: list[Any]) -> bool:
     return False
 
 
+def _migration_20260713_score_evidence(conn: Connection) -> None:
+    score_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(scores)").fetchall()
+    }
+    expected_columns = {
+        "confidence_lower": "REAL",
+        "confidence_upper": "REAL",
+        "variance": "REAL",
+        "vote_count": "INTEGER",
+        "observation_count": "INTEGER",
+        "session_count": "INTEGER",
+        "rank": "INTEGER",
+        "category": "TEXT",
+        "publication_date": "TEXT",
+        "methodology": "TEXT",
+        "source_listing_status": "TEXT",
+        "style_control": "INTEGER",
+        "preliminary": "INTEGER",
+        "source_metadata_json": "TEXT",
+    }
+    for column_name, column_type in expected_columns.items():
+        if column_name not in score_columns:
+            conn.exec_driver_sql(f"ALTER TABLE scores ADD COLUMN {column_name} {column_type}")
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS model_source_listings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_name TEXT NOT NULL,
+            benchmark_id TEXT NOT NULL,
+            raw_model_name TEXT NOT NULL,
+            raw_model_key TEXT NOT NULL,
+            model_id TEXT REFERENCES models(id),
+            listing_status TEXT NOT NULL,
+            source_revision TEXT,
+            publication_date TEXT,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            UNIQUE (source_name, benchmark_id, raw_model_key)
+        )
+        """
+    )
+
+
 SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
     ("20260701_002_model_roles", _migration_20260701_model_roles),
@@ -1400,6 +1522,7 @@ SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260702_002_general_model_approvals", _migration_20260702_general_model_approvals),
     ("20260703_001_speech_to_text_roles", _migration_20260703_speech_to_text_roles),
     ("20260703_002_text_to_speech_roles", _migration_20260703_text_to_speech_roles),
+    ("20260713_001_score_evidence", _migration_20260713_score_evidence),
 )
 
 

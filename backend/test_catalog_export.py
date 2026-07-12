@@ -20,7 +20,20 @@ class CatalogExportTests(unittest.TestCase):
                 "id": "model-a",
                 "name": "Model A",
                 "provider": "Provider",
-                "scores": {"benchmark": {"value": 95.0, "verified": True}},
+                "scores": {"benchmark": {
+                    "value": 95.0,
+                    "verified": True,
+                    "confidence_lower": 94.0,
+                    "confidence_upper": 96.0,
+                    "rank": 1,
+                    "category": "overall",
+                    "publication_date": "2026-07-10",
+                    "methodology": "bradley_terry_style_controlled",
+                    "source_listing_status": "listed",
+                    "style_control": True,
+                    "preliminary": False,
+                    "source_metadata": {"dataset_revision": "a" * 40},
+                }},
                 "inference_destinations": [{"id": "aws-bedrock", "regions": ["us-east-1"]}],
             },
             {
@@ -67,7 +80,20 @@ class CatalogExportTests(unittest.TestCase):
                 "huggingface_last_modified_at": "2026-06-25T18:30:00Z",
                 "model_roles": ["embedding", "reranker"],
                 "provider_origin_countries": [{"code": "US", "name": "United States"}],
-                "scores": {"benchmark": {"value": 95.0, "verified": True}},
+                "scores": {"benchmark": {
+                    "value": 95.0,
+                    "verified": True,
+                    "confidence_lower": 94.0,
+                    "confidence_upper": 96.0,
+                    "rank": 1,
+                    "category": "overall",
+                    "publication_date": "2026-07-10",
+                    "methodology": "bradley_terry_style_controlled",
+                    "source_listing_status": "listed",
+                    "style_control": True,
+                    "preliminary": False,
+                    "source_metadata": {"dataset_revision": "a" * 40},
+                }},
                 "use_case_approvals": {
                     "customer_support": {
                         "approved_for_use": True,
@@ -147,7 +173,20 @@ class CatalogExportTests(unittest.TestCase):
                 "name": "Model A",
                 "provider": "Provider",
                 "provider_origin_countries": [{"code": "AU", "name": "Australia"}],
-                "scores": {"benchmark": {"value": 95.0, "verified": True}},
+                "scores": {"benchmark": {
+                    "value": 95.0,
+                    "verified": True,
+                    "confidence_lower": 94.0,
+                    "confidence_upper": 96.0,
+                    "rank": 1,
+                    "category": "overall",
+                    "publication_date": "2026-07-10",
+                    "methodology": "bradley_terry_style_controlled",
+                    "source_listing_status": "listed",
+                    "style_control": True,
+                    "preliminary": False,
+                    "source_metadata": {"dataset_revision": "a" * 40},
+                }},
                 "use_case_approvals": {
                     "customer_support": {
                         "approved_for_use": True,
@@ -173,6 +212,18 @@ class CatalogExportTests(unittest.TestCase):
                         "model_evidence_status": "current",
                     }
                 ],
+                "source_listings": [{
+                    "source_name": "chatbot_arena",
+                    "benchmark_id": "chatbot_arena",
+                    "raw_model_name": "model-a",
+                    "raw_model_key": "model-a",
+                    "listing_status": "listed",
+                    "source_revision": "a" * 40,
+                    "publication_date": "2026-07-10",
+                    "first_seen_at": "2026-07-10T00:00:00Z",
+                    "last_seen_at": "2026-07-10T00:00:00Z",
+                    "metadata": {"dataset_split": "text_style_control"},
+                }],
             }
         ]
 
@@ -181,6 +232,9 @@ class CatalogExportTests(unittest.TestCase):
         score_rows = list(csv.DictReader(io.StringIO(bundle["scores"])))
         self.assertEqual(score_rows[0]["benchmark_id"], "benchmark")
         self.assertEqual(score_rows[0]["value"], "95.0")
+        self.assertEqual(score_rows[0]["confidence_lower"], "94.0")
+        self.assertEqual(score_rows[0]["style_control"], "true")
+        self.assertEqual(json.loads(score_rows[0]["source_metadata"])["dataset_revision"], "a" * 40)
 
         approval_rows = list(csv.DictReader(io.StringIO(bundle["use-case-approvals"])))
         self.assertEqual(approval_rows[0]["use_case_id"], "customer_support")
@@ -195,6 +249,10 @@ class CatalogExportTests(unittest.TestCase):
 
         freshness_rows = list(csv.DictReader(io.StringIO(bundle["source-freshness"])))
         self.assertEqual(freshness_rows[0]["source_name"], "chatbot_arena")
+
+        listing_rows = list(csv.DictReader(io.StringIO(bundle["source-listings"])))
+        self.assertEqual(listing_rows[0]["listing_status"], "listed")
+        self.assertEqual(listing_rows[0]["source_revision"], "a" * 40)
 
     def test_cli_list_models_writes_output_file(self) -> None:
         models = [{"id": "model-a", "name": "Model A", "provider": "Provider"}]

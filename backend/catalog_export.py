@@ -17,6 +17,7 @@ CSV_SIDECAR_SUFFIXES = {
     "inference_destinations": "inference-destinations",
     "provider_origin_countries": "provider-origin-countries",
     "source_freshness": "source-freshness",
+    "source_listings": "source-listings",
 }
 
 MODEL_CSV_BASE_FIELDS = [
@@ -166,6 +167,7 @@ NESTED_MODEL_FIELDS = {
     "inference_summary",
     "scores",
     "source_freshness",
+    "source_listings",
 }
 
 SCORE_CSV_FIELDS = [
@@ -180,8 +182,38 @@ SCORE_CSV_FIELDS = [
     "source_type",
     "verified",
     "notes",
+    "confidence_lower",
+    "confidence_upper",
+    "variance",
+    "vote_count",
+    "observation_count",
+    "session_count",
+    "rank",
+    "category",
+    "publication_date",
+    "methodology",
+    "source_listing_status",
+    "style_control",
+    "preliminary",
+    "source_metadata",
     "variant_model_id",
     "variant_model_name",
+]
+
+SOURCE_LISTING_CSV_FIELDS = [
+    "model_id",
+    "model_name",
+    "provider",
+    "source_name",
+    "benchmark_id",
+    "raw_model_name",
+    "raw_model_key",
+    "listing_status",
+    "source_revision",
+    "publication_date",
+    "first_seen_at",
+    "last_seen_at",
+    "metadata",
 ]
 
 USE_CASE_APPROVAL_CSV_FIELDS = [
@@ -318,6 +350,10 @@ def render_model_metadata_csv_bundle(models: list[dict[str, Any]]) -> dict[str, 
         CSV_SIDECAR_SUFFIXES["source_freshness"]: _render_csv_rows(
             SOURCE_FRESHNESS_CSV_FIELDS,
             _source_freshness_rows(models),
+        ),
+        CSV_SIDECAR_SUFFIXES["source_listings"]: _render_csv_rows(
+            SOURCE_LISTING_CSV_FIELDS,
+            _source_listing_rows(models),
         ),
     }
 
@@ -468,13 +504,33 @@ def _score_rows(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for benchmark_id, score in sorted(scores.items(), key=lambda item: str(item[0])):
             if not isinstance(score, dict):
                 continue
-            rows.append(
-                {
+            score_row = {
                     "model_id": model.get("id"),
                     "model_name": model.get("name"),
                     "provider": model.get("provider"),
                     "benchmark_id": benchmark_id,
                     **score,
+                }
+            score_row["source_metadata"] = json.dumps(
+                score.get("source_metadata") or {}, sort_keys=True
+            )
+            rows.append(score_row)
+    return rows
+
+
+def _source_listing_rows(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for model in models:
+        for listing in _as_list(model.get("source_listings")):
+            if not isinstance(listing, dict):
+                continue
+            rows.append(
+                {
+                    "model_id": model.get("id"),
+                    "model_name": model.get("name"),
+                    "provider": model.get("provider"),
+                    **listing,
+                    "metadata": json.dumps(listing.get("metadata") or {}, sort_keys=True),
                 }
             )
     return rows

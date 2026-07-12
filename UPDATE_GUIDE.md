@@ -53,6 +53,24 @@ python -m backend list-models --format jsonl --output output/model-metadata.json
 - Hugging Face model-card metadata when `model-card-sync` is run
 - update history, source-run detail, and audit output
 
+LM Arena refreshes use the official Hugging Face Parquet dataset rather than
+the rendered leaderboard page. The adapter resolves the current dataset commit
+once, pins every selected subset to that immutable revision, and fails the
+source run before persistence on transport, Parquet schema, identity, score, or
+confidence-bound violations. Optional selected Text categories are skipped when
+the official snapshot omits them; required Overall surfaces are not optional.
+Arena rows only score already-known catalog identities. Unmatched rows are kept
+in `raw_source_records` and `model_source_listings` and do not create, activate,
+deactivate, or deprecate models. A previously listed identity absent from a
+later complete benchmark snapshot transitions to neutral `no_longer_listed`
+evidence with its prior `last_seen_at` preserved.
+
+Run the live isolated-database contract check after changing this adapter:
+
+```bash
+python scripts/test_arena_ingest_e2e.py
+```
+
 OpenRouter market/ranking pages are optional enrichment sources. If their page
 shape changes and expected payloads such as `rankingData` are absent, the update
 log records a non-fatal `openrouter_market` warning while unrelated benchmark

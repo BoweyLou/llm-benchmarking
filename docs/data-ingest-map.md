@@ -23,7 +23,7 @@ flowchart LR
         AA["Artificial Analysis models and release dates"]
         AAIF["Artificial Analysis IFBench"]
         AATTS["Artificial Analysis Text to Speech"]
-        Arena["Chatbot Arena"]
+        Arena["LM Arena official Parquet dataset"]
         AIL["AILuminate"]
         BFCL["Berkeley Function Calling Leaderboard"]
         BCB["BigCodeBench"]
@@ -62,7 +62,8 @@ flowchart LR
 
     subgraph Store["SQLite store"]
         Models["models and age evidence"]
-        Scores["scores"]
+        Scores["scores with structured evidence"]
+        Listings["model_source_listings"]
         Runs["update_log, source_runs, raw_source_records"]
         Market["model_market_snapshots"]
         Inference["model_inference_destinations, inference_sync_status"]
@@ -105,6 +106,7 @@ flowchart LR
     Resolve --> Persist
     Raw --> Persist
     Persist --> Scores
+    Persist --> Listings
     Persist --> Runs
     Persist --> Models
     Persist --> Identity
@@ -158,7 +160,28 @@ flowchart LR
 | Artificial Analysis models | `ArtificialAnalysisAdapter` | Intelligence, speed, blended cost, creator/family metadata, release date. | Release dates are promoted as high-confidence model release evidence; additional AA evaluation pages should be added as separate adapters when stable. |
 | Artificial Analysis IFBench | `ArtificialAnalysisIfbenchAdapter` | IFBench score plus cost, output-token, and latency metrics. | One AA evaluation page is integrated; other AA pages remain future candidates. |
 | Artificial Analysis Text to Speech | `ArtificialAnalysisTtsAdapter` | Text-to-speech Speech Arena Elo, generation time, price per 1M characters, open-weight flags, provider/model metadata, and source links. | Used only for `text_to_speech` rankings; individual voices remain metadata unless exposed as distinct provider endpoints. |
-| Chatbot Arena | `ChatbotArenaAdapter` | Arena ELO, rank bands, votes, organization, model URL, license, price, context metadata. | Metadata promotion uses source-precedence rules and does not override higher-trust sources silently. |
+| LM Arena | `ChatbotArenaAdapter` | Official revision-pinned Parquet snapshots for raw Text Overall, style-controlled Text Overall and selected categories, WebDev, Agent IPS success, style-controlled Vision, Document, and Search. Persists confidence bounds, variance, votes/observations/sessions, rank, category, publication date, methodology, style-control flag, preliminary flag, revision metadata, and listing lifecycle evidence. | Resolves the dataset HEAD SHA once per run and uses immutable URLs for every subset. The legacy `chatbot_arena` ID is style-controlled Text Overall. New signals are unweighted by default. Dataset identities never create, reactivate, deactivate, or deprecate catalog models; unmatched listings remain queryable evidence. Rendered-page parsing and its unsafe fallback were removed. |
+
+### LM Arena contract
+
+The adapter validates HTTP success, Parquet readability, required columns,
+latest publication dates, required Overall categories, bounded identities,
+finite scores, and coherent confidence intervals before returning any records.
+Optional selected Text categories may be absent without failing unrelated Arena
+surfaces. Duplicate display names in an official category are collapsed
+deterministically to the row with the largest vote/session/observation count and
+the duplicate count is retained in source metadata.
+
+`scores` stores generic structured evidence (`confidence_lower`,
+`confidence_upper`, `variance`, count fields, rank, category, publication date,
+methodology, style control, preliminary status, listing status, and source
+metadata). `model_source_listings` separately upserts first/last-seen lifecycle
+evidence, including unmatched identities, without treating Arena presence as
+global provider availability. After a complete validated snapshot, previously
+listed keys absent from that benchmark are marked `no_longer_listed` while
+their last-seen timestamp is preserved; this neutral evidence never changes a
+model's global catalog status. The model API exposes matched listing evidence;
+CSV bundles include `scores` and `source-listings` companion files.
 | AILuminate | `AILuminateAdapter` | Public grade plus locale and system-class companion evidence. | Risk-category detail should wait for a stable detail-page surface. |
 | Berkeley Function Calling Leaderboard | `BfclAdapter` | Overall function-calling accuracy, component scores, cost, latency, organization, license, evaluation mode. | Current catalog score is overall BFCL; component scores remain raw metadata. |
 | BigCodeBench | `BigCodeBenchAdapter` | Full/Hard aggregate plus Instruct/Complete Pass@1 variants. | Variant scores stay separate to avoid one opaque coding score. |

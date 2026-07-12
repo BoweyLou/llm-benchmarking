@@ -72,6 +72,20 @@ class ScoreCandidate:
     source_type: str = "primary"
     verified: bool = True
     notes: str | None = None
+    confidence_lower: float | None = None
+    confidence_upper: float | None = None
+    variance: float | None = None
+    vote_count: int | None = None
+    observation_count: int | None = None
+    session_count: int | None = None
+    rank: int | None = None
+    category: str | None = None
+    publication_date: str | None = None
+    methodology: str | None = None
+    source_listing_status: str | None = None
+    style_control: bool | None = None
+    preliminary: bool | None = None
+    source_metadata: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -82,6 +96,7 @@ class SourceFetchResult:
     fetched_at: str
     raw_records: list[RawSourceRecord]
     candidates: list[ScoreCandidate]
+    listing_benchmark_ids: tuple[str, ...] = ()
 
 
 class BaseSourceAdapter(ABC):
@@ -107,4 +122,5 @@ class BaseSourceAdapter(ABC):
             fetched_at=fetched_at,
             raw_records=raw_records,
             candidates=candidates,
+            listing_benchmark_ids=self.benchmark_ids,
         )

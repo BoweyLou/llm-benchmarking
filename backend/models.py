@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SourceType = Literal["primary", "secondary", "manual"]
 ModelRole = Literal["generator", "embedding", "reranker", "multimodal_embedding", "speech_to_text", "text_to_speech"]
-RawSourceResolutionStatus = Literal["resolved", "skipped_aggregate", "unresolved"]
+RawSourceResolutionStatus = Literal["resolved", "skipped_aggregate", "skipped_unmatched_listing", "unresolved"]
 UpdateStatus = Literal["running", "completed", "failed"]
 TriggeredBy = Literal["manual", "api", "scheduled", "bootstrap", "cli"]
 AuditStatus = Literal["passed", "warning", "failed"]
@@ -55,6 +55,20 @@ class ScoreOut(APIModel):
     source_type: SourceType = "primary"
     verified: bool = False
     notes: str | None = None
+    confidence_lower: float | None = None
+    confidence_upper: float | None = None
+    variance: float | None = None
+    vote_count: int | None = None
+    observation_count: int | None = None
+    session_count: int | None = None
+    rank: int | None = None
+    category: str | None = None
+    publication_date: str | None = None
+    methodology: str | None = None
+    source_listing_status: str | None = None
+    style_control: bool | None = None
+    preliminary: bool | None = None
+    source_metadata: dict[str, Any] = Field(default_factory=dict)
     variant_model_id: str | None = None
     variant_model_name: str | None = None
 
@@ -104,6 +118,21 @@ class SourceFreshnessOut(APIModel):
     degraded: bool = False
     stale: bool = False
     missing_because_source_failed: bool = False
+
+
+class SourceListingOut(APIModel):
+    id: int
+    source_name: str
+    benchmark_id: str
+    raw_model_name: str
+    raw_model_key: str
+    model_id: str | None = None
+    listing_status: str
+    source_revision: str | None = None
+    publication_date: str | None = None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class OriginCountryOut(APIModel):
@@ -356,6 +385,7 @@ class ModelOut(APIModel):
     inference_destinations: list[InferenceDestinationOut] = Field(default_factory=list)
     inference_summary: InferenceSummaryOut = Field(default_factory=InferenceSummaryOut)
     source_freshness: list[SourceFreshnessOut] = Field(default_factory=list)
+    source_listings: list[SourceListingOut] = Field(default_factory=list)
     scores: dict[str, ScoreOut | None] = Field(default_factory=dict)
 
 
