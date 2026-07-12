@@ -17,7 +17,7 @@ the row is older than 14 days or the backend/API shape has changed.
 ## Done
 
 - [x] LBM-064: P1 Replace fragile Arena page scrape with official dataset ingestion
-  - Source: Human-approved Arena metadata review, implemented under the prepared `LBM-062` task packet because that packet ID collided with an older completed backlog row.
+  - Source: Human-approved Arena metadata review, rekeyed to `LBM-064` after discovery of a collision with an older completed backlog row.
   - Scope: revision-consistent official Hugging Face Parquet ingestion, separate Text/category/WebDev/Agent/Vision/Document/Search benchmarks, structured score uncertainty/provenance, listing lifecycle evidence, fail-closed validation, and audit/E2E coverage.
   - Acceptance: the legacy `chatbot_arena` ID means style-controlled Text Overall; new Arena benchmarks are unweighted by default; Arena never creates or globally deactivates models; API and CSV exports retain score and listing evidence.
   - Completed: 2026-07-13. Live isolated-DB E2E ingested all selected surfaces from one immutable dataset revision with zero catalog models created by ingestion.
