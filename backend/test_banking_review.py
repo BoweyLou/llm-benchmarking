@@ -68,6 +68,7 @@ class BankingReviewTests(unittest.TestCase):
         self.assertEqual(rows[0]["use_case_id"], "customer_support")
         self.assertEqual(rows[0]["family_id"], "provider::model-a")
         self.assertEqual(rows[0]["recommendation_status"], "recommended")
+        self.assertNotIn("effective_recommendation_status", rows[0])
         self.assertEqual(rows[0]["proposed_recommendation_status"], "not_recommended")
         self.assertEqual(rows[0]["proposed_recommendation_blockers"], "routing")
 

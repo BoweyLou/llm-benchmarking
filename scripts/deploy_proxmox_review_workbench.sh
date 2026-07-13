@@ -139,7 +139,19 @@ systemctl is-active --quiet "$REMOTE_SERVICE"
 REMOTE
 
 CATALOG_JSON="$(mktemp)"
-curl --fail --silent --show-error "http://$TAILSCALE_IP:$REMOTE_PORT/api/review/catalog" -o "$CATALOG_JSON"
+catalog_ready="no"
+for attempt in $(seq 1 30); do
+  if curl --fail --silent --show-error "http://$TAILSCALE_IP:$REMOTE_PORT/api/review/catalog" -o "$CATALOG_JSON"; then
+    catalog_ready="yes"
+    break
+  fi
+  sleep 1
+done
+if [[ "$catalog_ready" != "yes" ]]; then
+  printf 'Review catalog did not become ready at http://%s:%s/api/review/catalog.\n' "$TAILSCALE_IP" "$REMOTE_PORT" >&2
+  rm -f "$CATALOG_JSON"
+  exit 1
+fi
 python3 - "$CATALOG_JSON" <<'PY'
 import json
 import sys

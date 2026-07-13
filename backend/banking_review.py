@@ -55,7 +55,6 @@ REVIEW_LEADING_FIELDS = [
     "use_case_id",
     "approved_for_use",
     "recommendation_status",
-    "effective_recommendation_status",
     "proposed_recommendation_status",
     "proposed_recommendation_score",
     "proposed_recommendation_confidence",

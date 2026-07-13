@@ -80,10 +80,15 @@ class ReviewWorkbenchTests(unittest.TestCase):
 
         self.assertEqual(app_response.status_code, 200)
         self.assertIn("Banking Model Review", app_response.text)
-        self.assertIn("Effective recommendation", app_response.text)
         self.assertIn("Manual recommendation", app_response.text)
         self.assertIn("Restricted", app_response.text)
         self.assertIn('data-action="restricted"', app_response.text)
+        self.assertNotIn('${header("proposed", "Proposed")}', app_response.text)
+        self.assertNotIn('["proposed_recommendation",', app_response.text)
+        self.assertNotIn("Effective recommendation", app_response.text)
+        self.assertNotIn('${header("effective", "Effective")}', app_response.text)
+        self.assertNotIn("recommendationFilter", app_response.text)
+        self.assertNotIn("effective_recommendation_status", app_response.text)
         self.assertIn("manualRecommendationFilter", app_response.text)
         self.assertIn("hasSavedManualRecommendation", app_response.text)
         self.assertIn('<option value="pending">Pending</option>', app_response.text)
@@ -107,6 +112,15 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("body.model_roles = [body.model_roles]", app_response.text)
         self.assertIn("preferredUseCaseIdForModel", app_response.text)
         self.assertIn("bulkUseCaseIdForModels", app_response.text)
+        self.assertIn("matchingUseCaseIdForModel", app_response.text)
+        self.assertIn("matchingUseCaseIdsForModel", app_response.text)
+        self.assertIn("decisionUseCaseIdsForModel", app_response.text)
+        self.assertIn("bulkUseCaseTargetsForModels", app_response.text)
+        self.assertIn("shouldTargetMatchingUseCaseFilters", app_response.text)
+        self.assertIn("matchingUseCaseFilterOptions", app_response.text)
+        self.assertIn("useCaseApprovalStatus", app_response.text)
+        self.assertIn("useCaseApprovalClass", app_response.text)
+        self.assertIn('return "pending"', app_response.text)
         self.assertIn('${header("release_date", "Release")}', app_response.text)
         self.assertIn("modelReleaseInfo", app_response.text)
         self.assertIn("best_release_date", app_response.text)
@@ -142,6 +156,7 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("models", payload)
         self.assertIn("families", payload)
         self.assertIn("facets", payload)
+        self.assertNotIn("recommendations", payload["facets"])
         self.assertIn("countries", payload["facets"])
         self.assertTrue(payload["facets"]["countries"])
         self.assertIn("hyperscalers", payload["facets"])
@@ -399,6 +414,38 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertEqual(approval["recommendation_status"], "restricted")
         self.assertEqual(approval["effective_recommendation_status"], "restricted")
         self.assertEqual(approval["recommendation_notes"], "Cyber model limited to approved cyber team members.")
+
+    def test_review_decision_route_overwrites_restricted_recommendation(self) -> None:
+        os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
+        self._insert_review_model("restricted-to-not-recommended")
+        client = TestClient(main.app)
+
+        with patch("backend.main.bootstrap"):
+            restricted_response = client.post(
+                "/api/review/decisions",
+                json={
+                    "model_ids": ["restricted-to-not-recommended"],
+                    "use_case_ids": ["safety_compliance"],
+                    "recommendation_status": "restricted",
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+            not_recommended_response = client.post(
+                "/api/review/decisions",
+                json={
+                    "model_ids": ["restricted-to-not-recommended"],
+                    "use_case_ids": ["safety_compliance"],
+                    "recommendation_status": "not_recommended",
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+
+        self.assertEqual(restricted_response.status_code, 200)
+        self.assertEqual(not_recommended_response.status_code, 200)
+        model = next(model for model in update_engine.list_models() if model["id"] == "restricted-to-not-recommended")
+        approval = model["use_case_approvals"]["safety_compliance"]
+        self.assertEqual(approval["recommendation_status"], "not_recommended")
+        self.assertEqual(approval["effective_recommendation_status"], "not_recommended")
 
     def test_review_decision_route_can_clear_approval_boolean(self) -> None:
         os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
