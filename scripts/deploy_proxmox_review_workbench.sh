@@ -170,7 +170,7 @@ print(
 PY
 rm -f "$CATALOG_JSON"
 
-printf 'Deployed banking review workbench: http://%s:%s/review\n' "$TAILSCALE_IP" "$REMOTE_PORT"
+printf 'Deployed LLM Model Tool: http://%s:%s/review\n' "$TAILSCALE_IP" "$REMOTE_PORT"
 printf 'Trusted tailnet writes: %s\n' "$TAILNET_TRUSTED_WRITES"
 printf 'Admin token fallback is stored on %s:%s\n' "$REMOTE_HOST" "$REMOTE_ENV_FILE"
 printf 'Remote DB seed uploaded: %s\n' "$SEED_UPLOADED"

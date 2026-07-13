@@ -16,6 +16,13 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-067: P2 Rename the review workbench to LLM Model Tool
+  - Source: Human request 2026-07-13 to replace the banking-specific header and subtitle with a simpler product name.
+  - Scope: rename the visible browser title, brand badge, heading, current operator documentation, and deployment/runtime labels while preserving banking-specific policy, CLI, and export identifiers.
+  - Acceptance: `/review` is branded as `LLM Model Tool`, the old `BR` badge and banking workbench header/subtitle are absent, and functional banking identifiers remain compatible.
+  - Validation: focused review workbench regression, docs checks, version check, and task-scope diff review.
+  - Completed: 2026-07-13. The review surface and current operational labels now use the LLM Model Tool name.
+
 - [x] LBM-066: P1 Restore Artificial Analysis IFBench ingestion after schema drift
   - Source: Human report 2026-07-13 after the review workbench showed the latest sync as failed.
   - Problem: Artificial Analysis shortened its IFBench JSON-LD dataset names and metric keys, so the adapter rejected the current page even though valid score, output-token, cost, and latency data remained available.

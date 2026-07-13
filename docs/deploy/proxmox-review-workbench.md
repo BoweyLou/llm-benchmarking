@@ -1,6 +1,6 @@
-# Proxmox Tailnet Review Workbench Deployment
+# Proxmox Tailnet LLM Model Tool Deployment
 
-The banking model review workbench can run as a private FastAPI service on the
+The LLM Model Tool can run as a private FastAPI service on the
 Proxmox host and bind only to the host's Tailscale IPv4 address.
 
 ## Deploy
@@ -46,7 +46,7 @@ runtime cannot create a virtual environment.
 
 ## Use
 
-Open the workbench from any device on the tailnet:
+Open the LLM Model Tool from any device on the tailnet:
 
 ```text
 http://<proxmox-tailscale-ip>:8766/review
@@ -80,6 +80,6 @@ Restart after manual environment changes:
 ssh proxmox "systemctl restart llm-benchmarking.service"
 ```
 
-Back up review decisions before rebuilding the database by using the workbench
+Back up review decisions before rebuilding the database by using the LLM Model Tool
 snapshot export, or by copying `/var/lib/llm-benchmarking/db.sqlite` from the
 Proxmox host.

@@ -117,10 +117,10 @@ Use manual `restricted` when a model is suitable only for a defined group, for
 example a cyber-specialist model that should be available only to approved cyber
 team members. Store the audience or access condition in recommendation notes.
 
-## Banking Review Workbench
+## LLM Model Tool
 
-For interactive banking review, run the FastAPI app locally and open
-`/review`. The workbench shows the model catalog with provider, provider-origin
+For interactive model review, run the FastAPI app locally and open `/review`.
+The LLM Model Tool shows the model catalog with provider, provider-origin
 country, use-case, general-approval, manual-recommendation, use-case approval,
 family, catalog-status, model-role,
 small-model, and hyperscaler-availability filters; a sortable model table; family and needs-decision
@@ -312,7 +312,7 @@ uvicorn backend.main:app --reload --port 8000
 
 Useful local URLs:
 
-- Banking review workbench: `http://127.0.0.1:8000/review`
+- LLM Model Tool: `http://127.0.0.1:8000/review`
 - Root model list: `http://127.0.0.1:8000/`
 - Model list API: `http://127.0.0.1:8000/api/models`
 - API docs: `http://127.0.0.1:8000/docs`
@@ -489,7 +489,7 @@ Notes:
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.
 - `recommendation-audit` previews generated use-case recommendation proposals. `recommendation-sync` persists them so `list-models`, CSV export, and the API include proposed/effective recommendation fields.
-- `/review` is the interactive banking model review workbench and can export all, filtered, or selected model rows to CSV from the browser. It can also start `/api/update` and show live progress from `/api/update/status/{log_id}`. `banking-review export` writes the review-friendly combined CSV from the CLI. `banking-review set` and `banking-review deprecate` apply model- or family-scoped manual approval and recommendation decisions from the CLI.
+- `/review` is the interactive LLM Model Tool and can export all, filtered, or selected model rows to CSV from the browser. It can also start `/api/update` and show live progress from `/api/update/status/{log_id}`. `banking-review export` writes the review-friendly combined CSV from the CLI. `banking-review set` and `banking-review deprecate` apply model- or family-scoped manual approval and recommendation decisions from the CLI.
 - `model-license-sync` fills missing licenses using safe open-weight family propagation, a `Proprietary` fallback for missing proprietary licenses, and tracked exact/family overrides from [backend/model_license_baseline.json](backend/model_license_baseline.json).
 - `list-models` writes a clean CSV bundle to `output/model-list*.csv` by default in addition to the requested stdout/file format; pass `--no-csv` when you do not want the bundle, or `--no-csv-sidecars` when you only want the main model CSV.
 - `provider-origin-export` and `model-curation-export` push live curation back into the tracked baseline JSON files.
@@ -501,7 +501,7 @@ The core API is in [backend/main.py](backend/main.py). High-level groups:
 - model list: `/` and `/api/models`
 - catalog metadata: `/api/providers`, `/api/benchmarks`, `/api/use-cases`
 - rankings: `/api/rankings`
-- review workbench: `/review`, `/api/review/catalog`, `/api/review/decisions`, `/api/review/model-approvals`, `/api/review/models`, `/api/review/snapshots/export`, and `/api/review/snapshots/import`
+- LLM Model Tool: `/review`, `/api/review/catalog`, `/api/review/decisions`, `/api/review/model-approvals`, `/api/review/models`, `/api/review/snapshots/export`, and `/api/review/snapshots/import`
 - admin edits for provider metadata, approvals, inference-route approvals, manual benchmark scores, and model curation
 - update operations: `/api/update`, `/api/update/status/{log_id}`, `/api/update/history`, source-run detail, raw source records, audit output, and per-run catalog change summaries
 - market snapshots: `/api/market-snapshots`

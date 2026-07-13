@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3 - Unreleased
+
+- Renamed the visible review surface and current deployment labels to `LLM Model Tool`, replacing the banking-specific header and subtitle while retaining compatible banking workflow identifiers (LBM-067).
+
 ## 0.4.2 - Unreleased
 
 - Restored Artificial Analysis IFBench ingestion after upstream JSON-LD naming changes by supporting both current and legacy dataset names and score/time metric keys (LBM-066).

@@ -1,5 +1,5 @@
 [Unit]
-Description=LLM Benchmarking banking review workbench
+Description=LLM Model Tool
 After=network-online.target tailscaled.service
 Wants=network-online.target
 

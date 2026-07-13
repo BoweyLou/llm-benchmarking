@@ -81,7 +81,12 @@ class ReviewWorkbenchTests(unittest.TestCase):
             catalog_response = client.get("/api/review/catalog")
 
         self.assertEqual(app_response.status_code, 200)
-        self.assertIn("Banking Model Review", app_response.text)
+        self.assertIn("<title>LLM Model Tool</title>", app_response.text)
+        self.assertIn('<div class="brand-mark">LLM</div>', app_response.text)
+        self.assertIn("<h1>Model Tool</h1>", app_response.text)
+        self.assertNotIn("Banking Model Review", app_response.text)
+        self.assertNotIn("Internal Data Review Workbench", app_response.text)
+        self.assertNotIn(">BR<", app_response.text)
         self.assertIn("Manual recommendation", app_response.text)
         self.assertIn("Restricted", app_response.text)
         self.assertIn('data-action="restricted"', app_response.text)
