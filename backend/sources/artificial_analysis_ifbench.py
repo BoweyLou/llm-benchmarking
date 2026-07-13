@@ -11,8 +11,9 @@ from .base import BaseSourceAdapter, RawSourceRecord, ScoreCandidate, percent_sc
 
 
 IFBENCH_URL = "https://artificialanalysis.ai/evaluations/ifbench"
-IFBENCH_SCORE_KEY = "IFBench Benchmark Leaderboard"
-IFBENCH_TIME_KEY = "IFBench Benchmark Leaderboard time per task"
+IFBENCH_DATASET_PREFIXES = ("IFBench:", "IFBench Benchmark Leaderboard:")
+IFBENCH_SCORE_KEYS = ("IFBench", "IFBench Benchmark Leaderboard")
+IFBENCH_TIME_KEYS = ("IFBench time per task", "IFBench Benchmark Leaderboard time per task")
 
 
 class ArtificialAnalysisIfbenchAdapter(BaseSourceAdapter):
@@ -94,7 +95,7 @@ class ArtificialAnalysisIfbenchAdapter(BaseSourceAdapter):
                 continue
             name = str(payload.get("name") or "")
             rows = payload.get("data")
-            if payload.get("@type") != "Dataset" or not name.startswith("IFBench Benchmark Leaderboard"):
+            if payload.get("@type") != "Dataset" or not name.startswith(IFBENCH_DATASET_PREFIXES):
                 continue
             if isinstance(rows, list):
                 datasets.append({"name": name, "description": payload.get("description"), "data": rows})
@@ -183,7 +184,7 @@ def _row_identity(row: dict[str, Any]) -> str:
 
 
 def _metrics_from_sections(sections: dict[str, dict[str, Any]]) -> dict[str, float | None]:
-    score_fraction = safe_float((sections.get("score") or {}).get(IFBENCH_SCORE_KEY))
+    score_fraction = _first_float(sections.get("score") or {}, IFBENCH_SCORE_KEYS)
     answer_tokens = safe_float((sections.get("output_tokens") or {}).get("answer"))
     reasoning_tokens = safe_float((sections.get("output_tokens") or {}).get("reasoning"))
     output_tokens = _sum_present(answer_tokens, reasoning_tokens)
@@ -196,7 +197,7 @@ def _metrics_from_sections(sections: dict[str, dict[str, Any]]) -> dict[str, flo
     input_cost = safe_float(cost_row.get("input"))
     cost_per_task = _sum_present(answer_cost, reasoning_cost, cache_write_cost, cache_hit_cost, input_cost)
 
-    time_minutes = safe_float((sections.get("time") or {}).get(IFBENCH_TIME_KEY))
+    time_minutes = _first_float(sections.get("time") or {}, IFBENCH_TIME_KEYS)
 
     return {
         "score_fraction": score_fraction,
@@ -219,6 +220,14 @@ def _sum_present(*values: float | None) -> float | None:
     if not present:
         return None
     return sum(present)
+
+
+def _first_float(row: dict[str, Any], keys: Sequence[str]) -> float | None:
+    for key in keys:
+        value = safe_float(row.get(key))
+        if value is not None:
+            return value
+    return None
 
 
 def _absolute_details_url(value: Any) -> str | None:

@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-066: P1 Restore Artificial Analysis IFBench ingestion after schema drift
+  - Source: Human report 2026-07-13 after the review workbench showed the latest sync as failed.
+  - Problem: Artificial Analysis shortened its IFBench JSON-LD dataset names and metric keys, so the adapter rejected the current page even though valid score, output-token, cost, and latency data remained available.
+  - Scope: accept the current and legacy IFBench dataset-name prefixes and metric keys while retaining suffix-based section mapping and existing metric semantics.
+  - Acceptance: current and legacy IFBench JSON-LD schemas both produce score, output-token, cost, and time candidates; unrelated source behavior is unchanged.
+  - Validation: fixture-backed current/legacy parser regressions, live adapter fetch, full inference suite, docs checks, and version check.
+  - Completed: 2026-07-13. IFBench ingestion now tolerates both current and legacy Artificial Analysis JSON-LD naming.
+
 - [x] LBM-065: P1 Show database-update and sync timestamps in review workbench
   - Source: Human request 2026-07-13 after reviewing the deployed workbench freshness indicator.
   - Problem: the UI labeled the catalog response-build time as `Last synced`, so reviewers could not distinguish database writes from update-run completion.

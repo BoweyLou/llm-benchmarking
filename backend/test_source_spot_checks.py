@@ -595,9 +595,9 @@ class SourceSpotCheckTests(unittest.TestCase):
 
     def test_artificial_analysis_ifbench_spot_check_persists_score_efficiency_metrics(self) -> None:
             adapter = ArtificialAnalysisIfbenchAdapter()
-            raw_records = adapter._build_raw_records(
-                [
+            datasets = [
                     {
+                        "@type": "Dataset",
                         "name": "IFBench Benchmark Leaderboard: Score",
                         "data": [
                             {
@@ -608,6 +608,7 @@ class SourceSpotCheckTests(unittest.TestCase):
                         ],
                     },
                     {
+                        "@type": "Dataset",
                         "name": "IFBench Benchmark Leaderboard: Output Tokens per Task",
                         "data": [
                             {
@@ -619,6 +620,7 @@ class SourceSpotCheckTests(unittest.TestCase):
                         ],
                     },
                     {
+                        "@type": "Dataset",
                         "name": "IFBench Benchmark Leaderboard: Cost per Task",
                         "data": [
                             {
@@ -633,6 +635,7 @@ class SourceSpotCheckTests(unittest.TestCase):
                         ],
                     },
                     {
+                        "@type": "Dataset",
                         "name": "IFBench Benchmark Leaderboard: Time per Task",
                         "data": [
                             {
@@ -642,7 +645,13 @@ class SourceSpotCheckTests(unittest.TestCase):
                             }
                         ],
                     },
-                ],
+                ]
+            html = "".join(
+                f'<script type="application/ld+json">{json.dumps(dataset)}</script>'
+                for dataset in datasets
+            )
+            raw_records = adapter._build_raw_records(
+                adapter._extract_datasets(html),
                 fetched_at=FUTURE_COLLECTED_AT,
             )
 
@@ -681,6 +690,84 @@ class SourceSpotCheckTests(unittest.TestCase):
             self.assertEqual(raw_notes["evaluation"], "IFBench")
             self.assertEqual(raw_notes["metrics"]["output_tokens_per_task"], 350.5)
             self.assertAlmostEqual(raw_notes["metrics"]["score_fraction"], 0.8125)
+
+    def test_artificial_analysis_ifbench_accepts_current_json_ld_schema(self) -> None:
+            adapter = ArtificialAnalysisIfbenchAdapter()
+            datasets = [
+                {
+                    "@context": "https://schema.org",
+                    "@type": "Dataset",
+                    "name": "IFBench: Score",
+                    "data": [
+                        {
+                            "label": "Claude Opus 4.6",
+                            "IFBench": 0.8125,
+                            "detailsUrl": "/models/claude-opus-4-6",
+                        }
+                    ],
+                },
+                {
+                    "@context": "https://schema.org",
+                    "@type": "Dataset",
+                    "name": "IFBench: Output Tokens per Task",
+                    "data": [
+                        {
+                            "label": "Claude Opus 4.6",
+                            "answer": 110.0,
+                            "reasoning": 240.5,
+                            "detailsUrl": "/models/claude-opus-4-6",
+                        }
+                    ],
+                },
+                {
+                    "@context": "https://schema.org",
+                    "@type": "Dataset",
+                    "name": "IFBench: Cost per Task",
+                    "data": [
+                        {
+                            "label": "Claude Opus 4.6",
+                            "answer": 0.012,
+                            "reasoning": 0.034,
+                            "cacheWrite": 0.001,
+                            "cacheHit": 0.002,
+                            "input": 0.003,
+                            "detailsUrl": "/models/claude-opus-4-6",
+                        }
+                    ],
+                },
+                {
+                    "@context": "https://schema.org",
+                    "@type": "Dataset",
+                    "name": "IFBench: Time per Task",
+                    "data": [
+                        {
+                            "label": "Claude Opus 4.6",
+                            "IFBench time per task": 0.75,
+                            "detailsUrl": "/models/claude-opus-4-6",
+                        }
+                    ],
+                },
+            ]
+            html = "".join(
+                f'<script type="application/ld+json">{json.dumps(dataset)}</script>'
+                for dataset in datasets
+            )
+
+            raw_records = adapter._build_raw_records(
+                adapter._extract_datasets(html),
+                fetched_at=FUTURE_COLLECTED_AT,
+            )
+            candidates = adapter.normalize(raw_records)
+
+            candidate_values = {candidate.benchmark_id: candidate.value for candidate in candidates}
+            self.assertEqual(
+                set(candidate_values),
+                {"aa_ifbench", "aa_ifbench_cost", "aa_ifbench_output_tokens", "aa_ifbench_time"},
+            )
+            self.assertAlmostEqual(candidate_values["aa_ifbench"], 81.25)
+            self.assertAlmostEqual(candidate_values["aa_ifbench_cost"], 0.052)
+            self.assertAlmostEqual(candidate_values["aa_ifbench_output_tokens"], 350.5)
+            self.assertAlmostEqual(candidate_values["aa_ifbench_time"], 0.75)
 
     def test_swebench_spot_check_keeps_best_submission_for_each_model(self) -> None:
             adapter = SwebenchAdapter()

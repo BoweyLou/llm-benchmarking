@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2 - Unreleased
+
+- Restored Artificial Analysis IFBench ingestion after upstream JSON-LD naming changes by supporting both current and legacy dataset names and score/time metric keys (LBM-066).
+
 ## 0.4.1 - Unreleased
 
 - Fixed the review workbench freshness labels by separating the configured SQLite database/WAL modification time from the latest update-run timestamp and status, while retaining catalog response-generation time as distinct API metadata.
