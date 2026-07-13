@@ -17,6 +17,8 @@ from backend.database import (
     model_use_case_approvals as model_use_case_approvals_table,
     models as models_table,
     scores as scores_table,
+    sqlite_database_updated_at,
+    update_log as update_log_table,
 )
 from backend.seed_data import seed_reference_data
 
@@ -101,6 +103,12 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Hyperscaler availability", app_response.text)
         self.assertIn("runUpdates", app_response.text)
         self.assertIn("Run updates", app_response.text)
+        self.assertIn('id="databaseUpdated">Database updated:', app_response.text)
+        self.assertIn('id="lastSynced">Last sync:', app_response.text)
+        self.assertIn("state.catalog.database_updated_at", app_response.text)
+        self.assertIn("state.catalog.last_sync_at", app_response.text)
+        self.assertIn("toLocaleString()", app_response.text)
+        self.assertNotIn("Last synced:", app_response.text)
         self.assertIn("updateProgressPanel", app_response.text)
         self.assertIn("/api/update/status/", app_response.text)
         self.assertIn("updateSummaryPanel", app_response.text)
@@ -152,6 +160,11 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("evidenceForExport", app_response.text)
         self.assertEqual(catalog_response.status_code, 200)
         payload = catalog_response.json()
+        self.assertEqual(payload["schema_version"], 2)
+        self.assertIsNotNone(payload["database_updated_at"])
+        self.assertIsNone(payload["last_sync_at"])
+        self.assertIsNone(payload["last_sync_status"])
+        self.assertIsNone(payload["last_sync_log_id"])
         self.assertGreaterEqual(payload["summary"]["model_count"], 1)
         self.assertIn("models", payload)
         self.assertIn("families", payload)
@@ -684,6 +697,78 @@ class ReviewWorkbenchTests(unittest.TestCase):
             update_engine.BOOTSTRAPPED = active_bootstrapped
             second_engine.dispose()
             second_tempdir.cleanup()
+
+    def test_latest_sync_metadata_uses_started_at_for_running_run(self) -> None:
+        self._insert_update_log(
+            started_at="2026-07-13T01:00:00Z",
+            completed_at="2026-07-13T01:05:00Z",
+            status="completed",
+        )
+        running_id = self._insert_update_log(
+            started_at="2026-07-13T02:00:00Z",
+            completed_at=None,
+            status="running",
+        )
+
+        metadata = review_workbench._latest_sync_metadata()
+
+        self.assertEqual(metadata["last_sync_at"], "2026-07-13T02:00:00Z")
+        self.assertEqual(metadata["last_sync_status"], "running")
+        self.assertEqual(metadata["last_sync_log_id"], running_id)
+
+    def test_latest_sync_metadata_uses_terminal_completion_time_and_stable_ordering(self) -> None:
+        self._insert_update_log(
+            started_at="2026-07-13T01:00:00Z",
+            completed_at="2026-07-13T01:10:00Z",
+            status="completed",
+        )
+        failed_id = self._insert_update_log(
+            started_at="2026-07-13T02:00:00Z",
+            completed_at="2026-07-13T02:07:00Z",
+            status="failed",
+        )
+
+        metadata = review_workbench._latest_sync_metadata()
+
+        self.assertEqual(metadata["last_sync_at"], "2026-07-13T02:07:00Z")
+        self.assertEqual(metadata["last_sync_status"], "failed")
+        self.assertEqual(metadata["last_sync_log_id"], failed_id)
+
+        completed_id = self._insert_update_log(
+            started_at="2026-07-13T02:00:00Z",
+            completed_at="2026-07-13T02:09:00Z",
+            status="completed",
+        )
+        metadata = review_workbench._latest_sync_metadata()
+        self.assertEqual(metadata["last_sync_at"], "2026-07-13T02:09:00Z")
+        self.assertEqual(metadata["last_sync_status"], "completed")
+        self.assertEqual(metadata["last_sync_log_id"], completed_id)
+
+    def test_sqlite_database_updated_at_uses_newest_database_or_wal_mtime(self) -> None:
+        database_path = Path(self.tempdir.name) / "mtime.sqlite"
+        wal_path = Path(f"{database_path}-wal")
+        database_path.touch()
+        wal_path.touch()
+        os.utime(database_path, (1_700_000_000, 1_700_000_000))
+        os.utime(wal_path, (1_700_001_000, 1_700_001_000))
+        mtime_engine = get_engine(f"sqlite:///{database_path}")
+        try:
+            self.assertEqual(sqlite_database_updated_at(mtime_engine), "2023-11-14T22:30:00Z")
+        finally:
+            mtime_engine.dispose()
+
+    def _insert_update_log(self, *, started_at: str, completed_at: str | None, status: str) -> int:
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                update_log_table.insert(),
+                {
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "triggered_by": "test",
+                    "status": status,
+                },
+            )
+            return int(result.inserted_primary_key[0])
 
     def _insert_review_model(
         self,

@@ -153,6 +153,14 @@ flowchart LR
    inference destinations. It writes availability, region, deployment-mode, and
    pricing evidence to the inference catalog tables.
 
+The review catalog reports ingestion freshness without treating API response
+generation as a sync. `generated_at` remains the response-build timestamp;
+`database_updated_at` is derived read-only from the newest SQLite database or
+WAL file modification time, while `last_sync_at`, `last_sync_status`, and
+`last_sync_log_id` come from the newest `update_log` row ordered by start time
+and id. Running updates use their start time; terminal updates use their
+completion time.
+
 ## Current Source Inventory
 
 | Source | Current adapter or phase | Provides now | Caveats or next step |

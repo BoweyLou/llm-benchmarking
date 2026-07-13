@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 - Unreleased
+
+- Fixed the review workbench freshness labels by separating the configured SQLite database/WAL modification time from the latest update-run timestamp and status, while retaining catalog response-generation time as distinct API metadata.
+
 ## 0.4.0 - Unreleased
 
 - Added authenticated provider API catalog discovery for OpenAI, Anthropic, Google Gemini, Mistral, Cohere, and xAI, with credential-safe errors, provisional discovery policy, and non-blocking skipped runs when optional provider keys are absent.

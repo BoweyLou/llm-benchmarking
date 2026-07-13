@@ -25,6 +25,8 @@ from .database import (
     get_connection,
     model_use_case_approvals as model_use_case_approvals_table,
     models as models_table,
+    sqlite_database_updated_at,
+    update_log as update_log_table,
     utc_now_iso,
 )
 from .model_evidence import enrich_models_with_selection_evidence
@@ -43,9 +45,12 @@ def build_review_catalog() -> dict[str, Any]:
     providers = update_engine.list_providers()
     families = _build_family_summaries(models)
     facets = _build_facets(models, providers, families)
+    sync_metadata = _latest_sync_metadata()
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": utc_now_iso(),
+        "database_updated_at": sqlite_database_updated_at(update_engine.ENGINE),
+        **sync_metadata,
         "models": models,
         "use_cases": use_cases,
         "providers": providers,
@@ -58,6 +63,33 @@ def build_review_catalog() -> dict[str, Any]:
             "deprecated_count": sum(1 for model in models if model.get("catalog_status") == CATALOG_STATUS_DEPRECATED),
             "needs_decision_count": sum(1 for model in models if _model_needs_decision(model)),
         },
+    }
+
+
+def _latest_sync_metadata() -> dict[str, Any]:
+    """Return the latest persisted update run without changing database state."""
+    with get_connection(update_engine.ENGINE) as conn:
+        row = fetch_one(
+            conn,
+            select(
+                update_log_table.c.id,
+                update_log_table.c.started_at,
+                update_log_table.c.completed_at,
+                update_log_table.c.status,
+            )
+            .order_by(update_log_table.c.started_at.desc(), update_log_table.c.id.desc())
+            .limit(1),
+        )
+    if row is None:
+        return {"last_sync_at": None, "last_sync_status": None, "last_sync_log_id": None}
+
+    payload = dict(row)
+    status = payload.get("status")
+    sync_at = payload.get("started_at") if status == "running" else payload.get("completed_at")
+    return {
+        "last_sync_at": sync_at or payload.get("started_at"),
+        "last_sync_status": status,
+        "last_sync_log_id": int(payload["id"]),
     }
 
 

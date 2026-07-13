@@ -349,6 +349,14 @@ export and triage. Tags include roles such as `generator`, `embedding`, and
 the `frontier` tag for generator models that are not marked as small-model
 candidates.
 
+Review catalog schema version 2 keeps response-build time in `generated_at`
+and exposes two separate operational timestamps. `database_updated_at` is the
+newest UTC modification time of the configured SQLite database file or its WAL,
+so it covers database writes outside the update runner. `last_sync_at`,
+`last_sync_status`, and `last_sync_log_id` identify the newest `update_log`
+run. The workbench displays both values as full local date-and-time labels and
+uses explicit `Never` or `Unavailable` states when no trustworthy value exists.
+
 Models also carry size-aware catalog fields in exports and API responses:
 `parameter_count_b`, `active_parameter_count_b`, `model_size_class`,
 `small_model_candidate`, `model_size_source_name`, `model_size_source_url`, and

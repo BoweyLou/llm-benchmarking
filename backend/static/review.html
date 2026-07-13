@@ -1230,7 +1230,8 @@
         </div>
       </div>
       <div class="sync-strip">
-        <span id="lastSynced">Loading catalog...</span>
+        <span id="databaseUpdated">Database updated: Loading...</span>
+        <span id="lastSynced">Last sync: Loading...</span>
         <button class="linkish" id="syncNow">Sync now</button>
         <button class="btn small" id="runUpdates">Run updates</button>
         <div class="update-progress" id="updateProgressPanel" hidden aria-live="polite">
@@ -1542,6 +1543,7 @@
       selectAllFiltered: document.getElementById("selectAllFiltered"),
       showingCount: document.getElementById("showingCount"),
       pageLabel: document.getElementById("pageLabel"),
+      databaseUpdated: document.getElementById("databaseUpdated"),
       lastSynced: document.getElementById("lastSynced"),
       runUpdates: document.getElementById("runUpdates"),
       updateProgressPanel: document.getElementById("updateProgressPanel"),
@@ -1581,7 +1583,8 @@
     }
 
     async function loadCatalog() {
-      els.lastSynced.textContent = "Loading catalog...";
+      els.databaseUpdated.textContent = "Database updated: Loading...";
+      els.lastSynced.textContent = "Last sync: Loading...";
       const [catalog, benchmarks] = await Promise.all([
         request("/api/review/catalog", { method: "GET" }),
         request("/api/benchmarks", { method: "GET" })
@@ -1595,7 +1598,15 @@
       populateFilters();
       ensureActiveModel();
       render();
-      els.lastSynced.textContent = `Last synced: ${new Date(state.catalog.generated_at).toLocaleTimeString()}`;
+      els.databaseUpdated.textContent = `Database updated: ${formatCatalogTimestamp(state.catalog.database_updated_at, "Unavailable")}`;
+      const syncStatus = state.catalog.last_sync_status ? ` (${state.catalog.last_sync_status})` : "";
+      els.lastSynced.textContent = `Last sync: ${formatCatalogTimestamp(state.catalog.last_sync_at, "Never")}${syncStatus}`;
+    }
+
+    function formatCatalogTimestamp(value, emptyLabel) {
+      if (!value) return emptyLabel;
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? "Unavailable" : parsed.toLocaleString();
     }
 
     function initialiseRankingDefaults() {
@@ -3713,7 +3724,8 @@
     els.adminToken.value = sessionStorage.getItem("llm_benchmarking_admin_token") || "";
     bindEvents();
     loadCatalog().catch((error) => {
-      els.lastSynced.textContent = "Catalog load failed";
+      els.databaseUpdated.textContent = "Database updated: Unavailable";
+      els.lastSynced.textContent = "Last sync: Unavailable";
       toast(error.message);
     });
   </script>

@@ -433,6 +433,26 @@ def utc_now_iso() -> str:
     return utc_now().isoformat().replace("+00:00", "Z")
 
 
+def sqlite_database_updated_at(engine: Engine) -> str | None:
+    """Return the newest SQLite database/WAL filesystem mtime as UTC ISO-8601."""
+    if engine.dialect.name != "sqlite":
+        return None
+    database = engine.url.database
+    if not database or database == ":memory:":
+        return None
+
+    database_path = Path(database).expanduser()
+    mtimes: list[float] = []
+    for candidate in (database_path, Path(f"{database_path}-wal")):
+        try:
+            mtimes.append(candidate.stat().st_mtime)
+        except OSError:
+            continue
+    if not mtimes:
+        return None
+    return datetime.fromtimestamp(max(mtimes), timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def get_engine(database_url: str | None = None) -> Engine:
     url = database_url or DEFAULT_DATABASE_URL
     connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
@@ -1596,6 +1616,7 @@ __all__ = [
     "row_to_dict",
     "schema_migrations",
     "scores",
+    "sqlite_database_updated_at",
     "source_runs",
     "update_log",
     "use_case_benchmark_weights",

@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-065: P1 Show database-update and sync timestamps in review workbench
+  - Source: Human request 2026-07-13 after reviewing the deployed workbench freshness indicator.
+  - Problem: the UI labeled the catalog response-build time as `Last synced`, so reviewers could not distinguish database writes from update-run completion.
+  - Scope: expose the SQLite database/WAL modification time and latest `update_log` metadata in review catalog schema version 2, retain `generated_at`, and render both operational timestamps with full local date and time plus honest empty states.
+  - Acceptance: `/api/review/catalog` separates database update, last sync, and response-generation times; `/review` shows `Database updated` and `Last sync` labels without using a time-only value.
+  - Validation: focused review catalog/API/UI and database-mtime tests, full backend suite, docs checks, and version check.
+  - Completed: 2026-07-13. The workbench now distinguishes the last SQLite write from the latest update-run timestamp and status.
+
 - [x] LBM-064: P1 Replace fragile Arena page scrape with official dataset ingestion
   - Source: Human-approved Arena metadata review, rekeyed to `LBM-064` after discovery of a collision with an older completed backlog row.
   - Scope: revision-consistent official Hugging Face Parquet ingestion, separate Text/category/WebDev/Agent/Vision/Document/Search benchmarks, structured score uncertainty/provenance, listing lifecycle evidence, fail-closed validation, and audit/E2E coverage.
