@@ -71,6 +71,10 @@ Rules:
   escalation evidence needed next.
 - Include acceptance criteria that can be verified by commands, file checks, or
   review steps.
+- Include `test_strategy` before validation: selected boundary, rationale,
+  e2e-required decision, e2e scope, and validation command kinds. Mark e2e
+  required for user-visible, multi-component, stateful, runtime/deployment,
+  browser/UI, or external-tool behavior that smaller tests cannot prove.
 - Include closeout requirements before handoff: expected final receipt path,
   readiness check command/result, lifecycle action, final `agent-task-status`
   command/result, `agent-task-closeout` preview command/result, and an explicit

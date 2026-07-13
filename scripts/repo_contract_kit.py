@@ -11,12 +11,14 @@ import hashlib
 import importlib.util
 import json
 import os
+import plistlib
 import re
 import shutil
 import shlex
 import subprocess
 import sys
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,45 @@ STATE_APP_DIR = "repo-contract-kit"
 TARGET_REGISTRY_FILENAME = "enrolled-targets.json"
 PUBLIC_COMMAND = "kit"
 INTERNAL_PRODUCT_NAME = "repo-contract-kit"
+LEARNING_POLICY_PATH = ".agent-workflows/learning-policy.json"
+LEARNING_SCHEMA_FILENAMES = (
+    "learning-policy.schema.json",
+    "learning-event.schema.json",
+    "learning-proposal.schema.json",
+    "learning-decision.schema.json",
+    "learning-context.schema.json",
+    "learning-thread-summary.schema.json",
+    "learning-upstream-candidate.schema.json",
+)
+LEARNING_EVENT_KINDS = ("observation", "validation", "feedback", "incident")
+LEARNING_EVENT_OUTCOMES = ("confirmed", "inconclusive", "regressed", "unknown")
+LEARNING_EVENT_SOURCES = ("human", "agent", "automation")
+LEARNING_PRIVACY_LABELS = ("public-ok", "internal", "private-local", "sensitive-local")
+LEARNING_EVENT_MAX_SUMMARY_LENGTH = 500
+LEARNING_EVENT_MAX_EVIDENCE_ITEMS = 10
+LEARNING_EVENT_MAX_EVIDENCE_LENGTH = 500
+LEARNING_PROPOSAL_CLASSIFICATIONS = ("documentation", "workflow", "policy", "harness", "process", "other")
+LEARNING_PROPOSAL_MAX_TITLE_LENGTH = 160
+LEARNING_PROPOSAL_MAX_SCOPE_ITEMS = 10
+LEARNING_PROPOSAL_MAX_SCOPE_LENGTH = 200
+LEARNING_PROPOSAL_MAX_CHANGE_LENGTH = 500
+LEARNING_PROPOSAL_MAX_EVIDENCE_EVENTS = 10
+LEARNING_DECISION_OUTCOMES = ("approved", "rejected", "deferred")
+LEARNING_DECISION_MAX_DECIDER_LENGTH = 120
+LEARNING_DECISION_MAX_RATIONALE_LENGTH = 500
+LEARNING_DECISION_MAX_FOLLOW_UP_ITEMS = 10
+LEARNING_DECISION_MAX_FOLLOW_UP_LENGTH = 500
+LEARNING_CONTEXT_MAX_LIST = 50
+LEARNING_CONTEXT_BUNDLE_MAX_CONTEXTS = 3
+LEARNING_THREAD_SUMMARY_MAX_FILE_BYTES = 4096
+LEARNING_THREAD_SUMMARY_MAX_INTERACTIONS = 10000
+LEARNING_THREAD_SUMMARY_MAX_REDACTED_SUMMARY_LENGTH = 300
+LEARNING_UPSTREAM_CANDIDATE_MAX_LIST = 50
+LEARNING_UPSTREAM_EXPORT_PRIVACY_LABELS = ("public-ok", "internal")
+LEARNING_NON_EXECUTION_NOTE = (
+    "An approved proposal or decision records a review outcome only. It is not permission to write AGENTS.md, "
+    "policy files, target files, or global tool state, and Kit will not execute the recommendation."
+)
 DEFAULT_TARGET_IMPORT_EXCLUDES = ("*agent-worktrees*", "*/archive/*")
 DEFAULT_WORKTREE_SCAN_EXCLUDES = (
     ".git",
@@ -64,8 +105,13 @@ import check_docs_as_tests  # noqa: E402
 import check_token_budget  # noqa: E402
 import branch_readiness  # noqa: E402
 import changelog_update  # noqa: E402
+import closeout_fix  # noqa: E402
+import closeout_explanations  # noqa: E402
 import docs_explain  # noqa: E402
 import goal_check  # noqa: E402
+from agent_parallel_coordination import build_parallel_context  # noqa: E402
+import agent_task_lifecycle  # noqa: E402
+import agent_task_status  # noqa: E402
 import kit_status  # noqa: E402
 import lint_agent_docs  # noqa: E402
 
@@ -101,6 +147,9 @@ SELF_HEAL_GENERATED_EXACT_PATHS = {
     ".agent-workflows/tasks/.gitignore",
     ".doc-contract-kit/updates/.gitignore",
 }
+SELF_HEAL_RECEIPT_FILENAMES = ("finalize-receipt.json", "receipt.json")
+SELF_HEAL_STALE_BLOCK_AGE = timedelta(hours=24)
+TARGET_CLOSEOUT_SELF_HEAL_CODES = {"missing_final_receipts", "blocked_task_state"}
 CONTEXT_BUNDLE_DEFAULT_LIMITS = {
     "files": 25,
     "open_items": 5,
@@ -807,6 +856,116 @@ def worktree_candidate_paths(root: Path) -> list[Path]:
     return sorted(worktree_candidate_source_map(root))
 
 
+def worktree_list_branch(raw: dict[str, str]) -> tuple[str | None, str | None]:
+    raw_branch = raw.get("branch") or None
+    if raw_branch and raw_branch.startswith("refs/heads/"):
+        return raw_branch.removeprefix("refs/heads/"), raw_branch
+    return raw_branch, raw_branch
+
+
+def worktree_list_entry(raw: dict[str, str], *, primary: Path, current: Path) -> dict[str, Any]:
+    raw_path = raw.get("path") or ""
+    path = Path(raw_path).expanduser().resolve() if raw_path else Path("")
+    status = worktree_status(path) if raw_path else {
+        "available": False,
+        "dirty": None,
+        "entries": [],
+        "error": "worktree path is missing",
+    }
+    branch, raw_branch = worktree_list_branch(raw)
+    locked = "locked" in raw
+    prunable = "prunable" in raw
+    disposable = worktree_path_is_disposable(path) if raw_path else False
+    cleanup_candidate = bool(disposable and not path == primary and status.get("dirty") is False)
+    return {
+        "path": str(path) if raw_path else "",
+        "primary": bool(raw_path and path == primary),
+        "current": bool(raw_path and path == current),
+        "branch": branch,
+        "raw_branch_ref": raw_branch,
+        "head": raw.get("HEAD") or "",
+        "detached": "detached" in raw or not branch,
+        "dirty": status.get("dirty"),
+        "changed_count": len(status.get("entries") or []),
+        "status_entries": status.get("entries") or [],
+        "status_error": status.get("error"),
+        "locked": locked,
+        "locked_reason": raw.get("locked") if locked else None,
+        "prunable": prunable,
+        "prunable_reason": raw.get("prunable") if prunable else None,
+        "disposable_path": disposable,
+        "cleanup_candidate": cleanup_candidate,
+    }
+
+
+def worktree_list_error_payload(args: argparse.Namespace, root: Path, status: str, message: str, exit_code: int = 2) -> tuple[dict[str, Any], int]:
+    payload = {
+        "schema_version": 1,
+        "command": "worktree-list",
+        "repo": str(root),
+        "primary": "",
+        "created_at": now(),
+        "summary": {
+            "total": 0,
+            "has_linked_worktrees": False,
+            "linked_count": 0,
+            "dirty_count": 0,
+            "detached_count": 0,
+            "missing_count": 0,
+            "locked_count": 0,
+        },
+        "worktrees": [],
+        "root_errors": [{"root": str(root), "status": status, "error": message}],
+        "target_repo_writes": target_repo_writes(False, reason="worktree list is read-only"),
+        "sidecar_writes": sidecar_writes(False, reason="worktree list is read-only"),
+        "exit_code": exit_code,
+    }
+    return payload, exit_code
+
+
+def worktree_list_payload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    root = Path(getattr(args, "repo", "") or ".").expanduser().resolve()
+    if not root.exists():
+        return worktree_list_error_payload(args, root, "missing", "Repository path does not exist.")
+    git_root_result = run_git(root, ["rev-parse", "--show-toplevel"])
+    if git_root_result.returncode != 0:
+        return worktree_list_error_payload(
+            args,
+            root,
+            "not-git",
+            git_root_result.stderr.strip() or git_root_result.stdout.strip() or "Not a git repository.",
+        )
+    repo = Path(git_root_result.stdout.strip()).resolve()
+    primary = primary_checkout(repo)
+    raw_worktrees = git_worktrees(primary)
+    worktrees = [worktree_list_entry(raw, primary=primary, current=repo) for raw in raw_worktrees]
+    total = len(worktrees)
+    linked_count = len([item for item in worktrees if not item.get("primary")])
+    summary = {
+        "total": total,
+        "has_linked_worktrees": linked_count > 0,
+        "linked_count": linked_count,
+        "dirty_count": len([item for item in worktrees if item.get("dirty") is True]),
+        "detached_count": len([item for item in worktrees if item.get("detached")]),
+        "missing_count": len([item for item in worktrees if item.get("status_error") == "worktree path is missing"]),
+        "locked_count": len([item for item in worktrees if item.get("locked")]),
+    }
+    payload = {
+        "schema_version": 1,
+        "command": "worktree-list",
+        "repo": str(repo),
+        "primary": str(primary),
+        "created_at": now(),
+        "summary": summary,
+        "worktrees": worktrees,
+        "root_errors": [],
+        "target_repo_writes": target_repo_writes(False, reason="worktree list is read-only"),
+        "sidecar_writes": sidecar_writes(False, reason="worktree list is read-only"),
+        "exit_code": 0,
+    }
+    return payload, 0
+
+
 def worktree_entry(path: Path, discovery_sources: list[str] | None = None) -> dict[str, Any]:
     item: dict[str, Any] = {
         "root": str(path),
@@ -1200,11 +1359,14 @@ def cli_metadata() -> dict[str, Any]:
         "writes_target_repo_by_default": False,
         "mutating_commands": [
             "agent-self-heal --apply",
+            "closeout-fix --apply",
+            "finish --apply",
             "install",
             "setup",
             "start",
             "self update",
             "target add",
+            "target closeout-all --apply",
             "target import --apply",
             "target prune-missing --apply",
             "target repair-source-clone --apply",
@@ -1219,14 +1381,22 @@ def cli_metadata() -> dict[str, Any]:
         "sidecar_write_commands": [
             "sidecar-init",
             "agent-self-heal --apply",
+            "closeout-fix --apply",
+            "finish --apply",
             "automation-handoff",
             "agent-preflight --write-sidecar",
             "agent-doctor --write-sidecar",
             "feedback",
+            "learn event record --approved",
+            "learn thread-summary import --approved",
+            "learn proposal create",
+            "learn decision record --human-review-confirmed",
+            "learn upstream export --redaction-confirmed",
             "orient --write-sidecar",
             "review-plan --write-sidecar",
             "docs-propose --write-sidecar",
             "onboarding-pr --write-sidecar",
+            "target closeout-all --apply",
             "target import --apply",
             "target prune-missing --apply",
             "task-packet --write-sidecar",
@@ -1371,6 +1541,97 @@ def update_checkout(root: Path, ref: str, label: str) -> tuple[list[dict[str, An
     return steps, checkout_status(root), error, checkout.returncode
 
 
+def installed_macos_app_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    configured = os.environ.get("KIT_COMPANION_INSTALL_PATH")
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    candidates.extend(
+        [
+            Path("/Applications/KitCompanion.app"),
+            Path.home() / "Applications" / "KitCompanion.app",
+        ]
+    )
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen:
+            unique.append(candidate)
+            seen.add(key)
+    return unique
+
+
+def macos_app_bundle_version(app_path: Path) -> str | None:
+    info_plist = app_path / "Contents" / "Info.plist"
+    if not info_plist.exists():
+        return None
+    try:
+        with info_plist.open("rb") as handle:
+            info = plistlib.load(handle)
+    except Exception:
+        return None
+    version = info.get("CFBundleShortVersionString")
+    return str(version) if version else None
+
+
+def update_installed_macos_app(root: Path) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": "skipped",
+        "reason": "",
+        "installed_path": None,
+        "before_version": None,
+        "after_version": None,
+    }
+    if os.environ.get("KIT_COMPANION_UPDATE_ON_GLOBAL_UPDATE", "").lower() in {"0", "false", "no"}:
+        payload["reason"] = "disabled by KIT_COMPANION_UPDATE_ON_GLOBAL_UPDATE"
+        return payload
+    if sys.platform != "darwin":
+        payload["reason"] = "not macOS"
+        return payload
+
+    installed_path = next((candidate for candidate in installed_macos_app_candidates() if candidate.exists()), None)
+    if installed_path is None:
+        payload["reason"] = "Kit Companion is not installed"
+        return payload
+
+    install_script = root / "script" / "install_macos_app.sh"
+    payload["installed_path"] = str(installed_path)
+    payload["before_version"] = macos_app_bundle_version(installed_path)
+    payload["command"] = str(install_script)
+    if not install_script.exists():
+        payload["status"] = "failed"
+        payload["reason"] = f"missing installer script: {install_script}"
+        payload["exit_code"] = 2
+        return payload
+
+    env = os.environ.copy()
+    env.setdefault("KIT_COMPANION_INSTALL_PATH", str(installed_path))
+    result = subprocess.run(
+        [str(install_script)],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    payload.update(
+        {
+            "exit_code": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "after_version": macos_app_bundle_version(installed_path),
+        }
+    )
+    if result.returncode == 0:
+        payload["status"] = "applied"
+        payload["reason"] = "installed Kit Companion app refreshed from updated tool checkout"
+    else:
+        payload["status"] = "failed"
+        payload["reason"] = "installer script failed"
+    return payload
+
+
 def self_update_payload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     before = self_status_payload()["tool"]
     workflow_before = self_status_payload()["workflow_source"]
@@ -1389,6 +1650,14 @@ def self_update_payload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     tool_steps, tool_after, tool_error, tool_exit = update_checkout(ROOT, args.ref, "repo-contract-kit")
     payload["steps"].extend(tool_steps)
     payload["tool_after"] = tool_after or self_status_payload()["tool"]
+    payload["tool_update"] = {
+        "before_version": before.get("version") or "unknown",
+        "after_version": payload["tool_after"].get("version") or "unknown",
+        "before_ref": before.get("source_ref"),
+        "after_ref": payload["tool_after"].get("source_ref"),
+        "before_short_ref": before.get("short_ref"),
+        "after_short_ref": payload["tool_after"].get("short_ref"),
+    }
     if tool_error:
         payload["error"] = tool_error
         payload["exit_code"] = tool_exit
@@ -1409,6 +1678,10 @@ def self_update_payload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     else:
         payload["workflow_source_after"] = workflow_before
         payload["workflow_source_skipped"] = True
+    macos_app_update = update_installed_macos_app(ROOT)
+    payload["macos_app_update"] = macos_app_update
+    if macos_app_update.get("status") == "failed":
+        payload["warnings"].append(f"Kit Companion app update failed: {macos_app_update.get('reason')}")
     payload["exit_code"] = 0
     return payload, 0
 
@@ -1416,9 +1689,19 @@ def self_update_payload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
 def render_self_update(payload: dict[str, Any]) -> None:
     before = payload["tool_before"]
     after = payload.get("tool_after") or before
+    tool_update = payload.get("tool_update") or {}
     print(f"{PUBLIC_COMMAND} global update:")
     print(f" - root: {before['root']}")
-    print(f" - ref: {before.get('short_ref') or 'unknown'} -> {after.get('short_ref') or 'unknown'}")
+    print(
+        " - version: "
+        f"{tool_update.get('before_version') or before.get('version') or 'unknown'} -> "
+        f"{tool_update.get('after_version') or after.get('version') or 'unknown'}"
+    )
+    print(
+        " - source ref: "
+        f"{tool_update.get('before_short_ref') or before.get('short_ref') or 'unknown'} -> "
+        f"{tool_update.get('after_short_ref') or after.get('short_ref') or 'unknown'}"
+    )
     workflow_before = payload.get("workflow_source_before") or {}
     workflow_after = payload.get("workflow_source_after") or workflow_before
     if workflow_before.get("exists") or workflow_after.get("exists") or workflow_before.get("is_git_checkout") or workflow_after.get("is_git_checkout"):
@@ -1427,6 +1710,20 @@ def render_self_update(payload: dict[str, Any]) -> None:
         print(f" - ref: {workflow_before.get('short_ref') or 'unknown'} -> {workflow_after.get('short_ref') or 'unknown'}")
     for warning in payload.get("warnings", []):
         print(f" - warning: {warning}")
+    app_update = payload.get("macos_app_update") or {}
+    if app_update:
+        status = app_update.get("status")
+        path = app_update.get("installed_path")
+        if status == "applied":
+            print("optional macOS app update:")
+            print(f" - path: {path}")
+            print(f" - version: {app_update.get('before_version') or 'unknown'} -> {app_update.get('after_version') or 'unknown'}")
+        elif status == "failed":
+            print("optional macOS app update:")
+            print(f" - path: {path or 'unknown'}")
+            print(f" - error: {app_update.get('reason') or 'unknown'}")
+        else:
+            print(f"optional macOS app update: skipped ({app_update.get('reason') or 'not applicable'})")
     if payload.get("error"):
         print(f" - error: {payload['error']}")
     for step in payload.get("steps", []):
@@ -1483,9 +1780,9 @@ def command_map_annotations() -> dict[tuple[str, ...], dict[str, Any]]:
         ("start",): {
             "audience": ["human", "agent"],
             "mutation": "writes-target-conditionally",
-            "target_repo_write": "local-safe managed-file update by default for installed target repos; never with --no-update",
+            "target_repo_write": "local-safe managed-file update only for clean installed target repos; never with --no-update",
             "sidecar_write": "never",
-            "route_note": "`kit start` is the canonical first command for choosing human, agent, setup, maintenance, and release-gated journeys; installed targets may receive local-safe managed-file updates.",
+            "route_note": "`kit start` is the canonical first command for choosing human, agent, setup, maintenance, and release-gated journeys; clean installed targets may receive local-safe managed-file updates.",
             "examples": [
                 public_command("start"),
                 public_command("start", "--no-update"),
@@ -1666,9 +1963,98 @@ def command_map_annotations() -> dict[tuple[str, ...], dict[str, Any]]:
                 "sidecar_writes",
                 "can_claim_done",
                 "completion_state",
+                "autoclose_eligibility",
+                "default_branch",
+                "merge_readiness",
+                "docs_required",
+                "unfinished_reason",
                 "next_action",
                 "claim_blockers",
+                "blocker_explanations",
+                "human_summary",
                 "exit_code",
+            ],
+            "behavior_notes": [
+                "JSON output includes human_summary and blocker_explanations so callers can show the user what is blocked, why it blocks closeout, and the next safe action.",
+            ],
+        },
+        ("finish",): {
+            "audience": ["human", "agent", "app"],
+            "mutation": "launches-write-agent-with-apply",
+            "sidecar_write": "with --apply",
+            "target_repo_write": "via closeout-fix in --apply mode",
+            "route_role": "canonical",
+            "canonical_command": "finish",
+            "alias_group": "task-closeout",
+            "route_note": "`kit finish` is the strict per-thread completion gate. Preview composes closeout-plan policy fields; --apply delegates to closeout-fix only when the repo is eligible for gated closeout.",
+            "examples": [
+                public_command("finish", "--repo", "/path/to/repo", "--json"),
+                public_command("finish", "--repo", "/path/to/repo", "--apply", "--jsonl"),
+            ],
+            "output_schema": "finish_payload",
+            "docs": ["README.md", "docs/agent-guide.md", "docs/cli-reference.md"],
+            "stable_payload_fields": [
+                "schema_version",
+                "command",
+                "mode",
+                "repo",
+                "result",
+                "can_claim_done",
+                "completion_state",
+                "autoclose_eligibility",
+                "merge_readiness",
+                "next_action",
+                "closeout_fix",
+                "target_repo_writes",
+                "sidecar_writes",
+                "exit_code",
+            ],
+        },
+        ("closeout-fix",): {
+            "audience": ["human", "agent", "app"],
+            "mutation": "launches-write-agent",
+            "sidecar_write": "with --apply",
+            "target_repo_write": "via launched agent in --apply mode",
+            "route_role": "canonical",
+            "canonical_command": "closeout-fix",
+            "alias_group": "task-closeout",
+            "route_note": "`kit closeout-fix` supervises a headless closeout agent for one repo: preview is read-only, while --apply writes sidecar job receipts, lets the agent make logical commits, prunes only eligible clean disposable worktrees, verifies strict closeout, and pushes without force.",
+            "examples": [
+                public_command("closeout-fix", "--repo", "/path/to/repo", "--json"),
+                public_command("closeout-fix", "--repo", "/path/to/repo", "--apply", "--jsonl"),
+                public_command("closeout-fix", "--repo", "/path/to/repo", "--apply", "--no-push", "--json"),
+            ],
+            "output_schema": "closeout_fix_payload",
+            "docs": [
+                "README.md",
+                "docs/agent-guide.md",
+                "docs/human-guide.md",
+                "docs/macos-companion.md",
+                "docs/cli-reference.md",
+            ],
+            "stable_payload_fields": [
+                "schema_version",
+                "command",
+                "job_id",
+                "job_dir",
+                "result_path",
+                "runner",
+                "initial_closeout",
+                "commits",
+                "branches_pushed",
+                "worktrees_pruned",
+                "receipts",
+                "final_closeout",
+                "blockers",
+                "blocker_explanations",
+                "human_summary",
+                "result",
+                "target_repo_writes",
+                "sidecar_writes",
+                "exit_code",
+            ],
+            "behavior_notes": [
+                "Blocked apply runs are first-class workflow outcomes. The final JSON/JSONL payload includes result=blocked, human_summary, blocker_explanations, and result_path; the shell exit code is distinct from supervisor or tool failure.",
             ],
         },
         ("self",): {
@@ -1697,9 +2083,23 @@ def command_map_annotations() -> dict[tuple[str, ...], dict[str, Any]]:
             "route_role": "maintainer",
             "canonical_command": "self update",
             "alias_group": "global-tool",
-            "route_note": "Updates the global tool checkout; target repos still use `kit update`.",
+            "route_note": "Updates the global tool checkout; when Kit Companion is installed on macOS, refreshes the optional app from the updated checkout.",
             "examples": [public_command("self", "update", "--json")],
             "output_schema": "self_update_payload",
+            "stable_payload_fields": [
+                "schema_version",
+                "command",
+                "tool_update",
+                "workflow_source_after",
+                "macos_app_update",
+                "warnings",
+                "target_repo_writes",
+                "sidecar_writes",
+                "exit_code",
+            ],
+            "behavior_notes": [
+                "On macOS, global updates refresh an installed Kit Companion app from the updated checkout. Machines without the app skip this optional step.",
+            ],
         },
         ("sidecar-init",): {
             "audience": ["human", "agent"],
@@ -1739,6 +2139,343 @@ def command_map_annotations() -> dict[tuple[str, ...], dict[str, Any]]:
                 "local_kit",
                 "kit_drift",
             ],
+        },
+        ("learn",): {
+            "audience": ["human", "agent"],
+            "mutation": "namespace",
+            "json_supported": False,
+            "route_role": "namespace",
+            "canonical_command": "learn",
+            "examples": [public_command("learn", "status", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "subcommand_namespace",
+            "docs": ["docs/backlog.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "status"): {
+            "audience": ["human", "agent"],
+            "mutation": "read-only",
+            "target_repo_write": "never",
+            "sidecar_write": "never",
+            "route_role": "canonical",
+            "canonical_command": "learn status",
+            "route_note": "Reports supervised-learning policy ownership and future artifact paths without creating target, sidecar, or global state.",
+            "examples": [public_command("learn", "status", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "learn_status_payload",
+            "docs": [
+                "docs/backlog.md",
+                "docs/harness-engineering.md",
+                "docs/sidecar-retention.md",
+                "docs/adr/0005-supervised-learning-ownership-boundaries.md",
+            ],
+            "stable_payload_fields": [
+                "schema_version",
+                "command",
+                "repo",
+                "policy_state",
+                "policy",
+                "learning_paths",
+                "safe_next_commands",
+                "write_guarantees",
+                "target_repo_writes",
+                "sidecar_writes",
+                "global_writes",
+                "exit_code",
+            ],
+        },
+        ("learn", "event"): {
+            "audience": ["human", "agent"],
+            "mutation": "namespace",
+            "json_supported": False,
+            "route_role": "namespace",
+            "canonical_command": "learn event",
+            "examples": [public_command("learn", "event", "list", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "subcommand_namespace",
+            "docs": ["docs/backlog.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "event", "record"): {
+            "audience": ["human", "agent"],
+            "mutation": "writes-sidecar-on-approved-record",
+            "target_repo_write": "never",
+            "sidecar_write": "conditional",
+            "route_role": "canonical",
+            "canonical_command": "learn event record",
+            "route_note": "Records only explicit, schema-valid event input after an enrolled enabled policy and --approved; rejected, unapproved, and unenrolled attempts do not write state.",
+            "examples": [
+                public_command(
+                    "learn",
+                    "event",
+                    "record",
+                    "--repo",
+                    "/path/to/repo",
+                    "--kind",
+                    "validation",
+                    "--summary",
+                    "local validation completed",
+                    "--outcome",
+                    "confirmed",
+                    "--source",
+                    "human",
+                    "--approved",
+                    "--json",
+                )
+            ],
+            "output_schema": "learn_event_record_payload",
+            "docs": ["docs/backlog.md", "docs/harness-engineering.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "event", "list"): {
+            "audience": ["human", "agent"],
+            "mutation": "read-only",
+            "target_repo_write": "never",
+            "sidecar_write": "never",
+            "route_role": "canonical",
+            "canonical_command": "learn event list",
+            "route_note": "Lists locally stored schema-valid learning events without creating sidecar state.",
+            "examples": [public_command("learn", "event", "list", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "learn_event_list_payload",
+            "docs": ["docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "proposal"): {
+            "audience": ["human", "agent"],
+            "mutation": "namespace",
+            "json_supported": False,
+            "route_role": "namespace",
+            "canonical_command": "learn proposal",
+            "examples": [public_command("learn", "proposal", "list", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "subcommand_namespace",
+            "docs": ["docs/backlog.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "proposal", "create"): {
+            "audience": ["human", "agent"],
+            "mutation": "writes-sidecar-on-schema-valid-evidence",
+            "target_repo_write": "never",
+            "sidecar_write": "conditional",
+            "route_role": "canonical",
+            "canonical_command": "learn proposal create",
+            "route_note": "Creates only a pending-review local sidecar proposal from bounded explicit CLI fields and existing schema-valid event IDs; it never executes the recommendation or writes target/global state.",
+            "examples": [
+                public_command(
+                    "learn",
+                    "proposal",
+                    "create",
+                    "--repo",
+                    "/path/to/repo",
+                    "--title",
+                    "Document local review path",
+                    "--classification",
+                    "documentation",
+                    "--scope",
+                    "docs/ops/supervised-learning.md",
+                    "--recommended-change",
+                    "Document reviewable local proposals.",
+                    "--evidence-event",
+                    "evt-0123456789abcdef0123",
+                    "--json",
+                )
+            ],
+            "output_schema": "learn_proposal_create_payload",
+            "docs": ["docs/backlog.md", "docs/harness-engineering.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "proposal", "list"): {
+            "audience": ["human", "agent"],
+            "mutation": "read-only",
+            "target_repo_write": "never",
+            "sidecar_write": "never",
+            "route_role": "canonical",
+            "canonical_command": "learn proposal list",
+            "route_note": "Lists locally stored schema-valid learning proposals without creating sidecar state or executing recommendations.",
+            "examples": [public_command("learn", "proposal", "list", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "learn_proposal_list_payload",
+            "docs": ["docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "decision"): {
+            "audience": ["human", "agent"],
+            "mutation": "namespace",
+            "json_supported": False,
+            "route_role": "namespace",
+            "canonical_command": "learn decision",
+            "examples": [public_command("learn", "decision", "list", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "subcommand_namespace",
+            "docs": ["docs/backlog.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "decision", "record"): {
+            "audience": ["human", "agent"],
+            "mutation": "writes-sidecar-on-explicit-human-review",
+            "target_repo_write": "never",
+            "sidecar_write": "conditional",
+            "route_role": "canonical",
+            "canonical_command": "learn decision record",
+            "route_note": "Records only an explicit human-reviewed approved/rejected/deferred decision for an existing pending proposal, then updates that sidecar proposal; approval never authorizes target/global writes or recommendation execution.",
+            "examples": [
+                public_command(
+                    "learn",
+                    "decision",
+                    "record",
+                    "--repo",
+                    "/path/to/repo",
+                    "--proposal-id",
+                    "prop-0123456789abcdef0123",
+                    "--outcome",
+                    "approved",
+                    "--decider",
+                    "Repository owner",
+                    "--rationale",
+                    "The local evidence supports this bounded recommendation.",
+                    "--human-review-confirmed",
+                    "--json",
+                )
+            ],
+            "output_schema": "learn_decision_record_payload",
+            "docs": ["docs/backlog.md", "docs/harness-engineering.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "decision", "list"): {
+            "audience": ["human", "agent"],
+            "mutation": "read-only",
+            "target_repo_write": "never",
+            "sidecar_write": "never",
+            "route_role": "canonical",
+            "canonical_command": "learn decision list",
+            "route_note": "Lists locally stored schema-valid learning decisions without creating sidecar state or executing recommendations.",
+            "examples": [public_command("learn", "decision", "list", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "learn_decision_list_payload",
+            "docs": ["docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "context"): {
+            "audience": ["human", "agent"],
+            "mutation": "namespace",
+            "json_supported": False,
+            "route_role": "namespace",
+            "canonical_command": "learn context",
+            "examples": [public_command("learn", "context", "list", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "subcommand_namespace",
+            "docs": ["docs/backlog.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "context", "build"): {
+            "audience": ["human", "agent"],
+            "mutation": "writes-sidecar-on-approved-decision",
+            "target_repo_write": "never",
+            "sidecar_write": "conditional",
+            "route_role": "canonical",
+            "canonical_command": "learn context build",
+            "route_note": "Builds bounded sidecar-only guidance only from an existing schema-valid approved decision and its linked valid proposal; event, evidence, feedback, and conversation content are excluded and no recommendation is executed.",
+            "examples": [
+                public_command(
+                    "learn",
+                    "context",
+                    "build",
+                    "--repo",
+                    "/path/to/repo",
+                    "--decision-id",
+                    "dec-0123456789abcdef0123",
+                    "--json",
+                )
+            ],
+            "output_schema": "learn_context_build_payload",
+            "docs": ["docs/backlog.md", "docs/harness-engineering.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "context", "list"): {
+            "audience": ["human", "agent"],
+            "mutation": "read-only",
+            "target_repo_write": "never",
+            "sidecar_write": "never",
+            "route_role": "canonical",
+            "canonical_command": "learn context list",
+            "route_note": "Lists only schema-valid bounded approved-learning context records without creating sidecar state, treating them as sidecar-only guidance rather than target instructions.",
+            "examples": [public_command("learn", "context", "list", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "learn_context_list_payload",
+            "docs": ["docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "thread-summary"): {
+            "audience": ["human", "agent"],
+            "mutation": "namespace",
+            "json_supported": False,
+            "route_role": "namespace",
+            "canonical_command": "learn thread-summary",
+            "examples": [public_command("learn", "thread-summary", "list", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "subcommand_namespace",
+            "docs": ["docs/backlog.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "thread-summary", "import"): {
+            "audience": ["human", "agent"],
+            "mutation": "writes-one-sidecar-event-on-explicit-approved-redacted-input",
+            "target_repo_write": "never",
+            "sidecar_write": "conditional",
+            "route_role": "canonical",
+            "canonical_command": "learn thread-summary import",
+            "route_note": "Accepts only one strict bounded explicitly redacted aggregate file after --approved and an active supervised policy. It does not scan runtime state, mine Codex history, call a network, or write target/global state.",
+            "examples": [public_command("learn", "thread-summary", "import", "--repo", "/path/to/repo", "--input", "redacted-summary.json", "--approved", "--json")],
+            "output_schema": "learn_thread_summary_import_payload",
+            "docs": ["docs/backlog.md", "docs/harness-engineering.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+            "stable_payload_fields": ["schema_version", "command", "event", "input_contract", "target_repo_writes", "sidecar_writes", "global_writes", "exit_code"],
+        },
+        ("learn", "thread-summary", "list"): {
+            "audience": ["human", "agent"],
+            "mutation": "read-only",
+            "target_repo_write": "never",
+            "sidecar_write": "never",
+            "route_role": "canonical",
+            "canonical_command": "learn thread-summary list",
+            "route_note": "Lists only schema-valid imported summary events without creating state.",
+            "examples": [public_command("learn", "thread-summary", "list", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "learn_thread_summary_list_payload",
+            "docs": ["docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "upstream"): {
+            "audience": ["human", "agent"],
+            "mutation": "namespace",
+            "json_supported": False,
+            "route_role": "namespace",
+            "canonical_command": "learn upstream",
+            "examples": [public_command("learn", "upstream", "list", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "subcommand_namespace",
+            "docs": ["docs/backlog.md", "docs/rollout-guide.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "upstream", "export"): {
+            "audience": ["human", "agent"],
+            "mutation": "writes-portable-sidecar-candidate-on-approved-decision",
+            "target_repo_write": "never",
+            "sidecar_write": "conditional",
+            "route_role": "canonical",
+            "canonical_command": "learn upstream export",
+            "route_note": "Exports only a redaction-confirmed public-ok/internal portable candidate from a currently approved decision and matching proposal. Source review remains a normal source task, commit, test, and release; only then may a human run kit self update and a guarded target update or reconcile. No propagation is automatic.",
+            "examples": [public_command("learn", "upstream", "export", "--repo", "/path/to/repo", "--decision-id", "dec-0123456789abcdef0123", "--privacy-label", "internal", "--redaction-confirmed", "--json")],
+            "output_schema": "learn_upstream_export_payload",
+            "docs": ["docs/backlog.md", "docs/harness-engineering.md", "docs/rollout-guide.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+            "stable_payload_fields": ["schema_version", "command", "candidate", "rollout_guidance", "target_repo_writes", "sidecar_writes", "global_writes", "exit_code"],
+        },
+        ("learn", "upstream", "list"): {
+            "audience": ["human", "agent"],
+            "mutation": "read-only",
+            "target_repo_write": "never",
+            "sidecar_write": "never",
+            "route_role": "canonical",
+            "canonical_command": "learn upstream list",
+            "route_note": "Lists only schema-valid candidates whose decision/proposal lineage remains currently approved and unchanged; it never creates state or propagates changes.",
+            "examples": [public_command("learn", "upstream", "list", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "learn_upstream_list_payload",
+            "docs": ["docs/rollout-guide.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "upstream", "reconcile"): {
+            "audience": ["human", "agent"],
+            "mutation": "read-only",
+            "target_repo_write": "never",
+            "sidecar_write": "never",
+            "route_role": "canonical",
+            "canonical_command": "learn upstream reconcile",
+            "route_note": "Compares valid candidate source baselines with the local current global-tool source ref, marking revalidation when the source advanced. It never runs kit self update, target update, or any propagation.",
+            "examples": [public_command("learn", "upstream", "reconcile", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "learn_upstream_reconcile_payload",
+            "docs": ["docs/rollout-guide.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
+        },
+        ("learn", "evaluate"): {
+            "audience": ["human", "agent"],
+            "mutation": "read-only",
+            "target_repo_write": "never",
+            "sidecar_write": "never",
+            "route_role": "canonical",
+            "canonical_command": "learn evaluate",
+            "route_note": "Reports local schema-valid artifact and policy-gate facts only. It explicitly makes no effectiveness claim and never writes or propagates changes.",
+            "examples": [public_command("learn", "evaluate", "--repo", "/path/to/repo", "--json")],
+            "output_schema": "learn_evaluate_payload",
+            "docs": ["docs/backlog.md", "docs/harness-engineering.md", "docs/rollout-guide.md", "docs/sidecar-retention.md", "docs/adr/0005-supervised-learning-ownership-boundaries.md"],
         },
         ("backlog-status",): {
             "audience": ["human", "agent"],
@@ -2048,6 +2785,38 @@ def command_map_annotations() -> dict[tuple[str, ...], dict[str, Any]]:
             ],
             "output_schema": "target_prune_missing_payload",
         },
+        ("target", "closeout-all"): {
+            "audience": ["human", "agent", "app"],
+            "mutation": "launches-write-agent-with-apply",
+            "target_repo_write": "with --apply through closeout-fix",
+            "sidecar_write": "with --apply",
+            "route_role": "canonical",
+            "canonical_command": "target closeout-all",
+            "alias_group": "target-closeout",
+            "route_note": "Runs the registered-target closeout gate across the kit target registry. Dry-run is report-only; --apply closes only policy-eligible repos and leaves ambiguous or unfinished work untouched.",
+            "examples": [
+                public_command("target", "closeout-all", "--dry-run", "--json"),
+                public_command("target", "closeout-all", "--apply", "--policy", "gated", "--json"),
+            ],
+            "output_schema": "target_closeout_all_payload",
+            "docs": ["README.md", "docs/agent-guide.md", "docs/cli-reference.md"],
+            "stable_payload_fields": [
+                "schema_version",
+                "command",
+                "mode",
+                "policy",
+                "registry",
+                "summary",
+                "targets",
+                "default_branch_integration",
+                "target_repo_writes",
+                "sidecar_writes",
+                "exit_code",
+            ],
+            "behavior_notes": [
+                "Apply mode reports LEFT-UNFINISHED and NEEDS-REVIEW targets in the JSON summary without making the batch command fail. Non-zero shell exit is reserved for one or more FAILED targets.",
+            ],
+        },
         ("target", "update-all"): {
             "audience": ["human", "agent"],
             "mutation": "writes-targets-with-apply",
@@ -2066,8 +2835,18 @@ def command_map_annotations() -> dict[tuple[str, ...], dict[str, Any]]:
             "audience": ["human", "agent"],
             "mutation": "namespace",
             "json_supported": False,
-            "examples": [public_command("worktree", "audit", "--root", "/path/to/repo-or-parent", "--json")],
+            "examples": [
+                public_command("worktree", "list", "--repo", "/path/to/repo", "--json"),
+                public_command("worktree", "audit", "--root", "/path/to/repo-or-parent", "--json"),
+            ],
             "output_schema": "subcommand_namespace",
+        },
+        ("worktree", "list"): {
+            "audience": ["human", "agent"],
+            "mutation": "read-only",
+            "route_note": "Lists every Git-linked worktree for one repository, including ordinary siblings, detached checkouts, Codex worktrees, and kit task worktrees. This is visibility-only and does not classify cleanup safety.",
+            "examples": [public_command("worktree", "list", "--repo", "/Volumes/Myrtle/MiniProjects/MiniCommand", "--json")],
+            "output_schema": "worktree_list_payload",
         },
         ("worktree", "audit"): {
             "audience": ["human", "agent"],
@@ -2198,6 +2977,178 @@ def primary_checkout(repo: Path) -> Path:
     if common and common.name == ".git":
         return common.parent.resolve()
     return repo.resolve()
+
+
+def current_branch_name(repo: Path) -> str:
+    branch = git_text(repo, ["branch", "--show-current"])
+    if branch:
+        return branch
+    branch = git_text(repo, ["rev-parse", "--abbrev-ref", "HEAD"])
+    return "" if branch == "HEAD" else branch
+
+
+def current_commit(repo: Path) -> str:
+    return git_text(repo, ["rev-parse", "HEAD"])
+
+
+def branch_head(repo: Path, branch: str | None) -> str:
+    if not branch:
+        return ""
+    return git_text(repo, ["rev-parse", branch])
+
+
+def local_branch_exists(repo: Path, branch: str) -> bool:
+    return run_git(repo, ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"]).returncode == 0
+
+
+def closeout_default_branch(repo: Path) -> dict[str, Any]:
+    current_branch = current_branch_name(repo)
+    remote_head = git_text(repo, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
+    branch = ""
+    source = "unknown"
+    remote = ""
+    if remote_head.startswith("origin/"):
+        branch = remote_head.split("/", 1)[1]
+        source = "origin-head"
+        remote = "origin"
+    elif current_branch in DEFAULT_BRANCH_NAMES:
+        branch = current_branch
+        source = "current-default-name"
+    else:
+        for candidate in ("main", "master", "trunk", "develop"):
+            if local_branch_exists(repo, candidate):
+                branch = candidate
+                source = "local-default-name"
+                break
+    if not branch and current_branch:
+        branch = current_branch
+        source = "current-branch-fallback"
+    return {
+        "name": branch or None,
+        "remote": remote or None,
+        "remote_head": remote_head or None,
+        "source": source,
+        "detected": bool(branch),
+        "current_branch": current_branch or None,
+        "current_head": current_commit(repo) or None,
+        "head": branch_head(repo, branch) or None,
+    }
+
+
+def closeout_blocker_codes(blockers: list[dict[str, Any]]) -> list[str]:
+    return sorted({str(item.get("code") or "") for item in blockers if item.get("code")})
+
+
+def closeout_docs_required(dirty: dict[str, Any], completion_state: str) -> dict[str, Any]:
+    if completion_state == "clean":
+        return {
+            "required": False,
+            "state": "not-required-by-clean-tree",
+            "reason": "No target repo changes are pending.",
+            "report_marker": "No docs needed: repo is clean.",
+        }
+    if dirty.get("dirty"):
+        return {
+            "required": None,
+            "state": "requires-change-classification",
+            "reason": "Dirty changes need semantic classification before docs impact can be decided.",
+            "report_requirement": "Report docs updated, or record `No docs needed: <reason>`.",
+        }
+    return {
+        "required": None,
+        "state": "unknown-until-closeout-completes",
+        "reason": "Closeout may change task receipts, managed files, or docs; classify the final diff before claiming completion.",
+        "report_requirement": "Report docs updated, or record `No docs needed: <reason>`.",
+    }
+
+
+def closeout_unfinished_reason(completion_state: str, claim_blockers: list[dict[str, Any]]) -> str | None:
+    if completion_state == "clean" and not claim_blockers:
+        return None
+    if claim_blockers:
+        first = claim_blockers[0]
+        code = first.get("code") or "blocked"
+        message = first.get("message") or "Closeout has unresolved blockers."
+        return f"{code}: {message}"
+    return f"{completion_state}: closeout is not complete."
+
+
+def closeout_autoclose_eligibility(
+    repo: Path,
+    completion_state: str,
+    can_claim_done: bool,
+    claim_blockers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    blocker_codes = closeout_blocker_codes(claim_blockers)
+    soft_blockers = {"dirty_primary_checkout", "worktree_prune_candidates"}
+    hard_blockers = sorted(code for code in blocker_codes if code not in soft_blockers)
+    eligible_states = {"needs-integration", "needs-worktree-prune"}
+    if can_claim_done:
+        eligible = False
+        reason = "already-clean"
+    elif hard_blockers:
+        eligible = False
+        reason = f"hard-blockers-present: {', '.join(hard_blockers)}"
+    elif completion_state not in eligible_states:
+        eligible = False
+        reason = f"completion-state-not-autocloseable: {completion_state}"
+    else:
+        eligible = True
+        reason = "gated-closeout-fix-preview-required"
+    return {
+        "eligible": eligible,
+        "policy": "gated",
+        "reason": reason,
+        "allowed_blockers": sorted(soft_blockers),
+        "blocker_codes": blocker_codes,
+        "preview_command": public_command("closeout-fix", "--repo", str(repo), "--json"),
+        "apply_command": public_command("closeout-fix", "--repo", str(repo), "--apply", "--jsonl"),
+    }
+
+
+def closeout_merge_readiness(
+    repo: Path,
+    default_branch: dict[str, Any],
+    can_claim_done: bool,
+    claim_blockers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    current_branch = current_branch_name(repo)
+    current_head = current_commit(repo)
+    default_name = default_branch.get("name")
+    default_head = default_branch.get("head")
+    requires_integration = bool(current_branch and default_name and current_branch != default_name)
+    if not default_name:
+        status = "default-branch-unknown"
+        ready = False
+    elif not current_branch:
+        status = "detached-head"
+        ready = False
+    elif not can_claim_done:
+        status = "needs-closeout-before-merge"
+        ready = False
+    elif not requires_integration:
+        status = "on-default-branch"
+        ready = True
+    else:
+        status = "ready-for-reviewed-integration"
+        ready = True
+    command = None
+    if requires_integration:
+        command = (
+            f"create temporary integration worktree from {default_name}, merge {current_branch}, "
+            "run kit verify --harness-mode auto, then push without force"
+        )
+    return {
+        "status": status,
+        "ready": ready,
+        "current_branch": current_branch or None,
+        "current_head": current_head or None,
+        "default_branch": default_name,
+        "default_head": default_head,
+        "requires_integration_worktree": requires_integration,
+        "blocker_codes": closeout_blocker_codes(claim_blockers),
+        "integration_summary": command,
+    }
 
 
 def path_matches_allowed(path: str, allowed_paths: list[str]) -> bool:
@@ -3166,6 +4117,132 @@ def self_heal_stale_prepare_lock(repo: Path) -> list[dict[str, Any]]:
     ]
 
 
+def self_heal_receipt_candidate_entries(repo: Path, sidecar: dict[str, Any], task: dict[str, Any]) -> list[dict[str, Any]]:
+    task_id = str(task.get("task_id") or task.get("id") or "").strip()
+    if not task_id:
+        return []
+    metadata_path = str(task.get("_metadata_path") or "")
+    slug = Path(metadata_path).stem if metadata_path else safe_slug(task_id)
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(path_value: str, resolved: Path, provenance: str, priority: int) -> None:
+        key = str(resolved.resolve())
+        if key in seen or not resolved.exists():
+            return
+        seen.add(key)
+        candidates.append(
+            {
+                "path": path_value,
+                "resolved_path": key,
+                "provenance": provenance,
+                "priority": priority,
+            }
+        )
+
+    linked = resolve_task_receipt(repo, task)
+    if linked.get("exists") and linked.get("resolved_path"):
+        add(str(linked.get("path") or linked["resolved_path"]), Path(linked["resolved_path"]), "linked-final-receipt", 0)
+
+    latest = task.get("attribution") if isinstance(task.get("attribution"), dict) else attribution_from_task(task)
+    latest_receipt = latest.get("latest_receipt") if isinstance(latest.get("latest_receipt"), dict) else {}
+    latest_path = str(latest_receipt.get("path") or "").strip()
+    if latest_path:
+        latest_raw = Path(latest_path).expanduser()
+        latest_candidates = [latest_raw] if latest_raw.is_absolute() else [repo / latest_raw]
+        worktree_value = str(task.get("worktree") or "").strip()
+        if worktree_value and not latest_raw.is_absolute():
+            latest_candidates.append(Path(worktree_value).expanduser() / latest_raw)
+        for candidate in latest_candidates:
+            if candidate.exists():
+                add(latest_path, candidate, latest_receipt.get("provenance") or "attribution-latest-receipt", 1)
+                break
+
+    for index, filename in enumerate(SELF_HEAL_RECEIPT_FILENAMES, start=2):
+        relpath = f".agent-workflows/tasks/{slug}/{filename}"
+        candidate = repo / relpath
+        if candidate.exists():
+            add(relpath, candidate, "canonical-target-receipt", index)
+
+    paths = sidecar.get("paths") or {}
+    receipts_dir = paths.get("receipts_dir")
+    if receipts_dir and Path(receipts_dir).is_dir():
+        receipt_scan = scan_json_receipts([(Path(receipts_dir), "sidecar-receipts", "*.json")])
+        sidecar_matches = [
+            item
+            for item in receipt_scan.get("items", [])
+            if item.get("task_id") == task_id and item.get("category") in {"final_receipt", "finalizer"}
+        ]
+        for offset, item in enumerate(sorted(sidecar_matches, key=receipt_sort_key, reverse=True), start=10):
+            candidate = Path(str(item.get("path") or "")).expanduser()
+            if candidate.exists():
+                add(str(candidate), candidate, f"sidecar-{item.get('category')}", offset)
+
+    return sorted(candidates, key=lambda item: (int(item.get("priority") or 999), str(item.get("resolved_path") or "")))
+
+
+def self_heal_missing_final_receipts(repo: Path, sidecar: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates = []
+    for task in task_metadata_items(repo):
+        status = str(task.get("status") or "").strip().lower()
+        if not task_terminal(status):
+            continue
+        resolved = resolve_task_receipt(repo, task)
+        if resolved.get("exists"):
+            continue
+        receipt_candidates = self_heal_receipt_candidate_entries(repo, sidecar, task)
+        if not receipt_candidates:
+            continue
+        chosen = receipt_candidates[0]
+        candidates.append(
+            {
+                "action": "link-final-receipt",
+                "path": str(task.get("_metadata_path") or ""),
+                "task_id": task.get("task_id") or task.get("id") or Path(str(task.get("_metadata_path") or "")).stem,
+                "status": status,
+                "receipt_path": str(chosen["path"]),
+                "resolved_receipt_path": str(chosen["resolved_path"]),
+                "receipt_provenance": chosen["provenance"],
+                "candidate_count": len(receipt_candidates),
+                "reason": "terminal task has a recoverable receipt path that can be linked into metadata",
+            }
+        )
+    return candidates
+
+
+def self_heal_stale_missing_worktree_tasks(repo: Path) -> list[dict[str, Any]]:
+    candidates = []
+    now = datetime.now(timezone.utc)
+    for task in task_metadata_items(repo):
+        status = str(task.get("status") or "").strip().lower()
+        if status != "in-progress":
+            continue
+        worktree_value = str(task.get("worktree") or "").strip()
+        if not worktree_value:
+            continue
+        worktree_path = Path(worktree_value).expanduser()
+        if worktree_path.exists():
+            continue
+        expires_at = agent_task_status.parse_datetime(task.get("lease_expires_at"))
+        if not expires_at or expires_at >= now - SELF_HEAL_STALE_BLOCK_AGE:
+            continue
+        receipt = resolve_task_receipt(repo, task)
+        if receipt.get("exists"):
+            continue
+        candidates.append(
+            {
+                "action": "block-stale-missing-worktree-task",
+                "path": str(task.get("_metadata_path") or ""),
+                "task_id": task.get("task_id") or task.get("id") or Path(str(task.get("_metadata_path") or "")).stem,
+                "status": status,
+                "worktree": str(worktree_path),
+                "lease_expires_at": task.get("lease_expires_at"),
+                "reason": "in-progress task lease expired more than 24h ago and the recorded worktree is missing",
+            }
+        )
+    return candidates
+
+
 def self_heal_sidecar_needs_init(sidecar: dict[str, Any]) -> bool:
     if not sidecar.get("available"):
         return True
@@ -3192,6 +4269,8 @@ def self_heal_plan(args: argparse.Namespace, repo: Path, sidecar: dict[str, Any]
                 "reason": "sidecar state directory is not initialized",
             }
         )
+    actions.extend(self_heal_missing_final_receipts(repo, sidecar))
+    actions.extend(self_heal_stale_missing_worktree_tasks(repo))
     actions.extend(self_heal_stale_task_metadata(repo))
     actions.extend(self_heal_stale_prepare_lock(repo))
     blockers = []
@@ -3225,6 +4304,24 @@ def apply_self_heal_actions(repo: Path, state: dict[str, Any], actions: list[dic
     quarantine_root = Path(state["paths"]["quarantine_dir"]) / stamp
     for action in actions:
         if action["action"] == "sidecar-init":
+            continue
+        if action["action"] in {"link-final-receipt", "block-stale-missing-worktree-task"}:
+            lifecycle_args = argparse.Namespace(
+                task=action["task_id"],
+                action="link-receipt" if action["action"] == "link-final-receipt" else "block",
+                reason=action["reason"],
+                receipt=action.get("receipt_path") or "",
+                owner="",
+                owner_label="",
+                session_id="",
+                thread_id="",
+                automation_id="agent-self-heal",
+                lease_minutes=240,
+            )
+            lifecycle = agent_task_lifecycle.update_task(repo, lifecycle_args)
+            relpath = action["path"]
+            target_paths.append(relpath)
+            applied.append({**action, "applied": True, "lifecycle": lifecycle})
             continue
         relpath = action["path"]
         source = repo / relpath
@@ -3556,6 +4653,1641 @@ def status_payload(repo: Path) -> dict[str, Any]:
     }
 
 
+def learning_policy_payload(policy_path: Path) -> dict[str, Any]:
+    policy = read_json(policy_path)
+    base = {
+        "path": str(policy_path),
+        "ownership": "target",
+        "state": "not-installed",
+        "policy_id": None,
+        "schema_version": None,
+        "enabled": None,
+    }
+    if policy is None:
+        return base
+    if not isinstance(policy, dict) or policy.get("_error"):
+        return {**base, "state": "invalid"}
+    if policy.get("schema_version") != 1 or policy.get("policy_id") != "supervised-learning":
+        return {
+            **base,
+            "state": "unsupported",
+            "policy_id": policy.get("policy_id"),
+            "schema_version": policy.get("schema_version"),
+            "enabled": policy.get("enabled"),
+        }
+    return {
+        **base,
+        "state": "active" if policy.get("enabled", False) else "disabled",
+        "policy_id": policy["policy_id"],
+        "schema_version": policy["schema_version"],
+        "enabled": policy.get("enabled", False),
+    }
+
+
+def learn_status_payload(repo: Path) -> dict[str, Any]:
+    sidecar = sidecar_state(repo)
+    learning_paths = learning_paths_for(repo, sidecar)
+    policy_path = repo / LEARNING_POLICY_PATH
+    policy = learning_policy_payload(policy_path)
+    schema_paths = {
+        name.removesuffix(".schema.json").replace("-", "_"): str(repo / "schemas" / name)
+        for name in LEARNING_SCHEMA_FILENAMES
+    }
+    safe_next_commands = [
+        public_command("learn", "status", "--repo", str(repo), "--json"),
+        public_command("status", "--repo", str(repo), "--json"),
+    ]
+    if policy["state"] == "not-installed":
+        safe_next_commands.insert(
+            0,
+            public_command("setup", "--repo", str(repo), "--profile", "supervised-learning"),
+        )
+    return {
+        "schema_version": 1,
+        "command": "learn status",
+        "repo": str(repo),
+        "policy_state": policy["state"],
+        "policy": policy,
+        "learning_paths": {"policy": str(policy_path), "schemas": schema_paths, "sidecar": learning_paths},
+        "safe_next_commands": safe_next_commands,
+        "write_guarantees": {
+            "target_repo_writes": False,
+            "sidecar_writes": False,
+            "global_tool_writes": False,
+            "note": "learn status only reads target policy/schema paths and reports future sidecar paths.",
+        },
+        "target_repo_writes": target_repo_writes(False, reason="learn status is read-only"),
+        "sidecar_writes": sidecar_writes(False, reason="learn status is read-only"),
+        "global_writes": {"performed": False, "paths": [], "reason": "learn status is read-only"},
+        "sidecar_state": sidecar,
+        "exit_code": 0,
+    }
+
+
+def learning_paths_for(repo: Path, state: dict[str, Any] | None = None) -> dict[str, str]:
+    sidecar = state or sidecar_state(repo)
+    root = Path(str(sidecar["repo_state_dir"])) / "learning"
+    return {
+        "root": str(root),
+        "events": str(root / "events"),
+        "proposals": str(root / "proposals"),
+        "decisions": str(root / "decisions"),
+        "context": str(root / "context"),
+        "upstream_candidates": str(root / "upstream-candidates"),
+    }
+
+
+def learning_non_execution_guarantee() -> dict[str, Any]:
+    return {
+        "enforced": True,
+        "recommendation_execution_permitted": False,
+        "prohibited_writes": ["AGENTS.md", "policy files", "target files", "global tool state"],
+        "note": LEARNING_NON_EXECUTION_NOTE,
+    }
+
+
+def learning_task_packet_receipt_linkage() -> dict[str, Any]:
+    return {
+        "task_packet": {
+            "supported": True,
+            "state": "approved-decision-lineage-only",
+            "note": "Task packets may carry only explicitly requested schema-valid approved decision IDs; this is sidecar lineage, not permission to execute a recommendation.",
+        },
+        "receipt": {
+            "supported": False,
+            "state": "deferred",
+            "note": "Receipt mechanics remain unchanged in this phase.",
+        },
+    }
+
+
+def learning_sidecar_write_gate(repo: Path, schema_filename: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    state = sidecar_state(repo)
+    policy_path = repo / LEARNING_POLICY_PATH
+    policy = read_json(policy_path)
+    policy_status = learning_policy_payload(policy_path)
+    learning_paths = learning_paths_for(repo, state)
+    schema_path = repo / "schemas" / schema_filename
+    install = read_json(repo / ".doc-contract-kit" / "install.json")
+    gate: dict[str, Any] = {
+        "state": "approved",
+        "policy_path": str(policy_path),
+        "schema_path": str(schema_path),
+        "reason": "installed target-owned supervised-learning policy accepted bounded explicit sidecar input",
+    }
+    if not isinstance(policy, dict) or policy.get("_error") or policy_status["state"] == "not-installed":
+        gate.update({"state": "not-enrolled", "reason": "supervised-learning policy is not installed in the target repository"})
+    elif not isinstance(install, dict) or "supervised-learning" not in (install.get("profiles") or []):
+        gate.update({"state": "not-enrolled", "reason": "target repository is not enrolled with the supervised-learning profile"})
+    elif not schema_path.is_file():
+        gate.update({"state": "schema-missing", "reason": f"installed {schema_filename} is missing"})
+    else:
+        ownership = policy.get("ownership")
+        expected_ownership = {
+            "policy": "target",
+            "schemas": "kit-managed",
+            "events": "sidecar",
+            "proposals": "sidecar",
+            "decisions": "sidecar",
+            "context": "sidecar",
+            "upstream_candidates": "sidecar",
+        }
+        if (
+            policy.get("schema_version") != 1
+            or policy.get("policy_id") != "supervised-learning"
+            or policy.get("enabled") is not True
+            or policy.get("mode") != "supervised"
+            or policy.get("human_approval_required") is not True
+            or ownership != expected_ownership
+        ):
+            gate.update(
+                {
+                    "state": "policy-invalid",
+                    "reason": "policy must be enabled, supervised, target-owned, and keep learning records in the repository sidecar",
+                }
+            )
+    return gate, policy_status, {"state": state, "paths": learning_paths, "policy": policy}
+
+
+def learning_write_error_payload(
+    command: str,
+    repo: Path,
+    state: dict[str, Any],
+    learning_paths: dict[str, str],
+    policy: dict[str, Any],
+    gate: dict[str, Any],
+    *,
+    errors: list[str] | None = None,
+) -> tuple[dict[str, Any], int]:
+    return (
+        {
+            "schema_version": 1,
+            "command": command,
+            "action": "error",
+            "repo": str(repo),
+            "policy_state": policy["state"],
+            "policy": policy,
+            "learning_paths": {"sidecar": learning_paths},
+            "gate": gate,
+            "errors": errors or [],
+            "non_execution_guarantee": learning_non_execution_guarantee(),
+            "task_packet_receipt_linkage": learning_task_packet_receipt_linkage(),
+            "target_repo_writes": target_repo_writes(False, reason=f"{command} failed before target writes"),
+            "sidecar_writes": sidecar_writes(False, reason=f"{command} failed before sidecar writes"),
+            "global_writes": {"performed": False, "paths": [], "reason": f"{command} does not write global state"},
+            "sidecar_state": state,
+            "exit_code": 2,
+        },
+        2,
+    )
+
+
+def learning_is_timestamp(value: Any) -> bool:
+    if not isinstance(value, str) or not re.fullmatch(r"[^\s]+T[^\s]+Z", value):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() == timedelta(0)
+
+
+def learning_proposal_from_args(args: argparse.Namespace, repo: Path, policy: dict[str, Any]) -> dict[str, Any]:
+    evidence_event_ids = [item.strip() for item in (args.evidence_event or []) if item.strip()]
+    scope = [item.strip() for item in (args.scope or []) if item.strip()]
+    proposal = {
+        "schema_version": 1,
+        "proposal_id": "prop-" + uuid.uuid4().hex[:20],
+        "created_at": now(),
+        "policy_id": "supervised-learning",
+        "repo": str(repo),
+        "title": args.title.strip(),
+        "classification": args.classification,
+        "scope": scope,
+        "recommended_change": args.recommended_change.strip(),
+        "lineage": {"evidence_event_ids": evidence_event_ids},
+        "privacy_label": args.privacy_label or ((policy.get("retention") or {}).get("privacy_label")),
+        "status": "pending-review",
+        "human_approval_required": True,
+        "decision_id": None,
+        "non_execution_guarantee": learning_non_execution_guarantee(),
+    }
+    return proposal
+
+
+def learning_proposal_validation_errors(proposal: Any) -> list[str]:
+    if not isinstance(proposal, dict):
+        return ["proposal must be an object"]
+    required = {
+        "schema_version",
+        "proposal_id",
+        "created_at",
+        "policy_id",
+        "repo",
+        "title",
+        "classification",
+        "scope",
+        "recommended_change",
+        "lineage",
+        "privacy_label",
+        "status",
+        "human_approval_required",
+        "decision_id",
+        "non_execution_guarantee",
+    }
+    errors: list[str] = []
+    if set(proposal) != required:
+        errors.append("proposal fields do not match learning-proposal schema")
+    if proposal.get("schema_version") != 1:
+        errors.append("schema_version must be 1")
+    if not isinstance(proposal.get("proposal_id"), str) or not re.fullmatch(r"prop-[0-9a-f]{20}", proposal["proposal_id"]):
+        errors.append("proposal_id must be a stable prop- identifier")
+    if not learning_is_timestamp(proposal.get("created_at")):
+        errors.append("created_at must be an RFC3339 UTC timestamp")
+    if proposal.get("policy_id") != "supervised-learning" or not isinstance(proposal.get("repo"), str) or not proposal["repo"]:
+        errors.append("policy_id and repo must identify the supervised-learning target")
+    title = proposal.get("title")
+    if not isinstance(title, str) or not title.strip() or len(title) > LEARNING_PROPOSAL_MAX_TITLE_LENGTH:
+        errors.append("title must be non-empty and at most 160 characters")
+    if proposal.get("classification") not in LEARNING_PROPOSAL_CLASSIFICATIONS:
+        errors.append("classification is not allowed by learning-proposal schema")
+    scope = proposal.get("scope")
+    if not isinstance(scope, list) or not scope or len(scope) > LEARNING_PROPOSAL_MAX_SCOPE_ITEMS or any(
+        not isinstance(item, str) or not item.strip() or len(item) > LEARNING_PROPOSAL_MAX_SCOPE_LENGTH for item in scope
+    ):
+        errors.append("scope must contain one to ten explicit entries of 200 characters or fewer")
+    recommended_change = proposal.get("recommended_change")
+    if not isinstance(recommended_change, str) or not recommended_change.strip() or len(recommended_change) > LEARNING_PROPOSAL_MAX_CHANGE_LENGTH:
+        errors.append("recommended_change must be non-empty and at most 500 characters")
+    lineage = proposal.get("lineage")
+    evidence_event_ids = lineage.get("evidence_event_ids") if isinstance(lineage, dict) else None
+    if (
+        not isinstance(lineage, dict)
+        or set(lineage) != {"evidence_event_ids"}
+        or not isinstance(evidence_event_ids, list)
+        or not evidence_event_ids
+        or len(evidence_event_ids) > LEARNING_PROPOSAL_MAX_EVIDENCE_EVENTS
+        or len(set(evidence_event_ids)) != len(evidence_event_ids)
+        or any(not isinstance(item, str) or not re.fullmatch(r"evt-[0-9a-f]{20}", item) for item in evidence_event_ids)
+    ):
+        errors.append("lineage must contain one to ten unique stable evidence event IDs")
+    if proposal.get("privacy_label") not in LEARNING_PRIVACY_LABELS:
+        errors.append("privacy_label is not allowed by learning-proposal schema")
+    if proposal.get("status") not in ("pending-review", "approved", "rejected", "deferred"):
+        errors.append("status is not allowed by learning-proposal schema")
+    decision_id = proposal.get("decision_id")
+    if decision_id is not None and (not isinstance(decision_id, str) or not re.fullmatch(r"dec-[0-9a-f]{20}", decision_id)):
+        errors.append("decision_id must be null or a stable dec- identifier")
+    if proposal.get("human_approval_required") is not True:
+        errors.append("human_approval_required must be true")
+    if proposal.get("non_execution_guarantee") != learning_non_execution_guarantee():
+        errors.append("non_execution_guarantee must preserve the no-execution boundary")
+    return errors
+
+
+def read_learning_proposals(proposals_dir: Path, limit: int = 0) -> tuple[list[dict[str, Any]], list[str]]:
+    if not proposals_dir.exists():
+        return [], []
+    proposals: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for path in sorted(proposals_dir.glob("*.json")):
+        payload = read_json(path)
+        errors = learning_proposal_validation_errors(payload)
+        if errors:
+            warnings.append(f"Skipped invalid learning proposal {path.name}: {'; '.join(errors)}")
+            continue
+        proposals.append(payload)
+    proposals.sort(key=lambda proposal: (proposal["created_at"], proposal["proposal_id"]))
+    if limit > 0:
+        proposals = proposals[-limit:]
+    return proposals, warnings
+
+
+def learn_proposal_create_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    gate, policy_status, context = learning_sidecar_write_gate(repo, "learning-proposal.schema.json")
+    state = context["state"]
+    learning_paths = context["paths"]
+    policy = context["policy"]
+    if gate["state"] != "approved":
+        return learning_write_error_payload("learn proposal create", repo, state, learning_paths, policy_status, gate)
+    proposal = learning_proposal_from_args(args, repo, policy)
+    errors = learning_proposal_validation_errors(proposal)
+    if errors:
+        gate = {"state": "schema-invalid", "reason": "proposal failed local learning-proposal schema validation"}
+        return learning_write_error_payload("learn proposal create", repo, state, learning_paths, policy_status, gate, errors=errors)
+    events, _warnings = read_learning_events(Path(learning_paths["events"]))
+    valid_event_ids = {event["event_id"] for event in events}
+    evidence_event_ids = proposal["lineage"]["evidence_event_ids"]
+    missing_event_ids = [event_id for event_id in evidence_event_ids if event_id not in valid_event_ids]
+    if missing_event_ids:
+        gate = {
+            "state": "invalid-evidence",
+            "reason": "every proposal evidence event must already exist as a schema-valid local learning event",
+            "missing_event_ids": missing_event_ids,
+        }
+        return learning_write_error_payload("learn proposal create", repo, state, learning_paths, policy_status, gate)
+    state, init_paths = ensure_sidecar(repo, "learn proposal create")
+    learning_paths = learning_paths_for(repo, state)
+    proposals_dir = Path(learning_paths["proposals"])
+    proposals_dir.mkdir(parents=True, exist_ok=True)
+    proposal_path = proposals_dir / f"{proposal['proposal_id']}.json"
+    write_json_file(proposal_path, proposal)
+    paths = init_paths + [learning_paths["root"], learning_paths["proposals"], str(proposal_path)]
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn proposal create",
+            "action": "create",
+            "repo": str(repo),
+            "policy_state": policy_status["state"],
+            "policy": policy_status,
+            "learning_paths": {"sidecar": learning_paths},
+            "gate": gate,
+            "proposal": proposal,
+            "proposal_path": str(proposal_path),
+            "non_execution_guarantee": learning_non_execution_guarantee(),
+            "task_packet_receipt_linkage": learning_task_packet_receipt_linkage(),
+            "target_repo_writes": target_repo_writes(False, reason="learning proposals are stored only in the repository sidecar"),
+            "sidecar_writes": sidecar_writes(True, paths=paths, reason="explicit schema-valid learning proposal with local event evidence"),
+            "global_writes": {"performed": False, "paths": [], "reason": "learning proposal create does not write global state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def learn_proposal_list_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    state = sidecar_state(repo)
+    learning_paths = learning_paths_for(repo, state)
+    proposals_path = Path(learning_paths["proposals"])
+    proposals, warnings = read_learning_proposals(proposals_path, max(args.limit, 0))
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn proposal list",
+            "action": "list",
+            "repo": str(repo),
+            "proposals_path": str(proposals_path),
+            "proposals": proposals,
+            "count": len(proposals),
+            "warnings": warnings,
+            "non_execution_guarantee": learning_non_execution_guarantee(),
+            "task_packet_receipt_linkage": learning_task_packet_receipt_linkage(),
+            "target_repo_writes": target_repo_writes(False, reason="learn proposal list is read-only"),
+            "sidecar_writes": sidecar_writes(False, reason="learn proposal list is read-only"),
+            "global_writes": {"performed": False, "paths": [], "reason": "learn proposal list does not write global state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def learning_decision_from_args(args: argparse.Namespace, repo: Path, proposal: dict[str, Any]) -> dict[str, Any]:
+    follow_up = [item.strip() for item in (args.follow_up or []) if item.strip()]
+    return {
+        "schema_version": 1,
+        "decision_id": "dec-" + uuid.uuid4().hex[:20],
+        "decided_at": now(),
+        "policy_id": "supervised-learning",
+        "repo": str(repo),
+        "proposal_id": proposal["proposal_id"],
+        "outcome": args.outcome,
+        "rationale": args.rationale.strip(),
+        "decider": args.decider.strip(),
+        "human_review": {"required": True, "confirmed": True, "capture": "explicit-cli-input"},
+        "lineage": {
+            "proposal_id": proposal["proposal_id"],
+            "evidence_event_ids": proposal["lineage"]["evidence_event_ids"],
+        },
+        "privacy_label": proposal["privacy_label"],
+        "follow_up": follow_up,
+        "non_execution_guarantee": learning_non_execution_guarantee(),
+    }
+
+
+def learning_decision_validation_errors(decision: Any) -> list[str]:
+    if not isinstance(decision, dict):
+        return ["decision must be an object"]
+    required = {
+        "schema_version",
+        "decision_id",
+        "decided_at",
+        "policy_id",
+        "repo",
+        "proposal_id",
+        "outcome",
+        "rationale",
+        "decider",
+        "human_review",
+        "lineage",
+        "privacy_label",
+        "follow_up",
+        "non_execution_guarantee",
+    }
+    errors: list[str] = []
+    if set(decision) != required:
+        errors.append("decision fields do not match learning-decision schema")
+    if decision.get("schema_version") != 1:
+        errors.append("schema_version must be 1")
+    if not isinstance(decision.get("decision_id"), str) or not re.fullmatch(r"dec-[0-9a-f]{20}", decision["decision_id"]):
+        errors.append("decision_id must be a stable dec- identifier")
+    if not learning_is_timestamp(decision.get("decided_at")):
+        errors.append("decided_at must be an RFC3339 UTC timestamp")
+    if decision.get("policy_id") != "supervised-learning" or not isinstance(decision.get("repo"), str) or not decision["repo"]:
+        errors.append("policy_id and repo must identify the supervised-learning target")
+    if not isinstance(decision.get("proposal_id"), str) or not re.fullmatch(r"prop-[0-9a-f]{20}", decision["proposal_id"]):
+        errors.append("proposal_id must be a stable prop- identifier")
+    if decision.get("outcome") not in LEARNING_DECISION_OUTCOMES:
+        errors.append("outcome is not allowed by learning-decision schema")
+    rationale = decision.get("rationale")
+    if not isinstance(rationale, str) or not rationale.strip() or len(rationale) > LEARNING_DECISION_MAX_RATIONALE_LENGTH:
+        errors.append("rationale must be non-empty and at most 500 characters")
+    decider = decision.get("decider")
+    if not isinstance(decider, str) or not decider.strip() or len(decider) > LEARNING_DECISION_MAX_DECIDER_LENGTH:
+        errors.append("decider must be non-empty and at most 120 characters")
+    if decision.get("human_review") != {"required": True, "confirmed": True, "capture": "explicit-cli-input"}:
+        errors.append("human_review must record explicit confirmed human review")
+    lineage = decision.get("lineage")
+    evidence_event_ids = lineage.get("evidence_event_ids") if isinstance(lineage, dict) else None
+    if (
+        not isinstance(lineage, dict)
+        or set(lineage) != {"proposal_id", "evidence_event_ids"}
+        or lineage.get("proposal_id") != decision.get("proposal_id")
+        or not isinstance(evidence_event_ids, list)
+        or not evidence_event_ids
+        or any(not isinstance(item, str) or not re.fullmatch(r"evt-[0-9a-f]{20}", item) for item in evidence_event_ids)
+    ):
+        errors.append("lineage must preserve the proposal and its stable evidence event IDs")
+    if decision.get("privacy_label") not in LEARNING_PRIVACY_LABELS:
+        errors.append("privacy_label is not allowed by learning-decision schema")
+    follow_up = decision.get("follow_up")
+    if not isinstance(follow_up, list) or len(follow_up) > LEARNING_DECISION_MAX_FOLLOW_UP_ITEMS or any(
+        not isinstance(item, str) or not item.strip() or len(item) > LEARNING_DECISION_MAX_FOLLOW_UP_LENGTH for item in follow_up
+    ):
+        errors.append("follow_up must contain at most ten explicit entries of 500 characters or fewer")
+    if decision.get("non_execution_guarantee") != learning_non_execution_guarantee():
+        errors.append("non_execution_guarantee must preserve the no-execution boundary")
+    return errors
+
+
+def read_learning_decisions(decisions_dir: Path, limit: int = 0) -> tuple[list[dict[str, Any]], list[str]]:
+    if not decisions_dir.exists():
+        return [], []
+    decisions: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for path in sorted(decisions_dir.glob("*.json")):
+        payload = read_json(path)
+        errors = learning_decision_validation_errors(payload)
+        if errors:
+            warnings.append(f"Skipped invalid learning decision {path.name}: {'; '.join(errors)}")
+            continue
+        decisions.append(payload)
+    decisions.sort(key=lambda decision: (decision["decided_at"], decision["decision_id"]))
+    if limit > 0:
+        decisions = decisions[-limit:]
+    return decisions, warnings
+
+
+def learn_decision_record_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    gate, policy_status, context = learning_sidecar_write_gate(repo, "learning-decision.schema.json")
+    state = context["state"]
+    learning_paths = context["paths"]
+    if gate["state"] != "approved":
+        return learning_write_error_payload("learn decision record", repo, state, learning_paths, policy_status, gate)
+    proposal_id = args.proposal_id.strip()
+    if not re.fullmatch(r"prop-[0-9a-f]{20}", proposal_id):
+        gate = {"state": "proposal-invalid", "reason": "proposal_id must be a stable prop- identifier"}
+        return learning_write_error_payload("learn decision record", repo, state, learning_paths, policy_status, gate)
+    proposal_path = Path(learning_paths["proposals"]) / f"{proposal_id}.json"
+    proposal = read_json(proposal_path)
+    proposal_errors = learning_proposal_validation_errors(proposal)
+    if proposal is None:
+        gate = {"state": "proposal-missing", "reason": "decision must reference an existing pending proposal"}
+        return learning_write_error_payload("learn decision record", repo, state, learning_paths, policy_status, gate)
+    if proposal_errors:
+        gate = {"state": "proposal-invalid", "reason": "referenced proposal failed local learning-proposal schema validation"}
+        return learning_write_error_payload("learn decision record", repo, state, learning_paths, policy_status, gate, errors=proposal_errors)
+    if proposal["status"] != "pending-review" or proposal["decision_id"] is not None:
+        gate = {"state": "proposal-not-pending", "reason": "decision must reference an existing pending-review proposal"}
+        return learning_write_error_payload("learn decision record", repo, state, learning_paths, policy_status, gate)
+    if not args.human_review_confirmed:
+        gate = {"state": "human-review-required", "reason": "pass --human-review-confirmed after explicit human review to record a decision"}
+        return learning_write_error_payload("learn decision record", repo, state, learning_paths, policy_status, gate)
+    decision = learning_decision_from_args(args, repo, proposal)
+    errors = learning_decision_validation_errors(decision)
+    if errors:
+        gate = {"state": "schema-invalid", "reason": "decision failed local learning-decision schema validation"}
+        return learning_write_error_payload("learn decision record", repo, state, learning_paths, policy_status, gate, errors=errors)
+    state, init_paths = ensure_sidecar(repo, "learn decision record")
+    learning_paths = learning_paths_for(repo, state)
+    decisions_dir = Path(learning_paths["decisions"])
+    decisions_dir.mkdir(parents=True, exist_ok=True)
+    decision_path = decisions_dir / f"{decision['decision_id']}.json"
+    proposal["status"] = decision["outcome"]
+    proposal["decision_id"] = decision["decision_id"]
+    write_json_file(decision_path, decision)
+    write_json_file(proposal_path, proposal)
+    paths = init_paths + [learning_paths["root"], learning_paths["decisions"], str(decision_path), str(proposal_path)]
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn decision record",
+            "action": "record",
+            "repo": str(repo),
+            "policy_state": policy_status["state"],
+            "policy": policy_status,
+            "learning_paths": {"sidecar": learning_paths},
+            "gate": gate,
+            "decision": decision,
+            "decision_path": str(decision_path),
+            "proposal": proposal,
+            "proposal_path": str(proposal_path),
+            "non_execution_guarantee": learning_non_execution_guarantee(),
+            "task_packet_receipt_linkage": learning_task_packet_receipt_linkage(),
+            "target_repo_writes": target_repo_writes(False, reason="learning decisions and proposal state are stored only in the repository sidecar"),
+            "sidecar_writes": sidecar_writes(True, paths=paths, reason="explicit human-reviewed learning decision and linked proposal update"),
+            "global_writes": {"performed": False, "paths": [], "reason": "learning decision record does not write global state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def learn_decision_list_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    state = sidecar_state(repo)
+    learning_paths = learning_paths_for(repo, state)
+    decisions_path = Path(learning_paths["decisions"])
+    decisions, warnings = read_learning_decisions(decisions_path, max(args.limit, 0))
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn decision list",
+            "action": "list",
+            "repo": str(repo),
+            "decisions_path": str(decisions_path),
+            "decisions": decisions,
+            "count": len(decisions),
+            "warnings": warnings,
+            "non_execution_guarantee": learning_non_execution_guarantee(),
+            "task_packet_receipt_linkage": learning_task_packet_receipt_linkage(),
+            "target_repo_writes": target_repo_writes(False, reason="learn decision list is read-only"),
+            "sidecar_writes": sidecar_writes(False, reason="learn decision list is read-only"),
+            "global_writes": {"performed": False, "paths": [], "reason": "learn decision list does not write global state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def learning_retention_days(policy: dict[str, Any]) -> int:
+    value = (policy.get("retention") or {}).get("default_days")
+    return value if isinstance(value, int) and value >= 1 else 90
+
+
+def learning_context_from_decision(decision: dict[str, Any], proposal: dict[str, Any], repo: Path, policy: dict[str, Any]) -> dict[str, Any]:
+    captured_at = datetime.now(timezone.utc).replace(microsecond=0)
+    retention_days = learning_retention_days(policy)
+    return {
+        "schema_version": 1,
+        "context_id": "ctx-" + uuid.uuid4().hex[:20],
+        "captured_at": captured_at.isoformat().replace("+00:00", "Z"),
+        "policy_id": "supervised-learning",
+        "repo": str(repo),
+        "lineage": {
+            "decision_id": decision["decision_id"],
+            "proposal_id": proposal["proposal_id"],
+        },
+        "guidance": {
+            "classification": proposal["classification"],
+            "scope": proposal["scope"],
+            "recommended_change": proposal["recommended_change"],
+        },
+        "privacy_label": proposal["privacy_label"],
+        "retention": {
+            "days": retention_days,
+            "expires_at": (captured_at + timedelta(days=retention_days)).isoformat().replace("+00:00", "Z"),
+        },
+        "sidecar_only_guidance": True,
+        "non_execution_guarantee": learning_non_execution_guarantee(),
+    }
+
+
+def learning_context_validation_errors(context: Any) -> list[str]:
+    if not isinstance(context, dict):
+        return ["context must be an object"]
+    required = {
+        "schema_version",
+        "context_id",
+        "captured_at",
+        "policy_id",
+        "repo",
+        "lineage",
+        "guidance",
+        "privacy_label",
+        "retention",
+        "sidecar_only_guidance",
+        "non_execution_guarantee",
+    }
+    errors: list[str] = []
+    if set(context) != required:
+        errors.append("context fields do not match learning-context schema")
+    if context.get("schema_version") != 1:
+        errors.append("schema_version must be 1")
+    if not isinstance(context.get("context_id"), str) or not re.fullmatch(r"ctx-[0-9a-f]{20}", context["context_id"]):
+        errors.append("context_id must be a stable ctx- identifier")
+    if not learning_is_timestamp(context.get("captured_at")):
+        errors.append("captured_at must be an RFC3339 UTC timestamp")
+    if context.get("policy_id") != "supervised-learning" or not isinstance(context.get("repo"), str) or not context["repo"]:
+        errors.append("policy_id and repo must identify the supervised-learning target")
+    lineage = context.get("lineage")
+    if (
+        not isinstance(lineage, dict)
+        or set(lineage) != {"decision_id", "proposal_id"}
+        or not isinstance(lineage.get("decision_id"), str)
+        or not re.fullmatch(r"dec-[0-9a-f]{20}", lineage["decision_id"])
+        or not isinstance(lineage.get("proposal_id"), str)
+        or not re.fullmatch(r"prop-[0-9a-f]{20}", lineage["proposal_id"])
+    ):
+        errors.append("lineage must contain only stable decision and proposal IDs")
+    guidance = context.get("guidance")
+    scope = guidance.get("scope") if isinstance(guidance, dict) else None
+    recommended_change = guidance.get("recommended_change") if isinstance(guidance, dict) else None
+    if (
+        not isinstance(guidance, dict)
+        or set(guidance) != {"classification", "scope", "recommended_change"}
+        or guidance.get("classification") not in LEARNING_PROPOSAL_CLASSIFICATIONS
+        or not isinstance(scope, list)
+        or not scope
+        or len(scope) > LEARNING_PROPOSAL_MAX_SCOPE_ITEMS
+        or any(not isinstance(item, str) or not item.strip() or len(item) > LEARNING_PROPOSAL_MAX_SCOPE_LENGTH for item in scope)
+        or not isinstance(recommended_change, str)
+        or not recommended_change.strip()
+        or len(recommended_change) > LEARNING_PROPOSAL_MAX_CHANGE_LENGTH
+    ):
+        errors.append("guidance must contain only bounded classification, scope, and recommended change fields")
+    if context.get("privacy_label") not in LEARNING_PRIVACY_LABELS:
+        errors.append("privacy_label is not allowed by learning-context schema")
+    retention = context.get("retention")
+    if (
+        not isinstance(retention, dict)
+        or set(retention) != {"days", "expires_at"}
+        or not isinstance(retention.get("days"), int)
+        or retention["days"] < 1
+        or not learning_is_timestamp(retention.get("expires_at"))
+    ):
+        errors.append("retention must contain positive days and an RFC3339 expiry timestamp")
+    if context.get("sidecar_only_guidance") is not True:
+        errors.append("sidecar_only_guidance must be true")
+    if context.get("non_execution_guarantee") != learning_non_execution_guarantee():
+        errors.append("non_execution_guarantee must preserve the no-execution boundary")
+    return errors
+
+
+def learning_context_lineage_validation_errors(
+    learning_context: dict[str, Any],
+    repo: Path,
+    decisions_by_id: dict[str, dict[str, Any]],
+    proposals_by_id: dict[str, dict[str, Any]],
+) -> list[str]:
+    errors: list[str] = []
+    if learning_context["repo"] != str(repo):
+        return ["context repo does not match the requested repository"]
+    lineage = learning_context["lineage"]
+    decision = decisions_by_id.get(lineage["decision_id"])
+    if decision is None:
+        return ["context decision is missing or schema-invalid in the local sidecar"]
+    if decision["repo"] != str(repo) or decision["outcome"] != "approved":
+        return ["context decision is not an approved decision for the requested repository"]
+    proposal = proposals_by_id.get(lineage["proposal_id"])
+    if proposal is None:
+        return ["context proposal is missing or schema-invalid in the local sidecar"]
+    if (
+        decision["proposal_id"] != proposal["proposal_id"]
+        or proposal["repo"] != str(repo)
+        or proposal["status"] != "approved"
+        or proposal["decision_id"] != decision["decision_id"]
+    ):
+        errors.append("context decision and proposal lineage is no longer an approved local link")
+    if learning_context["privacy_label"] != proposal["privacy_label"]:
+        errors.append("context privacy label no longer matches its approved proposal")
+    if learning_context["guidance"] != {
+        "classification": proposal["classification"],
+        "scope": proposal["scope"],
+        "recommended_change": proposal["recommended_change"],
+    }:
+        errors.append("context guidance no longer matches the bounded approved proposal fields")
+    return errors
+
+
+def read_learning_contexts(repo: Path, contexts_dir: Path | None = None, limit: int = 0) -> tuple[list[dict[str, Any]], list[str]]:
+    learning_paths = learning_paths_for(repo)
+    resolved_contexts_dir = contexts_dir or Path(learning_paths["context"])
+    decisions, decision_warnings = read_learning_decisions(Path(learning_paths["decisions"]))
+    proposals, proposal_warnings = read_learning_proposals(Path(learning_paths["proposals"]))
+    decisions_by_id = {decision["decision_id"]: decision for decision in decisions}
+    proposals_by_id = {proposal["proposal_id"]: proposal for proposal in proposals}
+    if not resolved_contexts_dir.exists():
+        return [], decision_warnings + proposal_warnings
+    contexts: list[dict[str, Any]] = []
+    warnings: list[str] = decision_warnings + proposal_warnings
+    for path in sorted(resolved_contexts_dir.glob("*.json")):
+        payload = read_json(path)
+        errors = learning_context_validation_errors(payload)
+        if not errors:
+            errors = learning_context_lineage_validation_errors(payload, repo, decisions_by_id, proposals_by_id)
+        if errors:
+            warnings.append(f"Skipped invalid learning context {path.name}: {'; '.join(errors)}")
+            continue
+        contexts.append(payload)
+    contexts.sort(key=lambda context: (context["captured_at"], context["context_id"]))
+    if limit > 0:
+        contexts = contexts[-limit:]
+    return contexts, warnings
+
+
+def learning_approved_decision_gate(
+    repo: Path, decision_id: str, schema_filename: str, purpose: str
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+    gate, policy_status, context = learning_sidecar_write_gate(repo, schema_filename)
+    state = context["state"]
+    learning_paths = context["paths"]
+    policy = context["policy"]
+    if gate["state"] != "approved":
+        return gate, policy_status, context, None, None
+    if not re.fullmatch(r"dec-[0-9a-f]{20}", decision_id):
+        return {"state": "decision-invalid", "reason": "decision_id must be a stable dec- identifier"}, policy_status, context, None, None
+    decisions, _warnings = read_learning_decisions(Path(learning_paths["decisions"]))
+    decision = next((item for item in decisions if item["decision_id"] == decision_id), None)
+    if decision is None:
+        return {"state": "decision-missing", "reason": f"{purpose} requires an existing schema-valid local decision"}, policy_status, context, None, None
+    if decision["repo"] != str(repo) or decision["outcome"] != "approved":
+        return {"state": "decision-not-approved", "reason": f"{purpose} requires an approved local decision for this repository"}, policy_status, context, None, None
+    proposals, _warnings = read_learning_proposals(Path(learning_paths["proposals"]))
+    proposal = next((item for item in proposals if item["proposal_id"] == decision["proposal_id"]), None)
+    if proposal is None:
+        return {"state": "proposal-missing", "reason": f"{purpose} requires the decision's linked schema-valid local proposal"}, policy_status, context, None, None
+    if (
+        proposal["repo"] != str(repo)
+        or proposal["status"] != "approved"
+        or proposal["decision_id"] != decision["decision_id"]
+        or proposal["privacy_label"] != decision["privacy_label"]
+    ):
+        return {"state": "proposal-linkage-invalid", "reason": "the approved decision must match its approved linked local proposal"}, policy_status, context, None, None
+    return gate, policy_status, context, decision, proposal
+
+
+def learning_context_gate(repo: Path, decision_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+    return learning_approved_decision_gate(repo, decision_id, "learning-context.schema.json", "context build")
+
+
+def learn_context_build_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    decision_id = args.decision_id.strip()
+    gate, policy_status, context_state, decision, proposal = learning_context_gate(repo, decision_id)
+    state = context_state["state"]
+    learning_paths = context_state["paths"]
+    policy = context_state["policy"]
+    if gate["state"] != "approved" or decision is None or proposal is None:
+        return learning_write_error_payload("learn context build", repo, state, learning_paths, policy_status, gate)
+    learning_context = learning_context_from_decision(decision, proposal, repo, policy)
+    errors = learning_context_validation_errors(learning_context)
+    if errors:
+        invalid_gate = {"state": "schema-invalid", "reason": "context failed local learning-context schema validation"}
+        return learning_write_error_payload("learn context build", repo, state, learning_paths, policy_status, invalid_gate, errors=errors)
+    state, init_paths = ensure_sidecar(repo, "learn context build")
+    learning_paths = learning_paths_for(repo, state)
+    contexts_dir = Path(learning_paths["context"])
+    contexts_dir.mkdir(parents=True, exist_ok=True)
+    context_path = contexts_dir / f"{learning_context['context_id']}.json"
+    write_json_file(context_path, learning_context)
+    paths = init_paths + [learning_paths["root"], learning_paths["context"], str(context_path)]
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn context build",
+            "action": "build",
+            "repo": str(repo),
+            "policy_state": policy_status["state"],
+            "policy": policy_status,
+            "learning_paths": {"sidecar": learning_paths},
+            "gate": gate,
+            "context": learning_context,
+            "context_path": str(context_path),
+            "non_execution_guarantee": learning_non_execution_guarantee(),
+            "task_packet_receipt_linkage": learning_task_packet_receipt_linkage(),
+            "target_repo_writes": target_repo_writes(False, reason="learning context is stored only in the repository sidecar"),
+            "sidecar_writes": sidecar_writes(True, paths=paths, reason="bounded context constructed from an approved decision and linked proposal"),
+            "global_writes": {"performed": False, "paths": [], "reason": "learn context build does not write global state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def learn_context_list_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    state = sidecar_state(repo)
+    learning_paths = learning_paths_for(repo, state)
+    contexts_path = Path(learning_paths["context"])
+    contexts, warnings = read_learning_contexts(repo, contexts_path, max(args.limit, 0))
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn context list",
+            "action": "list",
+            "repo": str(repo),
+            "contexts_path": str(contexts_path),
+            "contexts": contexts,
+            "count": len(contexts),
+            "warnings": warnings,
+            "sidecar_only_guidance": True,
+            "non_execution_guarantee": learning_non_execution_guarantee(),
+            "task_packet_receipt_linkage": learning_task_packet_receipt_linkage(),
+            "target_repo_writes": target_repo_writes(False, reason="learn context list is read-only"),
+            "sidecar_writes": sidecar_writes(False, reason="learn context list is read-only"),
+            "global_writes": {"performed": False, "paths": [], "reason": "learn context list does not write global state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def learning_upstream_candidate_validation_errors(candidate: Any) -> list[str]:
+    if not isinstance(candidate, dict):
+        return ["upstream candidate must be an object"]
+    required = {
+        "schema_version",
+        "candidate_id",
+        "created_at",
+        "policy_id",
+        "lineage",
+        "recommendation",
+        "origin",
+        "source_baseline",
+        "privacy_label",
+        "redaction_confirmed",
+    }
+    errors: list[str] = []
+    if set(candidate) != required:
+        errors.append("candidate fields do not match learning-upstream-candidate schema")
+    if candidate.get("schema_version") != 1:
+        errors.append("schema_version must be 1")
+    if not isinstance(candidate.get("candidate_id"), str) or not re.fullmatch(r"upc-[0-9a-f]{20}", candidate["candidate_id"]):
+        errors.append("candidate_id must be a stable upc- identifier")
+    if not learning_is_timestamp(candidate.get("created_at")):
+        errors.append("created_at must be an RFC3339 UTC timestamp")
+    if candidate.get("policy_id") != "supervised-learning":
+        errors.append("policy_id must be supervised-learning")
+    lineage = candidate.get("lineage")
+    if (
+        not isinstance(lineage, dict)
+        or set(lineage) != {"decision_id", "proposal_id"}
+        or not isinstance(lineage.get("decision_id"), str)
+        or not re.fullmatch(r"dec-[0-9a-f]{20}", lineage["decision_id"])
+        or not isinstance(lineage.get("proposal_id"), str)
+        or not re.fullmatch(r"prop-[0-9a-f]{20}", lineage["proposal_id"])
+    ):
+        errors.append("lineage must contain only stable approved decision and proposal IDs")
+    recommendation = candidate.get("recommendation")
+    if (
+        not isinstance(recommendation, dict)
+        or set(recommendation) != {"classification", "scope", "recommended_change"}
+        or recommendation.get("classification") not in LEARNING_PROPOSAL_CLASSIFICATIONS
+        or not isinstance(recommendation.get("scope"), list)
+        or not recommendation["scope"]
+        or len(recommendation["scope"]) > LEARNING_PROPOSAL_MAX_SCOPE_ITEMS
+        or any(not isinstance(item, str) or not item.strip() or len(item) > LEARNING_PROPOSAL_MAX_SCOPE_LENGTH for item in recommendation["scope"])
+        or not isinstance(recommendation.get("recommended_change"), str)
+        or not recommendation["recommended_change"].strip()
+        or len(recommendation["recommended_change"]) > LEARNING_PROPOSAL_MAX_CHANGE_LENGTH
+    ):
+        errors.append("recommendation must contain only bounded classification, scope, and recommended change")
+    origin = candidate.get("origin")
+    if (
+        not isinstance(origin, dict)
+        or set(origin) != {"kind", "repository_id"}
+        or origin.get("kind") != "sanitized-target"
+        or not isinstance(origin.get("repository_id"), str)
+        or not re.fullmatch(r"repo-[0-9a-f]{20}", origin["repository_id"])
+    ):
+        errors.append("origin must contain only a sanitized target identifier")
+    source_baseline = candidate.get("source_baseline")
+    if (
+        not isinstance(source_baseline, dict)
+        or set(source_baseline) != {"source_ref", "version"}
+        or not isinstance(source_baseline.get("source_ref"), str)
+        or not re.fullmatch(r"[0-9a-f]{40,64}", source_baseline["source_ref"])
+        or not isinstance(source_baseline.get("version"), str)
+        or not source_baseline["version"].strip()
+        or len(source_baseline["version"]) > 120
+    ):
+        errors.append("source_baseline must contain a local source ref and bounded version")
+    if candidate.get("privacy_label") not in LEARNING_UPSTREAM_EXPORT_PRIVACY_LABELS:
+        errors.append("privacy_label must be public-ok or internal for an upstream candidate")
+    if candidate.get("redaction_confirmed") is not True:
+        errors.append("redaction_confirmed must be true")
+    return errors
+
+
+def learning_upstream_candidate_lineage_validation_errors(
+    candidate: dict[str, Any], repo: Path, decisions_by_id: dict[str, dict[str, Any]], proposals_by_id: dict[str, dict[str, Any]]
+) -> list[str]:
+    errors: list[str] = []
+    lineage = candidate["lineage"]
+    decision = decisions_by_id.get(lineage["decision_id"])
+    if decision is None:
+        return ["candidate decision is missing or schema-invalid in the local sidecar"]
+    if decision["repo"] != str(repo) or decision["outcome"] != "approved":
+        return ["candidate decision is not currently approved for the requested repository"]
+    proposal = proposals_by_id.get(lineage["proposal_id"])
+    if proposal is None:
+        return ["candidate proposal is missing or schema-invalid in the local sidecar"]
+    if (
+        decision["proposal_id"] != proposal["proposal_id"]
+        or proposal["repo"] != str(repo)
+        or proposal["status"] != "approved"
+        or proposal["decision_id"] != decision["decision_id"]
+    ):
+        errors.append("candidate decision and proposal are no longer a current approved local link")
+    if candidate["recommendation"] != {
+        "classification": proposal["classification"],
+        "scope": proposal["scope"],
+        "recommended_change": proposal["recommended_change"],
+    }:
+        errors.append("candidate recommendation no longer matches its approved local proposal")
+    if candidate["privacy_label"] != proposal["privacy_label"] or candidate["privacy_label"] != decision["privacy_label"]:
+        errors.append("candidate privacy label no longer matches its approved local lineage")
+    expected_origin = "repo-" + hashlib.sha256(str(repo).encode("utf-8")).hexdigest()[:20]
+    if candidate["origin"].get("repository_id") != expected_origin:
+        errors.append("candidate sanitized origin does not match the requested repository")
+    return errors
+
+
+def read_learning_upstream_candidates(repo: Path, candidates_dir: Path, limit: int = 0) -> tuple[list[dict[str, Any]], list[str]]:
+    if not candidates_dir.exists():
+        return [], []
+    decisions, decision_warnings = read_learning_decisions(Path(learning_paths_for(repo)["decisions"]))
+    proposals, proposal_warnings = read_learning_proposals(Path(learning_paths_for(repo)["proposals"]))
+    decisions_by_id = {decision["decision_id"]: decision for decision in decisions}
+    proposals_by_id = {proposal["proposal_id"]: proposal for proposal in proposals}
+    candidates: list[dict[str, Any]] = []
+    warnings: list[str] = decision_warnings + proposal_warnings
+    for path in sorted(candidates_dir.glob("*.json")):
+        candidate = read_json(path)
+        errors = learning_upstream_candidate_validation_errors(candidate)
+        if not errors:
+            errors = learning_upstream_candidate_lineage_validation_errors(candidate, repo, decisions_by_id, proposals_by_id)
+        if errors:
+            warnings.append(f"Skipped invalid upstream candidate {path.name}: {'; '.join(errors)}")
+            continue
+        candidates.append(candidate)
+    candidates.sort(key=lambda item: (item["created_at"], item["candidate_id"]))
+    if limit > 0:
+        candidates = candidates[-limit:]
+    return candidates, warnings
+
+
+def current_global_source_baseline() -> dict[str, str] | None:
+    source_ref = git_text(ROOT, ["rev-parse", "HEAD"])
+    if not re.fullmatch(r"[0-9a-f]{40,64}", source_ref):
+        return None
+    return {"source_ref": source_ref, "version": kit_version()}
+
+
+def learning_upstream_candidate_from_decision(
+    decision: dict[str, Any], proposal: dict[str, Any], repo: Path, privacy_label: str, source_baseline: dict[str, str]
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "candidate_id": "upc-" + uuid.uuid4().hex[:20],
+        "created_at": now(),
+        "policy_id": "supervised-learning",
+        "lineage": {"decision_id": decision["decision_id"], "proposal_id": proposal["proposal_id"]},
+        "recommendation": {
+            "classification": proposal["classification"],
+            "scope": proposal["scope"],
+            "recommended_change": proposal["recommended_change"],
+        },
+        "origin": {
+            "kind": "sanitized-target",
+            "repository_id": "repo-" + hashlib.sha256(str(repo).encode("utf-8")).hexdigest()[:20],
+        },
+        "source_baseline": source_baseline,
+        "privacy_label": privacy_label,
+        "redaction_confirmed": True,
+    }
+
+
+def learning_upstream_rollout_guidance() -> dict[str, Any]:
+    return {
+        "source_review_required": True,
+        "automatic_propagation": False,
+        "normal_source_workflow": [
+            "Open a normal source task for the candidate.",
+            "Review, implement, commit, test, and release the source change through normal maintainer controls.",
+            "Only after that source release, a human may run kit self update and then a guarded target update or reconcile.",
+        ],
+        "note": "Export records a portable review candidate only. It never updates source, the global tool, or a target repository.",
+    }
+
+
+def learn_upstream_export_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    decision_id = args.decision_id.strip()
+    gate, policy_status, context, decision, proposal = learning_approved_decision_gate(
+        repo, decision_id, "learning-upstream-candidate.schema.json", "upstream export"
+    )
+    state = context["state"]
+    learning_paths = context["paths"]
+    policy = context["policy"]
+    if gate["state"] != "approved" or decision is None or proposal is None:
+        return learning_write_error_payload("learn upstream export", repo, state, learning_paths, policy_status, gate)
+    if args.privacy_label not in LEARNING_UPSTREAM_EXPORT_PRIVACY_LABELS:
+        privacy_gate = {"state": "privacy-not-exportable", "reason": "upstream export permits only public-ok or internal privacy labels"}
+        return learning_write_error_payload("learn upstream export", repo, state, learning_paths, policy_status, privacy_gate)
+    if not args.redaction_confirmed:
+        redaction_gate = {"state": "redaction-confirmation-required", "reason": "pass --redaction-confirmed after verifying the portable candidate is redacted"}
+        return learning_write_error_payload("learn upstream export", repo, state, learning_paths, policy_status, redaction_gate)
+    if proposal["privacy_label"] != args.privacy_label or decision["privacy_label"] != args.privacy_label:
+        privacy_gate = {"state": "privacy-label-mismatch", "reason": "export privacy must match the approved decision and linked proposal"}
+        return learning_write_error_payload("learn upstream export", repo, state, learning_paths, policy_status, privacy_gate)
+    source_baseline = current_global_source_baseline()
+    if source_baseline is None:
+        baseline_gate = {"state": "source-baseline-unavailable", "reason": "a local current source ref is required before exporting an upstream candidate"}
+        return learning_write_error_payload("learn upstream export", repo, state, learning_paths, policy_status, baseline_gate)
+    candidate = learning_upstream_candidate_from_decision(decision, proposal, repo, args.privacy_label, source_baseline)
+    errors = learning_upstream_candidate_validation_errors(candidate)
+    if errors:
+        invalid_gate = {"state": "schema-invalid", "reason": "candidate failed local learning-upstream-candidate schema validation"}
+        return learning_write_error_payload("learn upstream export", repo, state, learning_paths, policy_status, invalid_gate, errors=errors)
+    state, init_paths = ensure_sidecar(repo, "learn upstream export")
+    learning_paths = learning_paths_for(repo, state)
+    candidates_dir = Path(learning_paths["upstream_candidates"])
+    candidates_dir.mkdir(parents=True, exist_ok=True)
+    candidate_path = candidates_dir / f"{candidate['candidate_id']}.json"
+    write_json_file(candidate_path, candidate)
+    paths = init_paths + [learning_paths["root"], learning_paths["upstream_candidates"], str(candidate_path)]
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn upstream export",
+            "action": "export",
+            "repo": str(repo),
+            "policy_state": policy_status["state"],
+            "policy": policy_status,
+            "learning_paths": {"sidecar": learning_paths},
+            "gate": gate,
+            "candidate": candidate,
+            "candidate_path": str(candidate_path),
+            "rollout_guidance": learning_upstream_rollout_guidance(),
+            "target_repo_writes": target_repo_writes(False, reason="upstream candidates are stored only in the repository sidecar"),
+            "sidecar_writes": sidecar_writes(True, paths=paths, reason="explicit redacted upstream candidate export"),
+            "global_writes": {"performed": False, "paths": [], "reason": "upstream export does not write source or global tool state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def learn_upstream_list_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    state = sidecar_state(repo)
+    learning_paths = learning_paths_for(repo, state)
+    candidates, warnings = read_learning_upstream_candidates(repo, Path(learning_paths["upstream_candidates"]), max(args.limit, 0))
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn upstream list",
+            "action": "list",
+            "repo": str(repo),
+            "candidates_path": learning_paths["upstream_candidates"],
+            "candidates": candidates,
+            "count": len(candidates),
+            "warnings": warnings,
+            "rollout_guidance": learning_upstream_rollout_guidance(),
+            "target_repo_writes": target_repo_writes(False, reason="learn upstream list is read-only"),
+            "sidecar_writes": sidecar_writes(False, reason="learn upstream list is read-only"),
+            "global_writes": {"performed": False, "paths": [], "reason": "learn upstream list does not write source or global tool state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def learn_upstream_reconcile_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    state = sidecar_state(repo)
+    learning_paths = learning_paths_for(repo, state)
+    candidates, warnings = read_learning_upstream_candidates(repo, Path(learning_paths["upstream_candidates"]), max(args.limit, 0))
+    current = current_global_source_baseline()
+    reconciled: list[dict[str, Any]] = []
+    for candidate in candidates:
+        baseline_ref = candidate["source_baseline"]["source_ref"]
+        if current is None:
+            status = "current-source-unavailable"
+            revalidation_required = True
+        elif baseline_ref == current["source_ref"]:
+            status = "current"
+            revalidation_required = False
+        elif run_git(ROOT, ["merge-base", "--is-ancestor", baseline_ref, current["source_ref"]]).returncode == 0:
+            status = "source-advanced"
+            revalidation_required = True
+        else:
+            status = "source-ref-mismatch"
+            revalidation_required = True
+        reconciled.append(
+            {
+                "candidate_id": candidate["candidate_id"],
+                "baseline": candidate["source_baseline"],
+                "current_source": current,
+                "status": status,
+                "revalidation_required": revalidation_required,
+            }
+        )
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn upstream reconcile",
+            "action": "reconcile",
+            "repo": str(repo),
+            "candidates": reconciled,
+            "count": len(reconciled),
+            "warnings": warnings,
+            "rollout_guidance": learning_upstream_rollout_guidance(),
+            "target_repo_writes": target_repo_writes(False, reason="upstream reconcile only compares local candidate baselines"),
+            "sidecar_writes": sidecar_writes(False, reason="upstream reconcile is read-only"),
+            "global_writes": {"performed": False, "paths": [], "reason": "upstream reconcile never updates source or global tool state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def learn_evaluate_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    state = sidecar_state(repo)
+    learning_paths = learning_paths_for(repo, state)
+    events, event_warnings = read_learning_events(Path(learning_paths["events"]))
+    candidates, candidate_warnings = read_learning_upstream_candidates(repo, Path(learning_paths["upstream_candidates"]))
+    imported_event_count = sum(1 for event in events if event["provenance"].get("capture") == "thread-summary-import")
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn evaluate",
+            "action": "evaluate",
+            "repo": str(repo),
+            "facts": {
+                "thread_summary_events": imported_event_count,
+                "schema_valid_events": len(events),
+                "upstream_candidates": len(candidates),
+            },
+            "caveat": {
+                "not_effectiveness_claim": True,
+                "note": "This is a local artifact and policy-gate summary, not a claim that supervised learning or any recommendation is effective.",
+            },
+            "warnings": event_warnings + candidate_warnings,
+            "rollout_guidance": learning_upstream_rollout_guidance(),
+            "target_repo_writes": target_repo_writes(False, reason="learn evaluate is read-only"),
+            "sidecar_writes": sidecar_writes(False, reason="learn evaluate is read-only"),
+            "global_writes": {"performed": False, "paths": [], "reason": "learn evaluate does not write source or global tool state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def learning_event_gate(repo: Path, args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    state = sidecar_state(repo)
+    policy_path = repo / LEARNING_POLICY_PATH
+    policy = read_json(policy_path)
+    policy_status = learning_policy_payload(policy_path)
+    learning_paths = learning_paths_for(repo, state)
+    install = read_json(repo / ".doc-contract-kit" / "install.json")
+    approval_state = getattr(args, "approval_state", None) or (
+        "approved" if getattr(args, "approved", False) else "not-requested"
+    )
+    gate: dict[str, Any] = {
+        "state": "approved",
+        "approval_state": approval_state,
+        "policy_path": str(policy_path),
+        "event_schema_path": str(repo / "schemas" / "learning-event.schema.json"),
+        "reason": "installed target-owned supervised-learning policy and explicit human approval accepted",
+    }
+    if not isinstance(policy, dict) or policy.get("_error") or policy_status["state"] == "not-installed":
+        gate.update({"state": "not-enrolled", "reason": "supervised-learning policy is not installed in the target repository"})
+    elif not isinstance(install, dict) or "supervised-learning" not in (install.get("profiles") or []):
+        gate.update({"state": "not-enrolled", "reason": "target repository is not enrolled with the supervised-learning profile"})
+    elif not (repo / "schemas" / "learning-event.schema.json").is_file():
+        gate.update({"state": "schema-missing", "reason": "installed learning-event schema is missing"})
+    elif (
+        policy.get("schema_version") != 1
+        or policy.get("policy_id") != "supervised-learning"
+        or policy.get("enabled") is not True
+        or policy.get("mode") != "supervised"
+        or policy.get("human_approval_required") is not True
+        or not isinstance(policy.get("ownership"), dict)
+        or policy["ownership"].get("policy") != "target"
+        or policy["ownership"].get("events") != "sidecar"
+    ):
+        gate.update({"state": "policy-invalid", "reason": "policy must be enabled, supervised, target-owned, and require human approval"})
+    elif approval_state == "rejected":
+        gate.update({"state": "approval-rejected", "reason": "rejected human approval cannot create a learning event"})
+    elif not getattr(args, "approved", False) or approval_state != "approved":
+        gate.update({"state": "approval-required", "reason": "pass --approved after explicit human approval to record an event"})
+    return gate, policy_status, {"state": state, "paths": learning_paths, "policy": policy}
+
+
+def learning_event_from_args(args: argparse.Namespace, repo: Path, policy: dict[str, Any]) -> dict[str, Any]:
+    occurred_at = now()
+    evidence = [item.strip() for item in (getattr(args, "evidence", None) or []) if item.strip()]
+    privacy_label = getattr(args, "privacy_label", None) or ((policy.get("retention") or {}).get("privacy_label"))
+    event = {
+        "schema_version": 1,
+        "occurred_at": occurred_at,
+        "policy_id": "supervised-learning",
+        "repo": str(repo),
+        "kind": args.kind,
+        "summary": args.summary.strip(),
+        "evidence": evidence,
+        "outcome": args.outcome,
+        "provenance": {"source": args.source, "capture": "explicit-cli-input"},
+        "privacy_label": privacy_label,
+        "supervision": {
+            "human_approval_required": True,
+            "approval_state": "approved",
+            "approval_flag": True,
+        },
+    }
+    event["event_id"] = "evt-" + uuid.uuid4().hex[:20]
+    return event
+
+
+def learning_event_validation_errors(event: Any) -> list[str]:
+    if not isinstance(event, dict):
+        return ["event must be an object"]
+    required = {
+        "schema_version",
+        "event_id",
+        "occurred_at",
+        "policy_id",
+        "repo",
+        "kind",
+        "summary",
+        "evidence",
+        "outcome",
+        "provenance",
+        "privacy_label",
+        "supervision",
+    }
+    errors: list[str] = []
+    if set(event) != required:
+        errors.append("event fields do not match learning-event schema")
+    if event.get("schema_version") != 1:
+        errors.append("schema_version must be 1")
+    if not isinstance(event.get("event_id"), str) or not re.fullmatch(r"evt-[0-9a-f]{20}", event["event_id"]):
+        errors.append("event_id must be a stable evt- identifier")
+    if not isinstance(event.get("occurred_at"), str) or not re.fullmatch(r"[^\\s]+T[^\\s]+Z", event["occurred_at"]):
+        errors.append("occurred_at must be an RFC3339 UTC timestamp")
+    if event.get("policy_id") != "supervised-learning" or not isinstance(event.get("repo"), str) or not event["repo"]:
+        errors.append("policy_id and repo must identify the supervised-learning target")
+    if event.get("kind") not in LEARNING_EVENT_KINDS:
+        errors.append("kind is not allowed by learning-event schema")
+    summary = event.get("summary")
+    if not isinstance(summary, str) or not summary.strip() or len(summary) > LEARNING_EVENT_MAX_SUMMARY_LENGTH:
+        errors.append("summary must be non-empty and at most 500 characters")
+    evidence = event.get("evidence")
+    if not isinstance(evidence, list) or len(evidence) > LEARNING_EVENT_MAX_EVIDENCE_ITEMS or any(
+        not isinstance(item, str) or not item.strip() or len(item) > LEARNING_EVENT_MAX_EVIDENCE_LENGTH for item in evidence
+    ):
+        errors.append("evidence must contain at most 10 explicit entries of 500 characters or fewer")
+    if event.get("outcome") not in LEARNING_EVENT_OUTCOMES:
+        errors.append("outcome is not allowed by learning-event schema")
+    provenance = event.get("provenance")
+    if (
+        not isinstance(provenance, dict)
+        or set(provenance) != {"source", "capture"}
+        or provenance.get("source") not in LEARNING_EVENT_SOURCES
+        or provenance.get("capture") not in {"explicit-cli-input", "thread-summary-import"}
+    ):
+        errors.append("provenance must contain an explicit allowed source and an allowed explicit capture method")
+    if event.get("privacy_label") not in LEARNING_PRIVACY_LABELS:
+        errors.append("privacy_label is not allowed by learning-event schema")
+    supervision = event.get("supervision")
+    if supervision != {"human_approval_required": True, "approval_state": "approved", "approval_flag": True}:
+        errors.append("supervision must record explicit approved human supervision")
+    return errors
+
+
+def learning_event_error_payload(
+    repo: Path,
+    state: dict[str, Any],
+    learning_paths: dict[str, str],
+    policy: dict[str, Any],
+    gate: dict[str, Any],
+    *,
+    errors: list[str] | None = None,
+) -> tuple[dict[str, Any], int]:
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn event record",
+            "action": "error",
+            "repo": str(repo),
+            "policy_state": policy["state"],
+            "policy": policy,
+            "learning_paths": {"sidecar": learning_paths},
+            "gate": gate,
+            "errors": errors or [],
+            "target_repo_writes": target_repo_writes(False, reason="learning event record failed before target writes"),
+            "sidecar_writes": sidecar_writes(False, reason="learning event record failed before sidecar writes"),
+            "global_writes": {"performed": False, "paths": [], "reason": "learning event record does not write global state"},
+            "sidecar_state": state,
+            "exit_code": 2,
+        },
+        2,
+    )
+
+
+def learn_event_record_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    gate, policy_status, context = learning_event_gate(repo, args)
+    state = context["state"]
+    learning_paths = context["paths"]
+    policy = context["policy"]
+    if gate["state"] != "approved":
+        return learning_event_error_payload(repo, state, learning_paths, policy_status, gate)
+    event = learning_event_from_args(args, repo, policy)
+    errors = learning_event_validation_errors(event)
+    if errors:
+        gate = {"state": "schema-invalid", "reason": "event failed local learning-event schema validation"}
+        return learning_event_error_payload(repo, state, learning_paths, policy_status, gate, errors=errors)
+    state, init_paths = ensure_sidecar(repo, "learn event record")
+    learning_paths = learning_paths_for(repo, state)
+    events_dir = Path(learning_paths["events"])
+    events_dir.mkdir(parents=True, exist_ok=True)
+    event_path = events_dir / f"{event['event_id']}.json"
+    write_json_file(event_path, event)
+    paths = init_paths + [learning_paths["root"], learning_paths["events"], str(event_path)]
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn event record",
+            "action": "record",
+            "repo": str(repo),
+            "policy_state": policy_status["state"],
+            "policy": policy_status,
+            "learning_paths": {"sidecar": learning_paths},
+            "gate": gate,
+            "event": event,
+            "event_path": str(event_path),
+            "target_repo_writes": target_repo_writes(False, reason="learning events are stored only in the repository sidecar"),
+            "sidecar_writes": sidecar_writes(True, paths=paths, reason="explicit approved learning event record"),
+            "global_writes": {"performed": False, "paths": [], "reason": "learning event record does not write global state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def read_learning_events(events_dir: Path, limit: int = 0) -> tuple[list[dict[str, Any]], list[str]]:
+    if not events_dir.exists():
+        return [], []
+    events: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for path in sorted(events_dir.glob("*.json")):
+        payload = read_json(path)
+        errors = learning_event_validation_errors(payload)
+        if errors:
+            warnings.append(f"Skipped invalid learning event {path.name}: {'; '.join(errors)}")
+            continue
+        events.append(payload)
+    events.sort(key=lambda event: (event["occurred_at"], event["event_id"]))
+    if limit > 0:
+        events = events[-limit:]
+    return events, warnings
+
+
+def learn_event_list_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    state = sidecar_state(repo)
+    learning_paths = learning_paths_for(repo, state)
+    events_path = Path(learning_paths["events"])
+    events, warnings = read_learning_events(events_path, max(args.limit, 0))
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn event list",
+            "action": "list",
+            "repo": str(repo),
+            "events_path": str(events_path),
+            "events": events,
+            "count": len(events),
+            "warnings": warnings,
+            "target_repo_writes": target_repo_writes(False, reason="learn event list is read-only"),
+            "sidecar_writes": sidecar_writes(False, reason="learn event list is read-only"),
+            "global_writes": {"performed": False, "paths": [], "reason": "learn event list is read-only"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def learning_thread_summary_validation_errors(summary: Any) -> list[str]:
+    if not isinstance(summary, dict):
+        return ["thread summary must be a JSON object"]
+    required = {"schema_version", "summary_id", "reported_at", "redaction", "aggregate"}
+    errors: list[str] = []
+    if set(summary) != required:
+        errors.append("thread summary fields do not match learning-thread-summary schema")
+    if summary.get("schema_version") != 1:
+        errors.append("schema_version must be 1")
+    if not isinstance(summary.get("summary_id"), str) or not re.fullmatch(r"tsum-[0-9a-f]{20}", summary["summary_id"]):
+        errors.append("summary_id must be a stable tsum- identifier")
+    if not learning_is_timestamp(summary.get("reported_at")):
+        errors.append("reported_at must be an RFC3339 UTC timestamp")
+    redaction = summary.get("redaction")
+    required_redaction = {
+        "human_confirmed": True,
+        "raw_transcript_excluded": True,
+        "raw_feedback_excluded": True,
+        "raw_event_content_excluded": True,
+        "private_content_excluded": True,
+    }
+    if redaction != required_redaction:
+        errors.append("redaction must explicitly confirm that raw and private content is excluded")
+    aggregate = summary.get("aggregate")
+    required_aggregate = {"interaction_count", "outcome_counts", "classification_counts", "redacted_summary"}
+    if not isinstance(aggregate, dict) or set(aggregate) != required_aggregate:
+        errors.append("aggregate fields do not match learning-thread-summary schema")
+        return errors
+    interaction_count = aggregate.get("interaction_count")
+    if not isinstance(interaction_count, int) or isinstance(interaction_count, bool) or not 1 <= interaction_count <= LEARNING_THREAD_SUMMARY_MAX_INTERACTIONS:
+        errors.append(f"interaction_count must be an integer from 1 to {LEARNING_THREAD_SUMMARY_MAX_INTERACTIONS}")
+    outcome_counts = aggregate.get("outcome_counts")
+    expected_outcomes = {"confirmed", "inconclusive", "regressed"}
+    if (
+        not isinstance(outcome_counts, dict)
+        or set(outcome_counts) != expected_outcomes
+        or any(not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= LEARNING_THREAD_SUMMARY_MAX_INTERACTIONS for value in outcome_counts.values())
+        or (isinstance(interaction_count, int) and sum(outcome_counts.values()) != interaction_count)
+    ):
+        errors.append("outcome_counts must be bounded confirmed, inconclusive, and regressed totals that equal interaction_count")
+    classification_counts = aggregate.get("classification_counts")
+    if (
+        not isinstance(classification_counts, dict)
+        or not classification_counts
+        or len(classification_counts) > len(LEARNING_PROPOSAL_CLASSIFICATIONS)
+        or any(key not in LEARNING_PROPOSAL_CLASSIFICATIONS for key in classification_counts)
+        or any(not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= LEARNING_THREAD_SUMMARY_MAX_INTERACTIONS for value in classification_counts.values())
+        or (isinstance(interaction_count, int) and sum(classification_counts.values()) != interaction_count)
+    ):
+        errors.append("classification_counts must contain bounded allowed classification totals that equal interaction_count")
+    redacted_summary = aggregate.get("redacted_summary")
+    if (
+        not isinstance(redacted_summary, str)
+        or not redacted_summary.strip()
+        or len(redacted_summary) > LEARNING_THREAD_SUMMARY_MAX_REDACTED_SUMMARY_LENGTH
+    ):
+        errors.append(f"redacted_summary must be non-empty and at most {LEARNING_THREAD_SUMMARY_MAX_REDACTED_SUMMARY_LENGTH} characters")
+    return errors
+
+
+def read_learning_thread_summary_input(input_path: str) -> tuple[dict[str, Any] | None, list[str]]:
+    path = Path(input_path).expanduser()
+    try:
+        if not path.is_file():
+            return None, ["input must name a readable regular JSON file"]
+        if path.stat().st_size > LEARNING_THREAD_SUMMARY_MAX_FILE_BYTES:
+            return None, [f"input exceeds the {LEARNING_THREAD_SUMMARY_MAX_FILE_BYTES}-byte thread-summary limit"]
+        raw = path.read_bytes()
+    except OSError as exc:
+        return None, [f"input could not be read: {exc}"]
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, [f"input must be valid UTF-8 JSON: {exc}"]
+    errors = learning_thread_summary_validation_errors(payload)
+    return payload if not errors else None, errors
+
+
+def learning_event_from_thread_summary(summary: dict[str, Any], repo: Path, policy: dict[str, Any]) -> dict[str, Any]:
+    aggregate = summary["aggregate"]
+    outcomes = aggregate["outcome_counts"]
+    classifications = aggregate["classification_counts"]
+    outcome = "confirmed" if outcomes["confirmed"] else "regressed" if outcomes["regressed"] else "inconclusive" if outcomes["inconclusive"] else "unknown"
+    classification_summary = ", ".join(f"{name}:{classifications[name]}" for name in sorted(classifications))
+    event = {
+        "schema_version": 1,
+        "event_id": "evt-" + uuid.uuid4().hex[:20],
+        "occurred_at": now(),
+        "policy_id": "supervised-learning",
+        "repo": str(repo),
+        "kind": "observation",
+        "summary": (
+            f"Redacted aggregate thread summary: {aggregate['interaction_count']} interactions; "
+            f"confirmed={outcomes['confirmed']}, inconclusive={outcomes['inconclusive']}, regressed={outcomes['regressed']}; "
+            f"classifications={classification_summary}."
+        ),
+        "evidence": [],
+        "outcome": outcome,
+        "provenance": {"source": "human", "capture": "thread-summary-import"},
+        "privacy_label": (policy.get("retention") or {}).get("privacy_label"),
+        "supervision": {
+            "human_approval_required": True,
+            "approval_state": "approved",
+            "approval_flag": True,
+        },
+    }
+    return event
+
+
+def learn_thread_summary_import_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    gate, policy_status, context = learning_event_gate(repo, args)
+    state = context["state"]
+    learning_paths = context["paths"]
+    policy = context["policy"]
+    if gate["state"] == "approval-required":
+        gate = {"state": "human-approval-required", "reason": "pass --approved after explicit human approval to import a thread summary"}
+    if gate["state"] != "approved":
+        return learning_write_error_payload("learn thread-summary import", repo, state, learning_paths, policy_status, gate)
+    schema_path = repo / "schemas" / "learning-thread-summary.schema.json"
+    if not schema_path.is_file():
+        missing_gate = {"state": "schema-missing", "reason": "installed learning-thread-summary schema is missing"}
+        return learning_write_error_payload("learn thread-summary import", repo, state, learning_paths, policy_status, missing_gate)
+    summary, errors = read_learning_thread_summary_input(args.input)
+    if errors or summary is None:
+        invalid_gate = {"state": "schema-invalid", "reason": "input must be a strict explicitly redacted aggregate thread summary"}
+        return learning_write_error_payload("learn thread-summary import", repo, state, learning_paths, policy_status, invalid_gate, errors=errors)
+    event = learning_event_from_thread_summary(summary, repo, policy)
+    event_errors = learning_event_validation_errors(event)
+    if event_errors:
+        invalid_gate = {"state": "schema-invalid", "reason": "imported event failed local learning-event schema validation"}
+        return learning_write_error_payload("learn thread-summary import", repo, state, learning_paths, policy_status, invalid_gate, errors=event_errors)
+    state, init_paths = ensure_sidecar(repo, "learn thread-summary import")
+    learning_paths = learning_paths_for(repo, state)
+    events_dir = Path(learning_paths["events"])
+    events_dir.mkdir(parents=True, exist_ok=True)
+    event_path = events_dir / f"{event['event_id']}.json"
+    write_json_file(event_path, event)
+    paths = init_paths + [learning_paths["root"], learning_paths["events"], str(event_path)]
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn thread-summary import",
+            "action": "import",
+            "repo": str(repo),
+            "policy_state": policy_status["state"],
+            "policy": policy_status,
+            "learning_paths": {"sidecar": learning_paths},
+            "gate": gate,
+            "event": event,
+            "event_path": str(event_path),
+            "input_contract": {
+                "schema": "learning-thread-summary.schema.json",
+                "raw_transcript_scan": False,
+                "history_mining": False,
+                "network_calls": False,
+                "note": "The import accepts only one bounded, explicitly redacted aggregate file and stores only its derived event summary.",
+            },
+            "target_repo_writes": target_repo_writes(False, reason="thread-summary import stores one derived event only in the repository sidecar"),
+            "sidecar_writes": sidecar_writes(True, paths=paths, reason="explicit approved thread-summary import"),
+            "global_writes": {"performed": False, "paths": [], "reason": "thread-summary import does not write global state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
+def learn_thread_summary_list_payload(args: argparse.Namespace, repo: Path) -> tuple[dict[str, Any], int]:
+    state = sidecar_state(repo)
+    learning_paths = learning_paths_for(repo, state)
+    events, warnings = read_learning_events(Path(learning_paths["events"]), max(args.limit, 0))
+    imported_events = [event for event in events if event["provenance"].get("capture") == "thread-summary-import"]
+    return (
+        {
+            "schema_version": 1,
+            "command": "learn thread-summary list",
+            "action": "list",
+            "repo": str(repo),
+            "events_path": learning_paths["events"],
+            "events": imported_events,
+            "count": len(imported_events),
+            "warnings": warnings,
+            "target_repo_writes": target_repo_writes(False, reason="learn thread-summary list is read-only"),
+            "sidecar_writes": sidecar_writes(False, reason="learn thread-summary list is read-only"),
+            "global_writes": {"performed": False, "paths": [], "reason": "learn thread-summary list does not write global state"},
+            "sidecar_state": state,
+            "exit_code": 0,
+        },
+        0,
+    )
+
+
 def config_for(repo: Path, config: str) -> dict[str, Any]:
     config_path = Path(config).expanduser()
     if not config_path.is_absolute():
@@ -3752,13 +6484,14 @@ def compact_task_status(repo: Path, limits: dict[str, int], omissions: list[dict
         for task in tasks
     ]
     hazards = payload.get("hazards", []) if isinstance(payload.get("hazards"), list) else []
+    parallel_context = payload.get("parallel_context") if isinstance(payload.get("parallel_context"), dict) else build_parallel_context(payload)
     warnings = []
     if result.returncode:
         warnings.append(result.stderr.strip() or result.stdout.strip() or "agent-task-status returned non-zero")
-    if hazards:
-        warnings.append("Task status reported coordination hazards.")
-    if payload.get("stale_tasks"):
-        warnings.append("Task status reported stale task metadata.")
+    if parallel_context.get("blockers"):
+        warnings.append("Task status reported write-task coordination blockers.")
+    if parallel_context.get("warnings"):
+        warnings.append("Task status reported write-task coordination warnings.")
     status = "warning" if warnings else "ok"
     return bundle_section(
         status,
@@ -3771,6 +6504,9 @@ def compact_task_status(repo: Path, limits: dict[str, int], omissions: list[dict
             "stale_task_count": len(payload.get("stale_tasks", []) or []),
             "unknown_scope_task_count": len(payload.get("unknown_scope_tasks", []) or []),
             "untracked_agent_worktree_count": len(payload.get("untracked_agent_worktrees", []) or []),
+            "parallel_context": parallel_context,
+            "can_start_write_task": bool(parallel_context.get("can_start_write_task")),
+            "recommended_next_command": parallel_context.get("recommended_next_command"),
             "tasks": bounded_list(compact_tasks, limits["tasks"], omissions, "task_status", "tasks", "task list was truncated"),
         },
         warnings,
@@ -4093,6 +6829,7 @@ def agent_state_ledger_payload(args: argparse.Namespace, repo: Path) -> dict[str
         receipt_paths.append((finalizer_dir, "target-final-receipts", "receipt.json"))
     receipts = scan_json_receipts(receipt_paths)
     tasks, task_blockers, task_warnings = ledger_task_summaries(primary, task_status)
+    parallel_context = task_status.get("parallel_context") if isinstance(task_status.get("parallel_context"), dict) else build_parallel_context(task_status)
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     blockers.extend(task_blockers)
@@ -4159,8 +6896,12 @@ def agent_state_ledger_payload(args: argparse.Namespace, repo: Path) -> dict[str
             "unknown_scope_tasks": task_status.get("unknown_scope_tasks", []),
             "dirty_worktree_tasks": task_status.get("dirty_worktree_tasks", []),
             "untracked_agent_worktrees": task_status.get("untracked_agent_worktrees", []),
+            "parallel_context": parallel_context,
+            "can_start_write_task": bool(parallel_context.get("can_start_write_task")),
+            "recommended_next_command": parallel_context.get("recommended_next_command"),
             "tasks": tasks,
         },
+        "parallel_context": parallel_context,
         "closeout_state": {
             "source_command": "make agent-task-closeout TASK_CLOSEOUT_JSON=1",
             "exit_code": closeout_code,
@@ -4193,6 +6934,8 @@ def render_agent_state_ledger(payload: dict[str, Any]) -> None:
     print(f" - dirty checkout: {str(dirty.get('dirty')).lower()} ({dirty.get('count', 0)} changed)")
     print(f" - sidecar available: {str((payload.get('sidecar') or {}).get('available')).lower()}")
     print(f" - tasks: {task_summary.get('active_task_count', 0)} active / {task_summary.get('task_count', 0)} total")
+    parallel_context = payload.get("parallel_context") or (payload.get("task_status") or {}).get("parallel_context") or {}
+    print(f" - can start write task: {str(parallel_context.get('can_start_write_task')).lower()}")
     print(f" - closeout candidates: {(payload.get('closeout_state') or {}).get('closeout_candidate_count', 0)}")
     if unresolved.get("blockers"):
         print(" - blockers:")
@@ -4353,6 +7096,7 @@ def closeout_plan_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any
     ledger = agent_state_ledger_payload(args, primary)
     dirty = ledger.get("dirty") or {}
     task_status = ledger.get("task_status") or {}
+    parallel_context = ledger.get("parallel_context") or task_status.get("parallel_context") or {}
     task_summary = task_status.get("summary") or {}
     tasks = task_status.get("tasks") or []
     closeout = ledger.get("closeout_state") or {}
@@ -4444,6 +7188,14 @@ def closeout_plan_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any
                 "code": "blocked_task_state",
                 "message": "Task metadata has missing, stale, or overlapping worktree state.",
                 "count": len(blocked_task_states),
+            }
+        )
+    if parallel_context.get("blockers"):
+        task_ledger_blockers.append(
+            {
+                "code": "parallel_context_blockers",
+                "message": "Parallel coordination reported blockers for starting or closing write-task work.",
+                "count": len(parallel_context.get("blockers") or []),
             }
         )
     if closeout.get("closeout_candidate_count", 0):
@@ -4554,11 +7306,16 @@ def closeout_plan_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any
         )
 
     can_claim_done = not claim_blockers
+    default_branch = closeout_default_branch(primary)
+    autoclose_eligibility = closeout_autoclose_eligibility(primary, completion_state, can_claim_done, claim_blockers)
+    merge_readiness = closeout_merge_readiness(primary, default_branch, can_claim_done, claim_blockers)
+    docs_required = closeout_docs_required(dirty, completion_state)
+    unfinished_reason = closeout_unfinished_reason(completion_state, claim_blockers)
     nonblocking_warning_codes = sorted(
         code for code in warning_codes if code in {"missing_sidecar", "receipt_warning", "task_status_warning", "closeout_warning"}
     )
     exit_code = 1 if args.strict and not can_claim_done else 0
-    return {
+    payload = {
         "schema_version": 1,
         "command": "closeout-plan",
         "repo": str(primary),
@@ -4574,6 +7331,11 @@ def closeout_plan_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any
         "completion_state": completion_state,
         "result": "ok" if can_claim_done else "blocked",
         "strict": bool(args.strict),
+        "autoclose_eligibility": autoclose_eligibility,
+        "default_branch": default_branch,
+        "merge_readiness": merge_readiness,
+        "docs_required": docs_required,
+        "unfinished_reason": unfinished_reason,
         "next_action": next_action,
         "claim_blockers": claim_blockers,
         "task_ledger_blockers": task_ledger_blockers,
@@ -4584,6 +7346,9 @@ def closeout_plan_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any
         "dirty": dirty,
         "dirty_file_groups": closeout_dirty_file_groups(dirty.get("entries") or []),
         "task_summary": task_summary,
+        "parallel_context": parallel_context,
+        "can_start_write_task": bool(parallel_context.get("can_start_write_task")),
+        "recommended_write_task_command": parallel_context.get("recommended_next_command"),
         "active_tasks": active_tasks,
         "terminal_missing_receipts": terminal_missing_receipts,
         "dirty_worktree_tasks": dirty_worktree_tasks,
@@ -4610,6 +7375,9 @@ def closeout_plan_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any
         },
         "exit_code": exit_code,
     }
+    payload["blocker_explanations"] = closeout_explanations.explain_blockers(claim_blockers)
+    payload["human_summary"] = closeout_explanations.closeout_plan_human_summary(payload)
+    return payload
 
 
 def render_closeout_plan(payload: dict[str, Any]) -> None:
@@ -4617,6 +7385,15 @@ def render_closeout_plan(payload: dict[str, Any]) -> None:
     print(f" - can claim done: {str(payload['can_claim_done']).lower()}")
     print(f" - completion state: {payload['completion_state']}")
     print(f" - writes: target=false sidecar=false")
+    default_branch = payload.get("default_branch") or {}
+    autoclose = payload.get("autoclose_eligibility") or {}
+    merge = payload.get("merge_readiness") or {}
+    if default_branch:
+        print(f" - default branch: {default_branch.get('name') or 'unknown'} ({default_branch.get('source')})")
+    if autoclose:
+        print(f" - autoclose eligible: {str(autoclose.get('eligible')).lower()} ({autoclose.get('reason')})")
+    if merge:
+        print(f" - merge readiness: {merge.get('status')}")
     dirty = payload.get("dirty") or {}
     git_state = payload.get("git_worktree_state") or {}
     managed_state = payload.get("kit_managed_state") or {}
@@ -4641,11 +7418,23 @@ def render_closeout_plan(payload: dict[str, Any]) -> None:
             f"({worktree_prune_summary.get('dirty', 0)} dirty)"
         )
     print(f" - tasks: {task_summary.get('active_task_count', 0)} active / {task_summary.get('task_count', 0)} total")
+    parallel_context = payload.get("parallel_context") or {}
+    if parallel_context:
+        print(f" - can start write task: {str(parallel_context.get('can_start_write_task')).lower()}")
+        print(f" - write-task next command: {parallel_context.get('recommended_next_command')}")
     print(f" - closeout: {closeout.get('candidate_count', 0)} candidate / {closeout.get('blocked_count', 0)} blocked")
     if payload.get("claim_blockers"):
         print(" - claim blockers:")
         for item in payload["claim_blockers"]:
             print(f"   - {item.get('code')}: {item.get('message')} ({item.get('count', 0)})")
+    summary = payload.get("human_summary") or {}
+    if summary:
+        print(" - explanation:")
+        print(f"   - {summary.get('title')}: {summary.get('plain_reason')}")
+        if summary.get("why_it_blocks"):
+            print(f"   - why: {summary.get('why_it_blocks')}")
+        if summary.get("recommended_action"):
+            print(f"   - how to address: {summary.get('recommended_action')}")
     if payload.get("task_ledger_blockers"):
         print(" - task ledger blockers:")
         for item in payload["task_ledger_blockers"]:
@@ -4763,6 +7552,7 @@ def agent_context_bundle_payload(args: argparse.Namespace, repo: Path) -> dict[s
         "token_files": args.max_token_files,
         "warnings": args.max_warnings,
         "commands": args.max_commands,
+        "approved_learning_contexts": LEARNING_CONTEXT_BUNDLE_MAX_CONTEXTS,
     }
     omissions: list[dict[str, Any]] = []
     files = changed_files(repo, args.mode)
@@ -4799,6 +7589,15 @@ def agent_context_bundle_payload(args: argparse.Namespace, repo: Path) -> dict[s
 
     token_section = compact_token_budget(repo, limits, omissions)
     task_section = compact_task_status(repo, limits, omissions)
+    learning_contexts, learning_context_warnings = read_learning_contexts(repo)
+    bounded_learning_contexts = bounded_list(
+        learning_contexts,
+        limits["approved_learning_contexts"],
+        omissions,
+        "approved_learning",
+        "contexts",
+        "approved-learning contexts were truncated",
+    )
 
     changed_entries = [
         {"path": path, "doc_impact": None, "goal_state": None}
@@ -4935,6 +7734,17 @@ def agent_context_bundle_payload(args: argparse.Namespace, repo: Path) -> dict[s
             goal_exit_code,
         ),
         "token_budget": token_section,
+        "approved_learning": bundle_section(
+            "ok",
+            "kit learn context list --json",
+            {
+                "count": len(bounded_learning_contexts),
+                "contexts": bounded_learning_contexts,
+                "sidecar_only_guidance": True,
+                "note": "Approved-learning contexts are sidecar-only guidance, not target instructions, and do not authorize recommendation execution.",
+            },
+            learning_context_warnings,
+        ),
         "sidecar": bundle_section(
             "ok" if sidecar_state(repo).get("available") else "warning",
             "repo_contract_kit.py status --json",
@@ -5968,6 +8778,8 @@ def calibration_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     receipts_count = json_file_count(Path(paths["receipts_dir"])) if paths else 0
     task_packets_count = json_file_count(Path(paths["task_packets_dir"])) if paths else 0
     runs_count = json_file_count(Path(paths["runs_dir"])) if paths else 0
+    learning_events_path = Path(learning_paths_for(repo, state)["events"])
+    learning_events, learning_event_warnings = read_learning_events(learning_events_path)
     return {
         "schema_version": 1,
         "command": "calibration",
@@ -5986,10 +8798,18 @@ def calibration_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
             "receipts_count": receipts_count,
             "task_metadata_count": task_packets_count,
             "orientation_run_count": runs_count,
+            "learning_events": {
+                "count": len(learning_events),
+                "derived": True,
+                "source": str(learning_events_path),
+                "invalid_record_count": len(learning_event_warnings),
+                "caveat": "Count is derived only from locally stored schema-valid approved event records; it does not infer conversations, feedback, outcomes, or external learning impact.",
+            },
         },
         "notes": [
             "This report aggregates local sidecar evidence only.",
             "Unknown fields remain explicit instead of inferred.",
+            "Learning-event counts are derived and caveated; this read-only report does not create sidecar state when no events exist.",
         ],
         "exit_code": 0,
     }
@@ -6006,6 +8826,47 @@ def retention_policy_payload() -> dict[str, Any]:
             "unless a human explicitly approves the specific content."
         ),
         "archive_guidance": "Archive release, migration, rollback, and accepted-finding evidence before purging local state.",
+    }
+
+
+def learning_retention_preview(repo: Path) -> dict[str, Any]:
+    paths = learning_paths_for(repo)
+    events, event_warnings = read_learning_events(Path(paths["events"]))
+    proposals, proposal_warnings = read_learning_proposals(Path(paths["proposals"]))
+    decisions, decision_warnings = read_learning_decisions(Path(paths["decisions"]))
+    contexts, context_warnings = read_learning_contexts(repo, Path(paths["context"]))
+    candidates, candidate_warnings = read_learning_upstream_candidates(repo, Path(paths["upstream_candidates"]))
+    current = datetime.now(timezone.utc)
+    expired: list[dict[str, str]] = []
+    expiring: list[dict[str, str]] = []
+    for context in contexts:
+        expires_at = datetime.fromisoformat(context["retention"]["expires_at"].replace("Z", "+00:00"))
+        entry = {
+            "context_id": context["context_id"],
+            "expires_at": context["retention"]["expires_at"],
+            "privacy_label": context["privacy_label"],
+        }
+        if expires_at <= current:
+            expired.append(entry)
+        elif expires_at <= current + timedelta(days=30):
+            expiring.append(entry)
+    return {
+        "counts": {
+            "events": len(events),
+            "proposals": len(proposals),
+            "decisions": len(decisions),
+            "contexts": len(contexts),
+            "upstream_candidates": len(candidates),
+        },
+        "expiry_preview": {
+            "deletes_by_default": False,
+            "expired_context_count": len(expired),
+            "expiring_within_30_days_count": len(expiring),
+            "expired_contexts": expired[:LEARNING_CONTEXT_MAX_LIST],
+            "expiring_contexts": expiring[:LEARNING_CONTEXT_MAX_LIST],
+        },
+        "warnings": event_warnings + proposal_warnings + decision_warnings + context_warnings + candidate_warnings,
+        "note": "Learning retention is preview-only in this phase; Kit provides no learning deletion command.",
     }
 
 
@@ -6045,6 +8906,7 @@ def retention_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         "sidecar_writes": sidecar_writes(False, reason="retention is preview-only"),
         "sidecar_state": state,
         "retention_policy": retention_policy_payload(),
+        "learning_artifacts": learning_retention_preview(repo),
         "purge_preview": {
             "deletes_by_default": False,
             "retention_days": default_days,
@@ -6179,6 +9041,48 @@ DEFAULT_TASK_PACKET_DOCS_VALIDATION_COMMANDS = [
     "make docs-as-tests when docs-as-tests claims apply",
 ]
 
+TEST_BOUNDARY_CHOICES = [
+    "unit",
+    "integration",
+    "contract",
+    "cli-e2e",
+    "api-e2e",
+    "ui-e2e",
+    "runtime-e2e",
+    "manual",
+    "unknown",
+    "not-applicable",
+]
+
+E2E_TEST_BOUNDARIES = {"cli-e2e", "api-e2e", "ui-e2e", "runtime-e2e"}
+
+
+def infer_validation_kind(command: str) -> str:
+    text = command.lower()
+    if "docs-freshness" in text or "docs-check" in text or "doc_impact" in text or "doc-impact" in text:
+        return "docs"
+    if "version-check" in text or "version.py check" in text:
+        return "version"
+    if "playwright" in text or "cypress" in text or "selenium" in text or "browser" in text or "ui-e2e" in text:
+        return "ui-e2e"
+    if "api-e2e" in text or "postman" in text or "newman" in text:
+        return "api-e2e"
+    if "cli-e2e" in text or "cli_ux" in text or "command-map" in text or "kit " in text:
+        return "cli-e2e"
+    if "runtime-e2e" in text or "launchd" in text or "systemctl" in text or "smoke" in text:
+        return "runtime-smoke"
+    if "contract" in text or "schema" in text:
+        return "contract"
+    if "integration" in text:
+        return "integration"
+    if "unittest" in text or "pytest" in text or "swift test" in text or "make test" in text:
+        return "unit"
+    if "manual" in text:
+        return "manual"
+    if "verify" in text or "check" in text:
+        return "verification"
+    return "unspecified"
+
 
 def task_packet_story_payload(args: argparse.Namespace, acceptance_items: list[str]) -> dict[str, Any]:
     source = getattr(args, "source_reference", None) or getattr(args, "task_id", "")
@@ -6217,9 +9121,74 @@ def task_packet_docs_impact_payload(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def task_packet_test_strategy_payload(args: argparse.Namespace, validation_commands: list[str]) -> dict[str, Any]:
+    selected_boundary = getattr(args, "test_boundary", None) or "unknown"
+    e2e_required = bool(getattr(args, "e2e_required", False)) or selected_boundary in E2E_TEST_BOUNDARIES
+    if selected_boundary == "not-applicable":
+        decision_state = "not-applicable"
+    elif selected_boundary == "unknown":
+        decision_state = "needs-selection"
+    else:
+        decision_state = "selected"
+    return {
+        "decision_state": decision_state,
+        "selected_boundary": selected_boundary,
+        "e2e_required": e2e_required,
+        "rationale": getattr(args, "test_rationale", None) or "",
+        "e2e_scope": getattr(args, "e2e_scope", None) or [],
+        "automation_policy": (
+            "Select the outermost reliable automated boundary for changed behavior. "
+            "Use CLI/API/UI/runtime e2e for user-visible, multi-component, stateful, deployment, "
+            "or external-tool behavior that smaller tests cannot prove."
+        ),
+        "validation_kinds": [
+            {"command": command, "kind": infer_validation_kind(command)}
+            for command in validation_commands
+        ],
+    }
+
+
+def learning_task_packet_lineage(repo: Path, requested_ids: list[str]) -> tuple[list[str], dict[str, Any] | None]:
+    if any(not isinstance(item, str) or not item.strip() for item in requested_ids):
+        return [], {"state": "decision-invalid", "reason": "learning decision IDs must be non-empty stable dec- identifiers"}
+    decision_ids = [item.strip() for item in requested_ids]
+    if len(set(decision_ids)) != len(decision_ids):
+        return [], {"state": "decision-duplicate", "reason": "learning decision IDs must be unique"}
+    for decision_id in decision_ids:
+        if not re.fullmatch(r"dec-[0-9a-f]{20}", decision_id):
+            return [], {"state": "decision-invalid", "reason": "learning decision IDs must be stable dec- identifiers"}
+    decisions, _warnings = read_learning_decisions(Path(learning_paths_for(repo)["decisions"]))
+    decisions_by_id = {decision["decision_id"]: decision for decision in decisions}
+    for decision_id in decision_ids:
+        decision = decisions_by_id.get(decision_id)
+        if decision is None:
+            return [], {"state": "decision-missing", "reason": "each requested learning decision must exist as a schema-valid local record"}
+        if decision["repo"] != str(repo) or decision["outcome"] != "approved":
+            return [], {"state": "decision-not-approved", "reason": "each requested learning decision must be approved for this repository"}
+    return decision_ids, None
+
+
+def task_packet_learning_error_payload(repo: Path, gate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "command": "task-packet",
+        "repo": str(repo),
+        "gate": gate,
+        "learning_decision_lineage": [],
+        "target_repo_writes": target_repo_writes(False, reason="task packet rejected invalid learning decision lineage before target writes"),
+        "sidecar_writes": sidecar_writes(False, reason="task packet rejected invalid learning decision lineage before sidecar writes"),
+        "sidecar_state": sidecar_state(repo),
+        "non_execution_guarantee": learning_non_execution_guarantee(),
+        "exit_code": 2,
+    }
+
+
 def task_packet_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     requested_harness_mode = getattr(args, "harness_mode", "standard")
     mode_selection = harness_mode_selection(repo, requested_harness_mode)
+    learning_decision_lineage, lineage_gate = learning_task_packet_lineage(repo, getattr(args, "learning_decision", None) or [])
+    if lineage_gate is not None:
+        return task_packet_learning_error_payload(repo, lineage_gate)
     if mode_selection["selected_mode"] == "lite" and requested_harness_mode in {"auto", "lite"}:
         return lite_task_note_payload(args, repo, mode_selection)
 
@@ -6228,6 +9197,7 @@ def task_packet_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     task_slug = safe_artifact_name(args.task_id)
     non_goals = args.non_goal or list(DEFAULT_TASK_PACKET_NON_GOALS)
     acceptance_items = args.acceptance or ["Implementation scope is explicit and verifiable."]
+    validation_commands = args.validation or ["make test", "make docs-check", "make version-check"]
     payload = {
         "schema_version": 1,
         "command": "task-packet",
@@ -6270,8 +9240,8 @@ def task_packet_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         ],
         "validation": {
             "commands": [
-                {"command": command, "required": True}
-                for command in (args.validation or ["make test", "make docs-check", "make version-check"])
+                {"command": command, "required": True, "kind": infer_validation_kind(command)}
+                for command in validation_commands
             ],
             "evidence_to_capture": [
                 "git diff --check",
@@ -6279,6 +9249,7 @@ def task_packet_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
                 "docs-impact result",
             ],
         },
+        "test_strategy": task_packet_test_strategy_payload(args, validation_commands),
         "closeout_requirements": {
             "final_receipt_path": f".agent-workflows/tasks/{task_slug}/receipt.json or sidecar equivalent",
             "readiness_check": {
@@ -6323,6 +9294,7 @@ def task_packet_payload(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
             "approver": args.approver,
             "notes": args.approval_note or "",
         },
+        "learning_decision_lineage": learning_decision_lineage,
         "handoff": {
             "recommended_prompt": "workflows/prompts/task-packet.md",
             "owner": args.owner,
@@ -6392,6 +9364,10 @@ def backlog_task_packet_payload(args: argparse.Namespace, repo: Path) -> dict[st
         non_goal=args.non_goal or [],
         acceptance=args.acceptance or [f"Backlog item {item['id']} is implemented and its status can be marked done."],
         validation=args.validation or ["make agent-verify"],
+        test_boundary=args.test_boundary,
+        test_rationale=args.test_rationale,
+        e2e_required=args.e2e_required,
+        e2e_scope=args.e2e_scope,
         docs_impact=args.docs_impact,
         docs_path=args.docs_path or [],
         docs_surface=args.docs_surface,
@@ -6629,6 +9605,16 @@ def start_local_update_payload(repo: Path, status: dict[str, Any], args: argpars
         }
         for item in unsafe_actions
     ]
+    dirty_target_files = [
+        str(path)
+        for warning in plan.get("warnings") or []
+        if isinstance(warning, dict) and warning.get("code") == "dirty_target_repo"
+        for path in (warning.get("paths") or [])
+    ]
+    if dirty_target_files and write_actions:
+        local_update["blocked_by"] = sorted(set([*local_update["blocked_by"], "dirty-target-repo"]))
+        local_update["dirty_target_files"] = sorted(set(dirty_target_files))
+        local_update["dirty_target_file_count"] = len(set(dirty_target_files))
 
     if not write_actions:
         local_update.update(
@@ -6643,6 +9629,14 @@ def start_local_update_payload(repo: Path, status: dict[str, Any], args: argpars
             {
                 "reason": "local update is available but not safe for automatic start",
                 "next_commands": [command_for_repo(repo, "update", "--dry-run"), command_for_repo(repo, "doctor")],
+            }
+        )
+        return local_update
+    if dirty_target_files and write_actions:
+        local_update.update(
+            {
+                "reason": "local update is available but target repo is dirty",
+                "next_commands": [command_for_repo(repo, "status"), command_for_repo(repo, "update", "--dry-run")],
             }
         )
         return local_update
@@ -7938,6 +10932,7 @@ JSON_CONTRACT_COMMAND_MAP_FIELDS = [
     "canonical_command",
     "output_schema",
     "docs",
+    "behavior_notes",
 ]
 JSON_CONTRACT_STABLE_PAYLOAD_FIELDS = [
     "schema_version",
@@ -8047,6 +11042,7 @@ def command_map_payload(invoked_command: str = "command-map") -> dict[str, Any]:
             "canonical_command": annotation.get("canonical_command") or annotation.get("alias_of") or name,
             "alias_group": annotation.get("alias_group"),
             "route_note": annotation.get("route_note"),
+            "behavior_notes": annotation.get("behavior_notes", []),
             "examples": annotation.get("examples", default_examples(path, json_supported)),
             "exit_codes": annotation.get("exit_codes", default_exit_codes),
             "output_schema": output_schema,
@@ -8257,6 +11253,7 @@ def cli_reference_payload() -> dict[str, Any]:
                 "examples": command.get("examples") or [],
                 "flags": command.get("flags") or [],
                 "docs": command.get("docs") or [],
+                "behavior_notes": command.get("behavior_notes") or [],
             }
         )
         claims.append(
@@ -8325,6 +11322,12 @@ def render_cli_reference_markdown(payload: dict[str, Any]) -> str:
             lines.append("")
             for example in command["examples"]:
                 lines.append(f"- `{example}`")
+            lines.append("")
+        if command["behavior_notes"]:
+            lines.append("Behavior notes:")
+            lines.append("")
+            for note in command["behavior_notes"]:
+                lines.append(f"- {note}")
             lines.append("")
         if command["flags"]:
             lines.append("Flags:")
@@ -8924,6 +11927,7 @@ def render_options(include_advanced: bool = False) -> None:
     print(f"  {PUBLIC_COMMAND} update --all --dry-run  Preview updates for registered target repos")
     print(f"  {PUBLIC_COMMAND} doctor                  Diagnose dirty state and task blockers")
     print(f"  {PUBLIC_COMMAND} closeout-plan           Decide whether work is actually closed out")
+    print(f"  {PUBLIC_COMMAND} closeout-fix --json     Preview supervised dirty-repo closeout")
     print(f"  {PUBLIC_COMMAND} palette                 Search commands in a TTY")
     print(f"  {PUBLIC_COMMAND} completion zsh          Print shell completion code")
     print("")
@@ -9470,6 +12474,606 @@ def target_update_all_payload(args: argparse.Namespace) -> tuple[dict[str, Any],
     return payload, exit_code
 
 
+def closeout_plan_for_repo(repo: Path, *, strict: bool = False) -> dict[str, Any]:
+    return closeout_plan_payload(argparse.Namespace(repo=str(repo), strict=strict), repo)
+
+
+def closeout_fix_result_summary(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not payload:
+        return None
+    return {
+        "command": payload.get("command"),
+        "mode": payload.get("mode"),
+        "result": payload.get("result"),
+        "job_id": payload.get("job_id"),
+        "job_dir": payload.get("job_dir"),
+        "result_path": payload.get("result_path"),
+        "commits": payload.get("commits") or [],
+        "branches_pushed": payload.get("branches_pushed") or [],
+        "worktrees_pruned": payload.get("worktrees_pruned") or [],
+        "receipts": payload.get("receipts") or [],
+        "blockers": payload.get("blockers") or [],
+        "final_closeout": payload.get("final_closeout"),
+        "target_repo_writes": payload.get("target_repo_writes") or target_repo_writes(False),
+        "sidecar_writes": payload.get("sidecar_writes") or sidecar_writes(False),
+        "exit_code": payload.get("exit_code"),
+    }
+
+
+def finish_payload(
+    args: argparse.Namespace,
+    repo: Path,
+    *,
+    event_sink: closeout_fix.EventSink | None = None,
+) -> tuple[dict[str, Any], int]:
+    apply = bool(getattr(args, "apply", False))
+    plan = closeout_plan_for_repo(repo, strict=True)
+    initial_plan = plan
+    eligibility = plan.get("autoclose_eligibility") or {}
+    next_action = plan.get("next_action") or {}
+    closeout_payload: dict[str, Any] | None = None
+    closeout_exit = None
+
+    if not apply:
+        if plan.get("can_claim_done"):
+            result = "finished"
+            exit_code = 0
+        elif eligibility.get("eligible"):
+            result = "needs-apply"
+            exit_code = 1
+            next_action = {
+                "command": eligibility.get("apply_command"),
+                "reason": "Run the gated closeout supervisor to preserve and integrate finishable dirty work.",
+                "mutating": True,
+            }
+        else:
+            result = "blocked"
+            exit_code = 1
+    elif not eligibility.get("eligible"):
+        result = "finished" if plan.get("can_claim_done") else "blocked"
+        exit_code = 0 if plan.get("can_claim_done") else 2
+    else:
+        preview_payload, preview_exit = closeout_fix.preview_payload(args, repo, CLI_ENTRYPOINT)
+        if preview_exit != 0:
+            closeout_payload = preview_payload
+            result = "blocked"
+            closeout_exit = preview_exit
+            exit_code = preview_exit
+        else:
+            closeout_payload, closeout_exit = closeout_fix.apply_payload(args, repo, CLI_ENTRYPOINT, event_sink=event_sink)
+            final_closeout = closeout_payload.get("final_closeout") if closeout_payload else None
+            if closeout_exit == 0 and isinstance(final_closeout, dict) and final_closeout.get("can_claim_done"):
+                result = "finished"
+                plan = final_closeout
+                exit_code = 0
+            else:
+                result = "blocked"
+                exit_code = closeout_exit or 2
+
+    payload = {
+        "schema_version": 1,
+        "command": "finish",
+        "mode": "apply" if apply else "check",
+        "repo": str(repo),
+        "created_at": now(),
+        "result": result,
+        "can_claim_done": bool(plan.get("can_claim_done")),
+        "completion_state": plan.get("completion_state"),
+        "autoclose_eligibility": plan.get("autoclose_eligibility"),
+        "default_branch": plan.get("default_branch"),
+        "merge_readiness": plan.get("merge_readiness"),
+        "docs_required": plan.get("docs_required"),
+        "unfinished_reason": plan.get("unfinished_reason"),
+        "next_action": next_action,
+        "closeout_plan": plan,
+        "initial_closeout": initial_plan if closeout_payload else None,
+        "closeout_fix": closeout_fix_result_summary(closeout_payload),
+        "target_repo_writes": (closeout_payload or {}).get("target_repo_writes")
+        or target_repo_writes(False, reason="finish check is read-only" if not apply else "finish did not write target repo state"),
+        "sidecar_writes": (closeout_payload or {}).get("sidecar_writes")
+        or sidecar_writes(False, reason="finish check is read-only" if not apply else "finish did not write sidecar state"),
+        "closeout_exit_code": closeout_exit,
+        "exit_code": exit_code,
+    }
+    payload["human_summary"] = (plan.get("human_summary") or {}) if isinstance(plan, dict) else {}
+    return payload, exit_code
+
+
+def target_closeout_status_for_plan(plan: dict[str, Any], *, apply: bool) -> tuple[str, str, str]:
+    merge = plan.get("merge_readiness") or {}
+    eligibility = plan.get("autoclose_eligibility") or {}
+    if plan.get("can_claim_done"):
+        if merge.get("requires_integration_worktree"):
+            return (
+                "NEEDS-REVIEW",
+                "default-branch-integration-required",
+                merge.get("integration_summary") or "Integrate the completed branch into the detected default branch.",
+            )
+        return "CLEAN", "already-clean", "none"
+    if eligibility.get("eligible"):
+        if apply:
+            return "LEFT-UNFINISHED", "eligible-closeout-pending-apply", eligibility.get("apply_command") or ""
+        return "LEFT-UNFINISHED", "dry-run-eligible-closeout", eligibility.get("apply_command") or ""
+    state = str(plan.get("completion_state") or "")
+    if state in {"needs-receipt", "needs-finalizer", "blocked", "needs-cleanup"}:
+        return "LEFT-UNFINISHED", plan.get("unfinished_reason") or state, (plan.get("next_action") or {}).get("command") or ""
+    return "NEEDS-REVIEW", plan.get("unfinished_reason") or state or "closeout-review-required", (plan.get("next_action") or {}).get("command") or ""
+
+
+def target_closeout_should_attempt_self_heal(plan: dict[str, Any]) -> bool:
+    if plan.get("dirty", {}).get("dirty"):
+        return False
+    blocker_codes = {item.get("code") for item in plan.get("claim_blockers") or []}
+    return bool(blocker_codes & TARGET_CLOSEOUT_SELF_HEAL_CODES)
+
+
+def target_closeout_self_heal(repo: Path) -> tuple[dict[str, Any] | None, int]:
+    preview_args = argparse.Namespace(apply=False, allow_path=[])
+    preview_payload, preview_exit = agent_self_heal_payload(preview_args, repo)
+    if preview_exit != 0 or not preview_payload.get("actions"):
+        return preview_payload, preview_exit
+    apply_args = argparse.Namespace(apply=True, allow_path=[])
+    apply_payload, apply_exit = agent_self_heal_payload(apply_args, repo)
+    return apply_payload, apply_exit
+
+
+def merge_write_guarantees(*writes: dict[str, Any]) -> dict[str, Any]:
+    performed = any(bool(item.get("performed")) for item in writes if isinstance(item, dict))
+    paths: list[str] = []
+    reasons: list[str] = []
+    for item in writes:
+        if not isinstance(item, dict):
+            continue
+        paths.extend(item.get("paths") or [])
+        reason = str(item.get("reason") or "").strip()
+        if reason:
+            reasons.append(reason)
+    return {
+        "performed": performed,
+        "paths": sorted(set(paths)),
+        "reason": "; ".join(reasons) if reasons else "",
+    }
+
+
+def target_closeout_integrate_default_branch(
+    args: argparse.Namespace,
+    repo: Path,
+    plan: dict[str, Any],
+) -> dict[str, Any]:
+    merge = plan.get("merge_readiness") or {}
+    branch = merge.get("current_branch")
+    default_branch = merge.get("default_branch")
+    state, sidecar_paths = ensure_sidecar(repo, "target closeout-all default branch integration")
+    run_dir = Path(state["paths"]["runs_dir"]) / "target-closeout-all" / artifact_stamp()
+    integration = run_dir / "integration"
+    result: dict[str, Any] = {
+        "status": "NEEDS-REVIEW",
+        "reason": "default-branch-integration-not-run",
+        "branch": branch,
+        "default_branch": default_branch,
+        "worktree": str(integration),
+        "sidecar_writes": sidecar_writes(True, paths=sidecar_paths, reason="default branch integration receipt state"),
+        "target_repo_writes": target_repo_writes(False, reason="default branch integration not run"),
+        "steps": [],
+        "branches_pushed": [],
+        "exit_code": 1,
+    }
+    if getattr(args, "no_push", False):
+        result.update({"reason": "no-push-enabled", "next_action": "Re-run without --no-push after reviewing the branch."})
+        return result
+    if not branch or not default_branch or branch == default_branch:
+        result.update({"reason": "integration-not-required", "status": "CLEAN", "next_action": "none", "exit_code": 0})
+        return result
+    remotes = {line.strip() for line in git_text(repo, ["remote"]).splitlines() if line.strip()}
+    if "origin" not in remotes:
+        result.update({"reason": "missing-origin-remote", "next_action": "Push and merge the branch manually after configuring origin."})
+        return result
+
+    branch_push, branch_push_blockers = closeout_fix.push_current_branch(repo, getattr(args, "timeout_seconds", 3600))
+    if branch_push:
+        result["branches_pushed"].append(branch_push)
+        result["steps"].append({"name": "push-current-branch", **branch_push})
+    if branch_push_blockers:
+        result.update(
+            {
+                "reason": "current-branch-push-failed",
+                "blockers": branch_push_blockers,
+                "next_action": "Resolve the branch push failure, then rerun closeout-all.",
+            }
+        )
+        return result
+
+    fetch = run_git(repo, ["fetch", "origin", default_branch])
+    result["steps"].append(
+        {
+            "name": "fetch-default-branch",
+            "command": f"git fetch origin {default_branch}",
+            "exit_code": fetch.returncode,
+            "stdout": closeout_fix.safe_excerpt(fetch.stdout),
+            "stderr": closeout_fix.safe_excerpt(fetch.stderr),
+        }
+    )
+    if fetch.returncode != 0:
+        result.update({"reason": "fetch-default-branch-failed", "next_action": "Resolve fetch failure, then rerun closeout-all."})
+        return result
+
+    remote_default_ref = f"refs/remotes/origin/{default_branch}"
+    default_ref = remote_default_ref if branch_head(repo, remote_default_ref) else default_branch
+    add = run_git(repo, ["worktree", "add", "--detach", str(integration), default_ref])
+    result["steps"].append(
+        {
+            "name": "create-integration-worktree",
+            "command": f"git worktree add --detach {integration} {default_ref}",
+            "exit_code": add.returncode,
+            "stdout": closeout_fix.safe_excerpt(add.stdout),
+            "stderr": closeout_fix.safe_excerpt(add.stderr),
+        }
+    )
+    if add.returncode != 0:
+        result.update({"reason": "integration-worktree-create-failed", "next_action": "Inspect git worktree state, then rerun closeout-all."})
+        return result
+
+    merge_result = run_git(
+        integration,
+        [
+            "-c",
+            "user.name=kit closeout-all",
+            "-c",
+            "user.email=kit-closeout-all@example.invalid",
+            "merge",
+            "--no-ff",
+            "--no-edit",
+            branch,
+        ],
+    )
+    result["steps"].append(
+        {
+            "name": "merge-completed-branch",
+            "command": f"git merge --no-ff --no-edit {branch}",
+            "exit_code": merge_result.returncode,
+            "stdout": closeout_fix.safe_excerpt(merge_result.stdout),
+            "stderr": closeout_fix.safe_excerpt(merge_result.stderr),
+        }
+    )
+    if merge_result.returncode != 0:
+        result.update({"reason": "merge-conflict-or-failure", "next_action": f"Inspect integration worktree: {integration}"})
+        return result
+
+    verify_command = [
+        sys.executable,
+        str(CLI_ENTRYPOINT),
+        "verify",
+        "--repo",
+        str(integration),
+        "--harness-mode",
+        "auto",
+        "--json",
+    ]
+    verify = subprocess.run(verify_command, cwd=integration, capture_output=True, text=True, check=False)
+    verify_payload = parse_json_stdout(verify)
+    result["steps"].append(
+        {
+            "name": "verify-integration-worktree",
+            "command": " ".join(shlex.quote(part) for part in verify_command),
+            "exit_code": verify.returncode,
+            "payload": verify_payload,
+            "stdout": closeout_fix.safe_excerpt(verify.stdout),
+            "stderr": closeout_fix.safe_excerpt(verify.stderr),
+        }
+    )
+    if verify.returncode != 0:
+        result.update({"reason": "integration-verification-failed", "next_action": f"Inspect integration worktree and verify output: {integration}"})
+        return result
+
+    before_default = branch_head(repo, remote_default_ref) or branch_head(repo, default_branch)
+    after_default = current_commit(integration)
+    push = run_git(integration, ["push", "origin", f"HEAD:refs/heads/{default_branch}"])
+    default_push = {
+        "branch": default_branch,
+        "command": f"git push origin HEAD:refs/heads/{default_branch}",
+        "exit_code": push.returncode,
+        "stdout": closeout_fix.safe_excerpt(push.stdout),
+        "stderr": closeout_fix.safe_excerpt(push.stderr),
+        "before_head": before_default or None,
+        "after_head": after_default or None,
+    }
+    result["branches_pushed"].append(default_push)
+    result["steps"].append({"name": "push-default-branch", **default_push})
+    if push.returncode != 0:
+        result.update({"reason": "default-branch-push-failed", "next_action": f"Inspect integration worktree: {integration}"})
+        return result
+
+    cleanup = run_git(repo, ["worktree", "remove", str(integration)])
+    result["steps"].append(
+        {
+            "name": "remove-integration-worktree",
+            "command": f"git worktree remove {integration}",
+            "exit_code": cleanup.returncode,
+            "stdout": closeout_fix.safe_excerpt(cleanup.stdout),
+            "stderr": closeout_fix.safe_excerpt(cleanup.stderr),
+        }
+    )
+    cleanup_warning = None
+    if cleanup.returncode != 0:
+        cleanup_warning = f"Integration worktree pushed successfully but cleanup failed: {integration}"
+    receipt = {
+        "schema_version": 1,
+        "command": "target-closeout-all-default-branch-integration",
+        "created_at": now(),
+        "repo": str(repo),
+        "branch": branch,
+        "default_branch": default_branch,
+        "before_default_head": before_default or None,
+        "after_default_head": after_default or None,
+        "worktree": str(integration),
+        "cleanup_warning": cleanup_warning,
+        "steps": result["steps"],
+    }
+    receipt_path = run_dir / "default-branch-integration.json"
+    write_json_file(receipt_path, receipt)
+    result.update(
+        {
+            "status": "CLEANED",
+            "reason": "default-branch-integrated",
+            "before_default_head": before_default or None,
+            "after_default_head": after_default or None,
+            "receipt": str(receipt_path),
+            "cleanup_warning": cleanup_warning,
+            "target_repo_writes": target_repo_writes(True, paths=[str(repo)], reason="pushed completed branch and default branch without force"),
+            "sidecar_writes": sidecar_writes(True, paths=[*sidecar_paths, str(receipt_path)], reason="default branch integration receipt"),
+            "next_action": "none" if cleanup_warning is None else cleanup_warning,
+            "exit_code": 0,
+        }
+    )
+    return result
+
+
+def target_closeout_all_run_target(args: argparse.Namespace, entry: dict[str, Any], *, apply: bool) -> dict[str, Any]:
+    root = entry.get("root")
+    result: dict[str, Any] = {
+        "root": root,
+        "id": entry.get("id"),
+        "name": entry.get("name"),
+        "status": "FAILED",
+        "target_repo_writes": target_repo_writes(False, reason="not attempted"),
+        "sidecar_writes": sidecar_writes(False, reason="not attempted"),
+    }
+    if not root:
+        result.update({"status": "FAILED", "reason": "invalid-registry-entry", "exit_code": 2, "error": "Registry entry has no root path."})
+        return result
+
+    repo_path = Path(str(root)).expanduser()
+    if not repo_path.exists():
+        result.update({"status": "FAILED", "reason": "missing", "exit_code": 2, "error": "Registered target path does not exist."})
+        return result
+    git_root_result = run_git(repo_path, ["rev-parse", "--show-toplevel"])
+    if git_root_result.returncode != 0:
+        result.update({"status": "FAILED", "reason": "not-git", "exit_code": 2, "error": "Registered target path is not a git repository."})
+        return result
+    repo = Path(git_root_result.stdout.strip()).resolve()
+    result["root"] = str(repo)
+    if not (repo / ".doc-contract-kit" / "install.json").exists():
+        result.update({"status": "FAILED", "reason": "not-installed", "exit_code": 2, "error": "Registered target no longer has a kit install receipt."})
+        return result
+
+    before_head = current_commit(repo)
+    before_branch = current_branch_name(repo)
+    initial_plan = closeout_plan_for_repo(repo, strict=False)
+    self_heal_payload = None
+    self_heal_exit = 0
+    plan = initial_plan
+    if apply and target_closeout_should_attempt_self_heal(initial_plan):
+        self_heal_payload, self_heal_exit = target_closeout_self_heal(repo)
+        if self_heal_payload is not None:
+            result["self_heal"] = {
+                "result": self_heal_payload.get("result"),
+                "actions": self_heal_payload.get("actions") or [],
+                "applied_actions": self_heal_payload.get("applied_actions") or [],
+                "blockers": self_heal_payload.get("blockers") or [],
+                "warnings": self_heal_payload.get("warnings") or [],
+                "receipt": self_heal_payload.get("receipt"),
+            }
+        if self_heal_payload and self_heal_exit == 0 and self_heal_payload.get("result") == "applied":
+            plan = closeout_plan_for_repo(repo, strict=False)
+    status, reason, next_action = target_closeout_status_for_plan(plan, apply=apply)
+    result.update(
+        {
+            "status": status,
+            "reason": reason,
+            "branch": before_branch or None,
+            "default_branch": (plan.get("default_branch") or {}).get("name"),
+            "before_head": before_head or None,
+            "after_head": before_head or None,
+            "initial_closeout_plan": {
+                "can_claim_done": initial_plan.get("can_claim_done"),
+                "completion_state": initial_plan.get("completion_state"),
+                "claim_blockers": initial_plan.get("claim_blockers") or [],
+                "next_action": initial_plan.get("next_action"),
+            },
+            "closeout_plan": {
+                "can_claim_done": plan.get("can_claim_done"),
+                "completion_state": plan.get("completion_state"),
+                "autoclose_eligibility": plan.get("autoclose_eligibility"),
+                "merge_readiness": plan.get("merge_readiness"),
+                "docs_required": plan.get("docs_required"),
+                "unfinished_reason": plan.get("unfinished_reason"),
+                "claim_blockers": plan.get("claim_blockers") or [],
+                "next_action": plan.get("next_action"),
+            },
+            "next_action": next_action,
+            "target_repo_writes": self_heal_payload.get("target_repo_writes") if self_heal_payload and self_heal_payload.get("result") == "applied" else target_repo_writes(False, reason="batch closeout dry-run or skipped"),
+            "sidecar_writes": self_heal_payload.get("sidecar_writes") if self_heal_payload and self_heal_payload.get("result") == "applied" else sidecar_writes(False, reason="batch closeout dry-run or skipped"),
+            "exit_code": 0 if status == "CLEAN" or (not apply and status == "LEFT-UNFINISHED") else 1,
+        }
+    )
+    if self_heal_payload and self_heal_payload.get("result") == "applied" and status == "CLEAN":
+        result.update(
+            {
+                "status": "CLEANED",
+                "reason": "metadata-self-heal-applied",
+                "next_action": "none",
+                "exit_code": 0,
+            }
+        )
+
+    merge_readiness = plan.get("merge_readiness") or {}
+    if apply and status == "NEEDS-REVIEW" and reason == "default-branch-integration-required":
+        integration = target_closeout_integrate_default_branch(args, repo, plan)
+        result["default_branch_integration"] = integration
+        result["target_repo_writes"] = merge_write_guarantees(result.get("target_repo_writes") or {}, integration.get("target_repo_writes") or {})
+        result["sidecar_writes"] = merge_write_guarantees(result.get("sidecar_writes") or {}, integration.get("sidecar_writes") or {})
+        if integration.get("status") == "CLEANED":
+            result.update(
+                {
+                    "status": "CLEANED",
+                    "reason": "default-branch-integrated",
+                    "after_head": integration.get("after_default_head") or result.get("after_head"),
+                    "default_before_head": integration.get("before_default_head"),
+                    "default_after_head": integration.get("after_default_head"),
+                    "branches_pushed": integration.get("branches_pushed") or [],
+                    "next_action": integration.get("next_action") or "none",
+                    "exit_code": 0,
+                }
+            )
+        else:
+            result.update(
+                {
+                    "status": "NEEDS-REVIEW",
+                    "reason": integration.get("reason") or "default-branch-integration-blocked",
+                    "next_action": integration.get("next_action") or merge_readiness.get("integration_summary") or "Inspect default branch integration result.",
+                    "branches_pushed": integration.get("branches_pushed") or [],
+                    "exit_code": integration.get("exit_code") or 1,
+                }
+            )
+        return result
+
+    if not apply or status != "LEFT-UNFINISHED" or not (plan.get("autoclose_eligibility") or {}).get("eligible"):
+        return result
+
+    preview_payload, preview_exit = closeout_fix.preview_payload(args, repo, CLI_ENTRYPOINT)
+    result["closeout_preview"] = closeout_fix_result_summary(preview_payload)
+    if preview_exit != 0:
+        result.update(
+            {
+                "status": "NEEDS-REVIEW",
+                "reason": "closeout-fix-preview-blocked",
+                "next_action": "Inspect closeout-fix preview blockers.",
+                "exit_code": preview_exit,
+            }
+        )
+        return result
+
+    try:
+        closeout_payload, closeout_exit = closeout_fix.apply_payload(args, repo, CLI_ENTRYPOINT)
+    except Exception as exc:
+        closeout_payload, closeout_exit = closeout_fix.failure_payload(args, repo, exc)
+    after_head = current_commit(repo)
+    result["after_head"] = after_head or None
+    result["closeout_fix"] = closeout_fix_result_summary(closeout_payload)
+    result["target_repo_writes"] = merge_write_guarantees(result.get("target_repo_writes") or {}, closeout_payload.get("target_repo_writes") or {})
+    result["sidecar_writes"] = merge_write_guarantees(result.get("sidecar_writes") or {}, closeout_payload.get("sidecar_writes") or {})
+    final_closeout = closeout_payload.get("final_closeout") if closeout_payload else None
+    final_merge = (final_closeout or {}).get("merge_readiness") or {}
+    if closeout_exit == 0 and isinstance(final_closeout, dict) and final_closeout.get("can_claim_done"):
+        if final_merge.get("requires_integration_worktree"):
+            integration = target_closeout_integrate_default_branch(args, repo, final_closeout)
+            result["default_branch_integration"] = integration
+            integration_writes = integration.get("target_repo_writes") or {}
+            integration_sidecar = integration.get("sidecar_writes") or {}
+            result["target_repo_writes"] = merge_write_guarantees(result.get("target_repo_writes") or {}, integration_writes)
+            result["sidecar_writes"] = merge_write_guarantees(result.get("sidecar_writes") or {}, integration_sidecar)
+            if integration.get("status") == "CLEANED":
+                result.update(
+                    {
+                        "status": "CLEANED",
+                        "reason": "closeout-fix-applied-and-default-branch-integrated",
+                        "default_before_head": integration.get("before_default_head"),
+                        "default_after_head": integration.get("after_default_head"),
+                        "branches_pushed": (closeout_payload.get("branches_pushed") or []) + (integration.get("branches_pushed") or []),
+                        "next_action": integration.get("next_action") or "none",
+                        "exit_code": 0,
+                    }
+                )
+            else:
+                result.update(
+                    {
+                        "status": "NEEDS-REVIEW",
+                        "reason": integration.get("reason") or "default-branch-integration-blocked",
+                        "branches_pushed": (closeout_payload.get("branches_pushed") or []) + (integration.get("branches_pushed") or []),
+                        "next_action": integration.get("next_action") or final_merge.get("integration_summary") or "Inspect default branch integration result.",
+                        "exit_code": integration.get("exit_code") or 1,
+                    }
+                )
+        else:
+            result.update({"status": "CLEANED", "reason": "closeout-fix-applied", "next_action": "none", "exit_code": 0})
+    elif closeout_payload.get("result") == "failed":
+        result.update({"status": "FAILED", "reason": "closeout-fix-failed", "next_action": "Inspect closeout-fix result_path.", "exit_code": closeout_exit or 1})
+    else:
+        result.update({"status": "NEEDS-REVIEW", "reason": "closeout-fix-blocked", "next_action": "Inspect closeout-fix blockers.", "exit_code": closeout_exit or 2})
+    return result
+
+
+def target_closeout_all_payload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    registry = read_target_registry()
+    targets = list(registry.get("targets") or [])
+    apply = bool(getattr(args, "apply", False)) and not bool(getattr(args, "dry_run", False))
+    results = [target_closeout_all_run_target(args, entry, apply=apply) for entry in targets]
+    status_counts: dict[str, int] = {}
+    for item in results:
+        status = str(item.get("status") or "FAILED")
+        status_counts[status] = status_counts.get(status, 0) + 1
+    failed_count = status_counts.get("FAILED", 0)
+    needs_review_count = status_counts.get("NEEDS-REVIEW", 0)
+    unfinished_count = status_counts.get("LEFT-UNFINISHED", 0)
+    follow_up_count = needs_review_count + unfinished_count
+    write_paths = [item["root"] for item in results if (item.get("target_repo_writes") or {}).get("performed")]
+    sidecar_paths: list[str] = []
+    for item in results:
+        writes = item.get("sidecar_writes") or {}
+        if writes.get("performed"):
+            sidecar_paths.extend(writes.get("paths") or [])
+    default_branch_integrations = [
+        item["default_branch_integration"]
+        for item in results
+        if isinstance(item.get("default_branch_integration"), dict)
+    ]
+    next_commands: list[str] = []
+    if targets and not apply:
+        next_commands.append(public_command("target", "closeout-all", "--apply", "--policy", getattr(args, "policy", "gated"), "--json"))
+    if status_counts.get("FAILED"):
+        next_commands.append(public_command("target", "list", "--json"))
+    exit_code = 1 if failed_count else 0
+    payload = {
+        "schema_version": 1,
+        "command": "target-closeout-all",
+        "mode": "apply" if apply else "dry-run",
+        "policy": getattr(args, "policy", "gated"),
+        "registry": {
+            "path": str(target_registry_path()),
+            "target_count": len(targets),
+            "updated_at": registry.get("updated_at"),
+        },
+        "target_repo_writes": target_repo_writes(bool(write_paths), paths=write_paths, reason="batch closeout apply" if write_paths else "batch dry-run, clean targets, or skipped closeouts"),
+        "sidecar_writes": sidecar_writes(bool(sidecar_paths), paths=sorted(set(sidecar_paths)), reason="batch closeout apply" if sidecar_paths else "batch dry-run, clean targets, or skipped closeouts"),
+        "summary": {
+            "total": len(results),
+            "clean": status_counts.get("CLEAN", 0),
+            "cleaned": status_counts.get("CLEANED", 0),
+            "left_unfinished": unfinished_count,
+            "needs_review": needs_review_count,
+            "requires_follow_up": follow_up_count,
+            "failed": failed_count,
+            "default_branch_integrations": len(default_branch_integrations),
+            "statuses": status_counts,
+        },
+        "default_branch_integration": default_branch_integrations,
+        "targets": results,
+        "next_commands": next_commands,
+        "exit_code": exit_code,
+    }
+    return payload, exit_code
+
+
 def target_prune_missing_payload(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     registry = read_target_registry()
     targets = list(registry.get("targets") or [])
@@ -9639,6 +13243,36 @@ def render_target_update_all(payload: dict[str, Any], style: str = "auto") -> No
             print(f"   - {command}")
 
 
+def render_target_closeout_all(payload: dict[str, Any], style: str = "auto") -> None:
+    summary = payload.get("summary") or {}
+    registry = payload.get("registry") or {}
+    print(styled_text(f"{PUBLIC_COMMAND} target closeout-all:", style, "1;36"))
+    print(f" - mode: {payload.get('mode')}")
+    print(f" - policy: {payload.get('policy')}")
+    print(f" - registry: {registry.get('path')}")
+    print(f" - targets: {summary.get('total', 0)}")
+    print(f" - clean: {summary.get('clean', 0)}")
+    print(f" - cleaned: {summary.get('cleaned', 0)}")
+    print(f" - default branch integrations: {summary.get('default_branch_integrations', 0)}")
+    print(f" - left unfinished: {summary.get('left_unfinished', 0)}")
+    print(f" - needs review: {summary.get('needs_review', 0)}")
+    print(f" - failed: {summary.get('failed', 0)}")
+    for item in payload.get("targets") or []:
+        root = item.get("root") or "(unknown)"
+        status = item.get("status") or "FAILED"
+        reason = item.get("reason") or ""
+        branch = item.get("branch") or "unknown"
+        default_branch = item.get("default_branch") or "unknown"
+        detail = f" ({reason})" if reason else ""
+        print(f"   - {status}: {root}{detail} [{branch} -> {default_branch}]")
+        if item.get("next_action") and item.get("next_action") != "none":
+            print(f"     next: {item.get('next_action')}")
+    if payload.get("next_commands"):
+        print(" - next commands:")
+        for command in payload["next_commands"]:
+            print(f"   - {command}")
+
+
 def render_worktree_audit(payload: dict[str, Any], style: str = "auto") -> None:
     summary = payload.get("summary") or {}
     print(styled_text(f"{PUBLIC_COMMAND} worktree audit:", style, "1;36"))
@@ -9650,6 +13284,37 @@ def render_worktree_audit(payload: dict[str, Any], style: str = "auto") -> None:
         blockers = ",".join(item.get("blockers") or [])
         detail = f" ({blockers})" if blockers else ""
         print(f"   - {item.get('status', 'unknown')}: {item.get('root')}{detail}")
+
+
+def render_worktree_list(payload: dict[str, Any], style: str = "auto") -> None:
+    summary = payload.get("summary") or {}
+    print(styled_text(f"{PUBLIC_COMMAND} worktree list:", style, "1;36"))
+    print(f" - repo: {payload.get('repo') or '(unknown)'}")
+    if payload.get("primary"):
+        print(f" - primary: {payload.get('primary')}")
+    print(f" - worktrees: {summary.get('total', 0)}")
+    print(f" - linked: {summary.get('linked_count', 0)}")
+    print(f" - dirty: {summary.get('dirty_count', 0)}")
+    print(f" - detached: {summary.get('detached_count', 0)}")
+    if summary.get("locked_count", 0):
+        print(f" - locked: {summary.get('locked_count', 0)}")
+    for error in payload.get("root_errors") or []:
+        print(f" - error: {error.get('error') or error.get('status') or 'unknown error'}")
+    for item in payload.get("worktrees") or []:
+        flags = []
+        if item.get("primary"):
+            flags.append("primary")
+        if item.get("current"):
+            flags.append("current")
+        if item.get("dirty"):
+            flags.append("dirty")
+        if item.get("detached"):
+            flags.append("detached")
+        if item.get("locked"):
+            flags.append("locked")
+        detail = f" ({', '.join(flags)})" if flags else ""
+        branch = item.get("branch") or "detached"
+        print(f"   - {branch}: {item.get('path')}{detail}")
 
 
 def render_worktree_prune(payload: dict[str, Any], style: str = "auto") -> None:
@@ -9797,7 +13462,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--update-policy",
         choices=START_UPDATE_POLICIES,
         default="local-safe",
-        help="Local update behavior for installed target repos: local-safe applies managed-file updates; check-only only reports.",
+        help="Local update behavior for installed target repos: local-safe applies managed-file updates only when the target is clean; check-only only reports.",
     )
     start.add_argument("--no-update", action="store_true", help="Skip the local update check and apply step.")
 
@@ -9847,6 +13512,41 @@ def build_parser() -> argparse.ArgumentParser:
     closeout_plan.add_argument("--format", choices=["text", "json"], default=None)
     closeout_plan.add_argument("--strict", action="store_true", help="Exit non-zero when completion cannot be claimed cleanly.")
 
+    closeout_fix_parser = subparsers.add_parser(
+        "closeout-fix",
+        help="Launch a supervised headless agent to close out dirty repo state.",
+    )
+    add_common_repo_args(closeout_fix_parser)
+    closeout_fix_parser.add_argument("--apply", action="store_true", help="Run the write-capable closeout job. Preview is the default.")
+    closeout_fix_parser.add_argument("--jsonl", action="store_true", help="Stream sanitized JSONL job events and the final payload.")
+    closeout_fix_parser.add_argument(
+        "--agent",
+        choices=("auto", "codex", "custom"),
+        default="auto",
+        help="Headless runner to launch. auto defaults to local codex exec.",
+    )
+    closeout_fix_parser.add_argument("--agent-command", help="Explicit command for --agent custom. No runner is inferred from adapters.")
+    closeout_fix_parser.add_argument("--timeout-seconds", type=int, default=3600, help="Maximum seconds for each supervised closeout step.")
+    closeout_fix_parser.add_argument("--no-push", action="store_true", help="Leave successful commits local instead of pushing the current branch.")
+
+    finish_parser = subparsers.add_parser(
+        "finish",
+        help="Run the strict per-thread finish gate and optionally apply gated closeout.",
+    )
+    add_common_repo_args(finish_parser)
+    finish_parser.add_argument("--format", choices=["text", "json"], default=None)
+    finish_parser.add_argument("--apply", action="store_true", help="Apply gated closeout when closeout-plan marks the repo eligible.")
+    finish_parser.add_argument("--jsonl", action="store_true", help="Stream closeout-fix JSONL events and the final finish payload when applying.")
+    finish_parser.add_argument(
+        "--agent",
+        choices=("auto", "codex", "custom"),
+        default="auto",
+        help="Headless runner to launch when --apply delegates to closeout-fix.",
+    )
+    finish_parser.add_argument("--agent-command", help="Explicit command for --agent custom.")
+    finish_parser.add_argument("--timeout-seconds", type=int, default=3600, help="Maximum seconds for each supervised closeout step.")
+    finish_parser.add_argument("--no-push", action="store_true", help="Leave successful closeout commits local instead of pushing the current branch.")
+
     self_cmd = subparsers.add_parser("self", help="Inspect or update the global repo-contract-kit tool checkout.")
     self_subparsers = self_cmd.add_subparsers(dest="self_command", required=True, parser_class=KitArgumentParser)
     self_status = self_subparsers.add_parser("status", help="Show global tool checkout status.")
@@ -9882,6 +13582,208 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = subparsers.add_parser("status", help="Show git, install, and kit state.")
     add_common_repo_args(status)
+
+    learn = subparsers.add_parser("learn", help="Inspect supervised-learning policy and ownership state.")
+    learn_subparsers = learn.add_subparsers(dest="learn_command", required=True, parser_class=KitArgumentParser)
+    learn_status = learn_subparsers.add_parser(
+        "status",
+        help="Show supervised-learning policy, schema, and future sidecar paths without writes.",
+    )
+    add_common_repo_args(learn_status)
+    learn_event = learn_subparsers.add_parser(
+        "event",
+        help="Record explicitly approved supervised-learning events or list stored local events.",
+    )
+    learn_event_subparsers = learn_event.add_subparsers(
+        dest="learn_event_command",
+        required=True,
+        parser_class=KitArgumentParser,
+    )
+    learn_event_record = learn_event_subparsers.add_parser(
+        "record",
+        help="Record an explicit approved schema-valid event in the repository sidecar.",
+    )
+    add_common_repo_args(learn_event_record)
+    learn_event_record.add_argument("--kind", required=True, choices=LEARNING_EVENT_KINDS, help="Explicit event kind.")
+    learn_event_record.add_argument("--summary", required=True, help="Explicit bounded summary; conversations and feedback are never harvested.")
+    learn_event_record.add_argument("--evidence", action="append", help="Explicit bounded evidence note. Can be repeated up to ten times.")
+    learn_event_record.add_argument("--outcome", required=True, choices=LEARNING_EVENT_OUTCOMES, help="Observed local outcome.")
+    learn_event_record.add_argument("--source", required=True, choices=LEARNING_EVENT_SOURCES, help="Explicit provenance source for this record.")
+    learn_event_record.add_argument("--privacy-label", choices=LEARNING_PRIVACY_LABELS, help="Privacy label; defaults to the target policy label.")
+    learn_event_record.add_argument("--approved", action="store_true", help="Confirm explicit human approval for this exact event record.")
+    learn_event_record.add_argument(
+        "--approval-state",
+        choices=("not-requested", "pending", "approved", "rejected"),
+        help="Optional explicit approval state; only --approved with approved state can write a record.",
+    )
+    learn_event_list = learn_event_subparsers.add_parser(
+        "list",
+        help="List local schema-valid learning events without creating sidecar state.",
+    )
+    add_common_repo_args(learn_event_list)
+    learn_event_list.add_argument("--limit", type=int, default=50, help="Maximum events to list. Use 0 for all events.")
+
+    learn_proposal = learn_subparsers.add_parser(
+        "proposal",
+        help="Create reviewable local learning proposals from existing events or list them without writes.",
+    )
+    learn_proposal_subparsers = learn_proposal.add_subparsers(
+        dest="learn_proposal_command",
+        required=True,
+        parser_class=KitArgumentParser,
+    )
+    learn_proposal_create = learn_proposal_subparsers.add_parser(
+        "create",
+        help="Create a pending-review proposal from schema-valid local event IDs only.",
+    )
+    add_common_repo_args(learn_proposal_create)
+    learn_proposal_create.add_argument("--title", required=True, help="Explicit bounded proposal title.")
+    learn_proposal_create.add_argument(
+        "--classification",
+        required=True,
+        choices=LEARNING_PROPOSAL_CLASSIFICATIONS,
+        help="Explicit proposal classification.",
+    )
+    learn_proposal_create.add_argument(
+        "--scope",
+        action="append",
+        required=True,
+        help="Explicit affected path or bounded scope. Can be repeated up to ten times.",
+    )
+    learn_proposal_create.add_argument(
+        "--recommended-change",
+        required=True,
+        help="Explicit bounded recommendation; Kit never harvests interactions or feedback.",
+    )
+    learn_proposal_create.add_argument(
+        "--evidence-event",
+        action="append",
+        required=True,
+        help="Existing schema-valid local evt- identifier. Can be repeated up to ten times.",
+    )
+    learn_proposal_create.add_argument("--privacy-label", choices=LEARNING_PRIVACY_LABELS, help="Privacy label; defaults to the target policy label.")
+    learn_proposal_list = learn_proposal_subparsers.add_parser(
+        "list",
+        help="List local schema-valid learning proposals without creating sidecar state.",
+    )
+    add_common_repo_args(learn_proposal_list)
+    learn_proposal_list.add_argument("--limit", type=int, default=50, help="Maximum proposals to list. Use 0 for all proposals.")
+
+    learn_decision = learn_subparsers.add_parser(
+        "decision",
+        help="Record explicit human-reviewed proposal decisions or list local decisions without writes.",
+    )
+    learn_decision_subparsers = learn_decision.add_subparsers(
+        dest="learn_decision_command",
+        required=True,
+        parser_class=KitArgumentParser,
+    )
+    learn_decision_record = learn_decision_subparsers.add_parser(
+        "record",
+        help="Record an explicit human-reviewed decision for one pending local proposal.",
+    )
+    add_common_repo_args(learn_decision_record)
+    learn_decision_record.add_argument("--proposal-id", required=True, help="Existing pending-review prop- identifier.")
+    learn_decision_record.add_argument("--outcome", required=True, choices=LEARNING_DECISION_OUTCOMES, help="Explicit human decision outcome.")
+    learn_decision_record.add_argument("--decider", required=True, help="Named human decider.")
+    learn_decision_record.add_argument("--rationale", required=True, help="Explicit bounded decision rationale.")
+    learn_decision_record.add_argument(
+        "--human-review-confirmed",
+        action="store_true",
+        help="Confirm explicit human review of this exact pending proposal before recording the decision.",
+    )
+    learn_decision_record.add_argument(
+        "--follow-up",
+        action="append",
+        help="Explicit bounded follow-up note. Can be repeated up to ten times.",
+    )
+    learn_decision_list = learn_decision_subparsers.add_parser(
+        "list",
+        help="List local schema-valid learning decisions without creating sidecar state.",
+    )
+    add_common_repo_args(learn_decision_list)
+    learn_decision_list.add_argument("--limit", type=int, default=50, help="Maximum decisions to list. Use 0 for all decisions.")
+
+    learn_context = learn_subparsers.add_parser(
+        "context",
+        help="Build bounded approved-learning guidance or list valid local context records.",
+    )
+    learn_context_subparsers = learn_context.add_subparsers(
+        dest="learn_context_command",
+        required=True,
+        parser_class=KitArgumentParser,
+    )
+    learn_context_build = learn_context_subparsers.add_parser(
+        "build",
+        help="Build sidecar-only bounded guidance from one approved local decision and linked proposal.",
+    )
+    add_common_repo_args(learn_context_build)
+    learn_context_build.add_argument("--decision-id", required=True, help="Existing schema-valid approved dec- identifier.")
+    learn_context_list = learn_context_subparsers.add_parser(
+        "list",
+        help="List local schema-valid approved-learning context records without creating state.",
+    )
+    add_common_repo_args(learn_context_list)
+    learn_context_list.add_argument("--limit", type=int, default=LEARNING_CONTEXT_MAX_LIST, help="Maximum contexts to list. Use 0 for all contexts.")
+
+    learn_thread_summary = learn_subparsers.add_parser(
+        "thread-summary",
+        help="Import one explicitly redacted aggregate thread summary or list imported event summaries.",
+    )
+    learn_thread_summary_subparsers = learn_thread_summary.add_subparsers(
+        dest="learn_thread_summary_command",
+        required=True,
+        parser_class=KitArgumentParser,
+    )
+    learn_thread_summary_import = learn_thread_summary_subparsers.add_parser(
+        "import",
+        help="Import one strict redacted aggregate summary as a supervised sidecar event; no history scanning or network calls occur.",
+    )
+    add_common_repo_args(learn_thread_summary_import)
+    learn_thread_summary_import.add_argument("--input", required=True, help="Strict redacted aggregate learning-thread-summary JSON file.")
+    learn_thread_summary_import.add_argument("--approved", action="store_true", help="Confirm explicit human approval for this exact thread-summary import.")
+    learn_thread_summary_list = learn_thread_summary_subparsers.add_parser(
+        "list",
+        help="List schema-valid imported thread-summary events without creating state.",
+    )
+    add_common_repo_args(learn_thread_summary_list)
+    learn_thread_summary_list.add_argument("--limit", type=int, default=50, help="Maximum imported summaries to list. Use 0 for all events.")
+
+    learn_upstream = learn_subparsers.add_parser(
+        "upstream",
+        help="Export approved redacted source-review candidates or inspect local candidate baselines.",
+    )
+    learn_upstream_subparsers = learn_upstream.add_subparsers(
+        dest="learn_upstream_command",
+        required=True,
+        parser_class=KitArgumentParser,
+    )
+    learn_upstream_export = learn_upstream_subparsers.add_parser(
+        "export",
+        help="Write one portable local candidate from an approved decision and linked proposal; no propagation occurs.",
+    )
+    add_common_repo_args(learn_upstream_export)
+    learn_upstream_export.add_argument("--decision-id", required=True, help="Existing schema-valid approved dec- identifier.")
+    learn_upstream_export.add_argument("--privacy-label", required=True, choices=LEARNING_PRIVACY_LABELS, help="Export privacy label; only public-ok or internal is accepted.")
+    learn_upstream_export.add_argument("--redaction-confirmed", action="store_true", help="Confirm that this exact portable candidate is redacted for source review.")
+    learn_upstream_list = learn_upstream_subparsers.add_parser(
+        "list",
+        help="List schema-valid local upstream candidates without creating state.",
+    )
+    add_common_repo_args(learn_upstream_list)
+    learn_upstream_list.add_argument("--limit", type=int, default=LEARNING_UPSTREAM_CANDIDATE_MAX_LIST, help="Maximum candidates to list. Use 0 for all candidates.")
+    learn_upstream_reconcile = learn_upstream_subparsers.add_parser(
+        "reconcile",
+        help="Read-only compare candidate baselines with the current local tool source ref; never update anything.",
+    )
+    add_common_repo_args(learn_upstream_reconcile)
+    learn_upstream_reconcile.add_argument("--limit", type=int, default=LEARNING_UPSTREAM_CANDIDATE_MAX_LIST, help="Maximum candidates to reconcile. Use 0 for all candidates.")
+
+    learn_evaluate = learn_subparsers.add_parser(
+        "evaluate",
+        help="Read-only local learning artifact facts with no claim of effectiveness.",
+    )
+    add_common_repo_args(learn_evaluate)
 
     mode_check = subparsers.add_parser("mode-check", help="Select lite, standard, or release-gated harness mode without writes.")
     add_common_repo_args(mode_check)
@@ -10136,6 +14038,10 @@ def build_parser() -> argparse.ArgumentParser:
     task_packet.add_argument("--non-goal", action="append")
     task_packet.add_argument("--acceptance", action="append")
     task_packet.add_argument("--validation", action="append")
+    task_packet.add_argument("--test-boundary", choices=TEST_BOUNDARY_CHOICES)
+    task_packet.add_argument("--test-rationale")
+    task_packet.add_argument("--e2e-required", action="store_true")
+    task_packet.add_argument("--e2e-scope", action="append", help="User flow, runtime surface, or scenario that e2e must cover.")
     task_packet.add_argument("--docs-impact", choices=["yes", "no", "unknown"], default="unknown")
     task_packet.add_argument("--docs-path", action="append")
     task_packet.add_argument("--docs-surface", action="append")
@@ -10152,6 +14058,11 @@ def build_parser() -> argparse.ArgumentParser:
     task_packet.add_argument("--owner")
     task_packet.add_argument("--dependency", action="append")
     task_packet.add_argument("--next-packet-hint")
+    task_packet.add_argument(
+        "--learning-decision",
+        action="append",
+        help="Existing schema-valid approved dec- identifier to retain as sidecar task-packet lineage. Can be repeated.",
+    )
     task_packet.add_argument("--write-sidecar", action="store_true", help="Write the task packet under the repo sidecar.")
 
     from_backlog = subparsers.add_parser("agent-task-packet-from-backlog", help="Emit a task packet scaffold for a selected backlog item.")
@@ -10171,6 +14082,10 @@ def build_parser() -> argparse.ArgumentParser:
     from_backlog.add_argument("--non-goal", action="append")
     from_backlog.add_argument("--acceptance", action="append")
     from_backlog.add_argument("--validation", action="append")
+    from_backlog.add_argument("--test-boundary", choices=TEST_BOUNDARY_CHOICES)
+    from_backlog.add_argument("--test-rationale")
+    from_backlog.add_argument("--e2e-required", action="store_true")
+    from_backlog.add_argument("--e2e-scope", action="append", help="User flow, runtime surface, or scenario that e2e must cover.")
     from_backlog.add_argument("--docs-impact", choices=["yes", "no", "unknown"], default="unknown")
     from_backlog.add_argument("--docs-path", action="append")
     from_backlog.add_argument("--docs-surface", action="append")
@@ -10296,6 +14211,24 @@ def build_parser() -> argparse.ArgumentParser:
     target_update_all.add_argument("--runtime-adapters")
     target_update_all.add_argument("--metadata-only", action="store_true")
     target_update_all.add_argument("--force-managed", action="store_true")
+    target_closeout_all = target_subparsers.add_parser(
+        "closeout-all",
+        help="Dry-run or apply gated closeout across every registered target repo.",
+    )
+    target_closeout_all.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    add_style_arg(target_closeout_all)
+    target_closeout_all.add_argument("--dry-run", action="store_true", help="Report every registered target closeout state without writes. This is the default.")
+    target_closeout_all.add_argument("--apply", action="store_true", help="Apply closeout only to policy-eligible targets.")
+    target_closeout_all.add_argument("--policy", choices=("gated",), default="gated", help="Closeout policy. Only gated is supported.")
+    target_closeout_all.add_argument(
+        "--agent",
+        choices=("auto", "codex", "custom"),
+        default="auto",
+        help="Headless runner to launch for eligible dirty repos.",
+    )
+    target_closeout_all.add_argument("--agent-command", help="Explicit command for --agent custom.")
+    target_closeout_all.add_argument("--timeout-seconds", type=int, default=3600, help="Maximum seconds for each supervised closeout step.")
+    target_closeout_all.add_argument("--no-push", action="store_true", help="Leave successful closeout commits local instead of pushing branches.")
     target_prune_missing = target_subparsers.add_parser(
         "prune-missing",
         help="Remove registered target repos whose paths no longer exist.",
@@ -10305,8 +14238,12 @@ def build_parser() -> argparse.ArgumentParser:
     target_prune_missing.add_argument("--dry-run", action="store_true", help="Preview missing registry entries without writing. This is the default.")
     target_prune_missing.add_argument("--apply", action="store_true", help="Remove missing registry entries from the local kit registry.")
 
-    worktree = subparsers.add_parser("worktree", help="Audit and prune disposable agent worktrees.")
+    worktree = subparsers.add_parser("worktree", help="List, audit, and prune Git worktrees.")
     worktree_subparsers = worktree.add_subparsers(dest="worktree_command", required=True, parser_class=KitArgumentParser)
+    worktree_list = worktree_subparsers.add_parser("list", help="List every Git-linked worktree for one repository.")
+    worktree_list.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    add_style_arg(worktree_list)
+    worktree_list.add_argument("--repo", default=".", help="Repository or linked worktree to inspect. Defaults to the current directory.")
     worktree_audit = worktree_subparsers.add_parser("audit", help="Audit disposable agent worktrees under one or more repo or directory roots.")
     worktree_audit.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     add_style_arg(worktree_audit)
@@ -10440,6 +14377,10 @@ def main(argv: list[str] | None = None) -> int:
         payload, exit_code = target_update_all_payload(args)
         render_json(payload) if args.json else render_target_update_all(payload, style=render_style(args))
         return exit_code
+    if args.command == "target" and getattr(args, "target_command", "") == "closeout-all":
+        payload, exit_code = target_closeout_all_payload(args)
+        render_json(payload) if args.json else render_target_closeout_all(payload, style=render_style(args))
+        return exit_code
     if args.command == "target" and getattr(args, "target_command", "") == "list":
         payload, exit_code = target_list_payload(args)
         render_json(payload) if args.json else render_target_list(payload, style=render_style(args))
@@ -10455,6 +14396,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "target" and getattr(args, "target_command", "") == "prune-missing":
         payload, exit_code = target_prune_missing_payload(args)
         render_json(payload) if args.json else render_target_prune_missing(payload, style=render_style(args))
+        return exit_code
+    if args.command == "worktree" and getattr(args, "worktree_command", "") == "list":
+        payload, exit_code = worktree_list_payload(args)
+        render_json(payload) if args.json else render_worktree_list(payload, style=render_style(args))
         return exit_code
     if args.command == "worktree" and getattr(args, "worktree_command", "") == "audit":
         payload, exit_code = worktree_audit_payload(args)
@@ -10478,6 +14423,87 @@ def main(argv: list[str] | None = None) -> int:
         payload = apply_runtime_mode(status_payload(repo), raw_argv, args)
         render_json(payload) if args.json else render_status(payload)
         return 0
+    if args.command == "learn" and args.learn_command == "status":
+        payload = apply_runtime_mode(learn_status_payload(repo), raw_argv, args)
+        if args.json:
+            render_json(payload)
+        else:
+            print(f"supervised-learning policy: {payload['policy_state']}")
+            print(f"policy path: {payload['learning_paths']['policy']}")
+            print("safe next commands:")
+            for command in payload["safe_next_commands"]:
+                print(f" - {command}")
+        return 0
+    if args.command == "learn" and args.learn_command == "event" and args.learn_event_command == "record":
+        payload, exit_code = learn_event_record_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "event" and args.learn_event_command == "list":
+        payload, exit_code = learn_event_list_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "proposal" and args.learn_proposal_command == "create":
+        payload, exit_code = learn_proposal_create_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "proposal" and args.learn_proposal_command == "list":
+        payload, exit_code = learn_proposal_list_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "decision" and args.learn_decision_command == "record":
+        payload, exit_code = learn_decision_record_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "decision" and args.learn_decision_command == "list":
+        payload, exit_code = learn_decision_list_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "context" and args.learn_context_command == "build":
+        payload, exit_code = learn_context_build_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "context" and args.learn_context_command == "list":
+        payload, exit_code = learn_context_list_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "thread-summary" and args.learn_thread_summary_command == "import":
+        payload, exit_code = learn_thread_summary_import_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "thread-summary" and args.learn_thread_summary_command == "list":
+        payload, exit_code = learn_thread_summary_list_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "upstream" and args.learn_upstream_command == "export":
+        payload, exit_code = learn_upstream_export_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "upstream" and args.learn_upstream_command == "list":
+        payload, exit_code = learn_upstream_list_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "upstream" and args.learn_upstream_command == "reconcile":
+        payload, exit_code = learn_upstream_reconcile_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
+    if args.command == "learn" and args.learn_command == "evaluate":
+        payload, exit_code = learn_evaluate_payload(args, repo)
+        payload = apply_runtime_mode(payload, raw_argv, args)
+        render_json(payload) if args.json else render_json(payload)
+        return exit_code
     if args.command == "mode-check":
         payload = apply_runtime_mode(mode_check_payload(args, repo), raw_argv, args)
         render_json(payload) if args.json else render_json(payload)
@@ -10520,6 +14546,40 @@ def main(argv: list[str] | None = None) -> int:
         output_format = args.format or ("json" if args.json else "text")
         render_json(payload) if output_format == "json" else render_closeout_plan(payload)
         return payload["exit_code"]
+    if args.command == "closeout-fix":
+        event_sink = None
+        if args.jsonl:
+            def event_sink(event: dict[str, Any]) -> None:
+                print(json.dumps(event, sort_keys=True), flush=True)
+
+        try:
+            if args.apply:
+                payload, exit_code = closeout_fix.apply_payload(args, repo, CLI_ENTRYPOINT, event_sink=event_sink)
+            else:
+                payload, exit_code = closeout_fix.preview_payload(args, repo, CLI_ENTRYPOINT)
+        except Exception as exc:
+            payload, exit_code = closeout_fix.failure_payload(args, repo, exc, event_sink=event_sink)
+
+        if args.jsonl:
+            print(json.dumps({"event": "final-payload", "payload": payload}, sort_keys=True), flush=True)
+        elif args.json:
+            render_json(payload)
+        else:
+            print(closeout_fix.render_text(payload))
+        return exit_code
+    if args.command == "finish":
+        event_sink = None
+        if args.jsonl:
+            def event_sink(event: dict[str, Any]) -> None:
+                print(json.dumps(event, sort_keys=True), flush=True)
+
+        payload, exit_code = finish_payload(args, repo, event_sink=event_sink)
+        if args.jsonl:
+            print(json.dumps({"event": "final-payload", "payload": payload}, sort_keys=True), flush=True)
+        else:
+            output_format = args.format or ("json" if args.json else "text")
+            render_json(payload) if output_format == "json" else render_closeout_plan(payload["closeout_plan"])
+        return exit_code
     if args.command == "branch-readiness":
         payload, exit_code = branch_readiness.build_report(args, repo)
         output_format = args.format or ("json" if args.json else "text")
@@ -10653,7 +14713,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "task-packet":
         payload = task_packet_payload(args, repo)
         render_json(payload)
-        return 0
+        return int(payload.get("exit_code") or 0)
     if args.command == "agent-task-packet-from-backlog":
         try:
             payload = backlog_task_packet_payload(args, repo)

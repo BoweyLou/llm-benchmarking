@@ -97,6 +97,15 @@ human request into work an agent can execute without guessing.
 
 ## Validation
 
+- Test strategy:
+  - decision_state: `needs-selection | selected | not-applicable`
+  - selected_boundary: `unit | integration | contract | cli-e2e | api-e2e | ui-e2e | runtime-e2e | manual | unknown | not-applicable`
+  - e2e_required: `yes | no`
+  - rationale: `<why this is the outermost reliable boundary, or why testing is not applicable>`
+  - e2e_scope:
+    - `<user flow, CLI command, API scenario, runtime surface, or explicit not-applicable>`
+  - validation_kinds:
+    - `<command>` - kind `<docs | version | unit | integration | contract | cli-e2e | api-e2e | ui-e2e | runtime-smoke | manual | verification | unspecified>`
 - Commands:
   - `<command>` - expected `<pass/fail/output>`
 - Optional commands:

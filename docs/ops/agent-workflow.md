@@ -122,6 +122,10 @@ combines dirty state, backlog/next work, task status, docs impact, goal check,
 token-budget totals, sidecar paths, and readiness hints. Use
 `CONTEXT_BUNDLE_JSON=1` for machine-readable output. Truncated sections add
 explicit omission records so compact context does not hide missing evidence.
+When the opt-in supervised-learning profile has valid approved-learning context
+records, the bundle includes only a small deterministic set whose approved
+decision/proposal lineage still validates. This is sidecar-only guidance, not
+target instructions, and never authorizes recommendation execution.
 
 `make agent-state-ledger` emits a read-only local ledger across checkout dirt,
 task metadata/worktrees, leases, active overlaps, final receipts, sidecar

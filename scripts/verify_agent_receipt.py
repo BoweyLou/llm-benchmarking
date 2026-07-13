@@ -24,6 +24,19 @@ from typing import Any
 VALID_RUN_STATUSES = {"pass", "pass-with-caveats", "fail", "blocked", "not-run"}
 VALID_COMMAND_RESULTS = {"pass", "fail", "not-run", "blocked"}
 VALID_TEST_RESULTS = {"red-green", "green-only", "not-applicable", "not-run", "blocked"}
+VALID_TEST_BOUNDARIES = {
+    "unit",
+    "integration",
+    "contract",
+    "cli-e2e",
+    "api-e2e",
+    "ui-e2e",
+    "runtime-e2e",
+    "manual",
+    "unknown",
+    "not-applicable",
+}
+E2E_TEST_BOUNDARIES = {"cli-e2e", "api-e2e", "ui-e2e", "runtime-e2e"}
 VALID_FINDING_PRIORITIES = {"P0", "P1", "P2", "P3"}
 VALID_FINDING_CONFIDENCE = {"high", "medium", "low"}
 VALID_FINDING_STATUS = {"open", "accepted", "rejected", "fixed", "deferred", "duplicate"}
@@ -366,9 +379,44 @@ def validate_receipt(receipt: Any, strict: bool) -> list[str]:
 
     tests = as_dict(evidence.get("tests"))
     require(tests.get("result") in VALID_TEST_RESULTS, "evidence.tests.result is invalid", errors)
+    selected_boundary = tests.get("selected_boundary")
+    if selected_boundary is not None:
+        require(
+            selected_boundary in VALID_TEST_BOUNDARIES,
+            "evidence.tests.selected_boundary is invalid",
+            errors,
+        )
+    if "boundary_rationale" in tests:
+        require(
+            isinstance(tests.get("boundary_rationale"), str),
+            "evidence.tests.boundary_rationale must be a string",
+            errors,
+        )
+    if "e2e_required" in tests:
+        require(
+            tests.get("e2e_required") in (True, False),
+            "evidence.tests.e2e_required must be boolean",
+            errors,
+        )
+    require(
+        tests.get("artifacts") is None or isinstance(tests.get("artifacts"), list),
+        "evidence.tests.artifacts must be an array when present",
+        errors,
+    )
     if tests.get("result") == "red-green":
         require(bool(tests.get("failing_test_evidence")), "red-green tests require failing_test_evidence", errors)
         require(bool(tests.get("passing_test_evidence")), "red-green tests require passing_test_evidence", errors)
+    if strict and behavior_change is True:
+        require(
+            selected_boundary not in {None, "unknown", "not-applicable"},
+            "strict mode requires evidence.tests.selected_boundary for behavior-changing work",
+            errors,
+        )
+        require(
+            bool(str(tests.get("boundary_rationale") or "").strip()),
+            "strict mode requires evidence.tests.boundary_rationale for behavior-changing work",
+            errors,
+        )
     if strict and behavior_change is True and tests.get("result") != "red-green":
         require(
             bool(tests.get("skip_reason")),
@@ -377,6 +425,24 @@ def validate_receipt(receipt: Any, strict: bool) -> list[str]:
         )
     if strict and tests.get("result") in {"not-run", "blocked", "green-only"}:
         require(bool(tests.get("skip_reason")), "strict mode requires tests.skip_reason when red/green evidence is absent", errors)
+    if strict and tests.get("e2e_required") is True:
+        require(
+            selected_boundary in E2E_TEST_BOUNDARIES,
+            "strict mode requires an e2e selected_boundary when evidence.tests.e2e_required=true",
+            errors,
+        )
+        if run.get("status") in {"pass", "pass-with-caveats"}:
+            require(
+                bool(tests.get("e2e_evidence")),
+                "strict mode requires evidence.tests.e2e_evidence when e2e_required=true",
+                errors,
+            )
+        else:
+            require(
+                bool(tests.get("e2e_evidence")) or bool(tests.get("e2e_skip_reason")),
+                "strict mode requires evidence.tests.e2e_evidence or e2e_skip_reason when e2e_required=true",
+                errors,
+            )
 
     validate_comment_only_verification(
         evidence.get("comment_only_verification"),

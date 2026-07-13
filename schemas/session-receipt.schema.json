@@ -263,6 +263,32 @@
               "type": "string",
               "enum": ["red-green", "green-only", "not-applicable", "not-run", "blocked"]
             },
+            "selected_boundary": {
+              "type": ["string", "null"],
+              "enum": [
+                "unit",
+                "integration",
+                "contract",
+                "cli-e2e",
+                "api-e2e",
+                "ui-e2e",
+                "runtime-e2e",
+                "manual",
+                "unknown",
+                "not-applicable",
+                null
+              ],
+              "description": "The outermost reliable boundary selected for task validation."
+            },
+            "boundary_rationale": {
+              "type": ["string", "null"],
+              "description": "Why this test boundary is sufficient, or why no automated boundary applies."
+            },
+            "e2e_required": {
+              "type": "boolean",
+              "default": false,
+              "description": "True when the changed behavior needs CLI/API/UI/runtime e2e evidence."
+            },
             "failing_test_evidence": {
               "type": ["string", "null"]
             },
@@ -274,6 +300,21 @@
             },
             "skip_reason": {
               "type": ["string", "null"]
+            },
+            "e2e_evidence": {
+              "type": ["string", "null"],
+              "description": "Command, transcript, trace, screenshot, or artifact proving the selected e2e boundary."
+            },
+            "e2e_skip_reason": {
+              "type": ["string", "null"],
+              "description": "Explicit blocker or rationale when required e2e evidence could not be captured."
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Local artifact paths or references for test logs, traces, screenshots, recordings, or reports."
             }
           }
         },

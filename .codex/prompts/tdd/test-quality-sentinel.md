@@ -19,6 +19,9 @@ Checks:
 - Are edge cases, errors, and compatibility paths covered where they matter?
 - Are snapshots meaningful and reviewed?
 - Are tests deterministic and scoped to the changed behavior?
+- Does the receipt name the selected test boundary and explain why it is sufficient?
+- If e2e is required, is CLI/API/UI/runtime evidence captured with logs,
+  traces, screenshots, recordings, or an explicit blocker/skip reason?
 - Do docs and tests agree on expected behavior?
 - Is generated-test provenance recorded when an agent wrote or shaped tests?
 - Is there a clear exception reason when no red/green evidence exists?
@@ -29,5 +32,6 @@ Output:
 - Weak tests or false confidence.
 - Missing high-value tests.
 - Red/green receipt completeness.
+- Boundary and e2e evidence completeness.
 - Fixes before merge.
 ```

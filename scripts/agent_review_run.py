@@ -514,7 +514,23 @@ def build_receipt(receipt_template, packet, runner_payload, status):
         "run": {"id": packet["run_id"], "started_at": packet["created_at"], "mode": packet["mode"]},
         "tooling": {"agent_tool": "manual", "local_only": True},
         "scope": {"repo_root": packet["repo"]["root"], "changed_files": packet["git"]["changed_files"]},
-        "evidence": {"commands": [], "docs_impact": {"checked": False, "result": "not-run"}, "tests": {"result": "not-run"}},
+        "evidence": {
+            "commands": [],
+            "docs_impact": {"checked": False, "result": "not-run"},
+            "tests": {
+                "result": "not-run",
+                "selected_boundary": "unknown",
+                "boundary_rationale": "",
+                "e2e_required": False,
+                "failing_test_evidence": None,
+                "passing_test_evidence": None,
+                "generated_test_provenance": None,
+                "skip_reason": None,
+                "e2e_evidence": None,
+                "e2e_skip_reason": None,
+                "artifacts": [],
+            },
+        },
         "findings": [],
         "disposition": {"summary": "", "next_actions": []},
     }
@@ -541,10 +557,16 @@ def build_receipt(receipt_template, packet, runner_payload, status):
     }
     receipt["evidence"]["tests"] = {
         "result": "not-applicable",
+        "selected_boundary": "not-applicable",
+        "boundary_rationale": "Review artifact generation has no product behavior boundary under test.",
+        "e2e_required": False,
         "failing_test_evidence": None,
         "passing_test_evidence": None,
         "generated_test_provenance": None,
         "skip_reason": "Review artifact generation only; no behavior change under test.",
+        "e2e_evidence": None,
+        "e2e_skip_reason": None,
+        "artifacts": [],
     }
     receipt["findings"] = runner_payload.get("findings", [])
     receipt["disposition"]["summary"] = runner_payload["summary"]

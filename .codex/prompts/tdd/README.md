@@ -14,10 +14,14 @@ Use these prompts when the work should be driven by executable behavior, not jus
 ## Workflow
 
 1. Start from user-visible behavior, a bug reproduction, or a contract.
-2. Write the smallest failing test that proves the next slice of behavior.
-3. Implement only enough code to pass.
-4. Refactor under the protection of the tests.
-5. Run the smallest meaningful verification loop before broad suites.
+2. Select the outermost reliable boundary that can prove the behavior: unit,
+   integration, contract, CLI e2e, API e2e, UI e2e, runtime e2e, manual, or
+   not applicable.
+3. Write the smallest failing test that proves the next slice of behavior at
+   that boundary, then narrow inward only when smaller tests clarify the cause.
+4. Implement only enough code to pass.
+5. Refactor under the protection of the tests.
+6. Run the smallest meaningful verification loop before broad suites.
 
 These prompts are deliberately compatible with the repo-review prompt set: use review prompts to find risk, then use these prompts to fix the accepted risk with executable evidence.
 
@@ -27,6 +31,10 @@ Every code-changing TDD run should record a local red/green receipt:
 
 - Failing test command and result before production code changed.
 - Passing test command and result after the smallest production change.
+- Selected test boundary and rationale.
+- E2E-required decision, e2e evidence, or explicit blocker/skip reason for
+  user-visible, multi-component, stateful, runtime/deployment, browser/UI, or
+  external-tool behavior.
 - Generated-test provenance when an agent wrote or heavily shaped the test.
 - Exception reason when a failing test is not practical.
 - Because regressions need repeatable evidence, manual validation notes are only

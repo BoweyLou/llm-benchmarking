@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/repo-contract-kit/learning-policy.schema.json",
+  "title": "Supervised Learning Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_id",
+    "enabled",
+    "mode",
+    "human_approval_required",
+    "ownership",
+    "retention",
+    "phase_boundary"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "policy_id": {"type": "string", "const": "supervised-learning"},
+    "enabled": {"type": "boolean"},
+    "mode": {"type": "string", "const": "supervised"},
+    "human_approval_required": {"type": "boolean", "const": true},
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "schemas", "events", "proposals", "decisions", "context", "upstream_candidates"],
+      "properties": {
+        "policy": {"type": "string", "const": "target"},
+        "schemas": {"type": "string", "const": "kit-managed"},
+        "events": {"type": "string", "const": "sidecar"},
+        "proposals": {"type": "string", "const": "sidecar"},
+        "decisions": {"type": "string", "const": "sidecar"},
+        "context": {"type": "string", "const": "sidecar"},
+        "upstream_candidates": {"type": "string", "const": "sidecar"}
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["privacy_label", "default_days"],
+      "properties": {
+        "privacy_label": {"type": "string", "enum": ["public-ok", "internal", "private-local", "sensitive-local"]},
+        "default_days": {"type": "integer", "minimum": 1}
+      }
+    },
+    "phase_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled_commands", "deferred_commands"],
+      "properties": {
+        "enabled_commands": {"type": "array", "items": {"type": "string"}},
+        "deferred_commands": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

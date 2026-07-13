@@ -5,7 +5,12 @@ This repository uses a test-first bias: important behavior should be described b
 ## Principles
 
 - Start with observable behavior: user-visible flows, APIs, CLIs, jobs, imports/exports, and domain outcomes.
-- Prefer the smallest test boundary that proves the contract.
+- Select the outermost reliable automated boundary that proves the contract,
+  then add smaller tests only when they clarify diagnosis or reduce feedback
+  cost.
+- Treat CLI, API, UI, and runtime e2e checks as required when user-visible,
+  multi-component, stateful, deployment/runtime, browser/UI, or external-tool
+  behavior cannot be proven by unit, integration, or contract tests.
 - Add regression tests before bug fixes.
 - Add characterization tests before risky refactors.
 - Add contract tests for APIs, schemas, generated clients, event payloads, persisted data, and file formats.
@@ -33,6 +38,8 @@ Use:
 A change is complete when:
 
 - The intended behavior is covered by meaningful tests or an explicit reason explains why not.
+- The receipt or handoff names the selected boundary, the rationale, and any
+  required e2e evidence or skip reason.
 - Relevant tests pass locally or the blocker is documented.
 - Tests prove behavior rather than only asserting mocks or implementation details.
 - Docs and ADRs match the tested behavior.
@@ -48,4 +55,3 @@ Some changes can reasonably skip tests:
 - Emergency operational changes where testing is impossible in the moment.
 
 When skipping tests, explain why in the PR.
-

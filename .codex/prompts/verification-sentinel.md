@@ -31,6 +31,8 @@ Checks:
 - Did docs and behavior converge?
 - Did the implementation introduce new duplication, dead code, broad abstraction, or security/privacy exposure?
 - Are validation commands sufficient for the changed surface?
+- Does the final receipt record the selected test boundary, rationale, and
+  e2e evidence or skip reason when e2e was required?
 - Did the final evidence preserve scope, docs impact, goal alignment,
   validation, closeout, receipt, and omission details instead of hiding them
   behind a compact summary?

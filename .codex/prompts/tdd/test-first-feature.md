@@ -15,12 +15,13 @@ Inputs:
 Process:
 1. Read the docs and code path for the feature before writing tests.
 2. State the intended behavior as concrete examples and edge cases.
-3. Pick the highest-value first test at the public boundary when practical.
-4. Write or propose the failing test first.
-5. Confirm why it fails. If it passes unexpectedly, explain the existing behavior and revise the test.
-6. Implement the smallest production change that makes the test pass.
-7. Refactor only after tests pass.
-8. Repeat for the next behavior slice.
+3. Pick the highest-value first test at the outermost reliable boundary when practical: unit, integration, contract, CLI e2e, API e2e, UI e2e, runtime e2e, manual, or not applicable.
+4. Mark e2e required when user-visible, multi-component, stateful, runtime/deployment, browser/UI, or external-tool behavior cannot be proven by a smaller test.
+5. Write or propose the failing test first.
+6. Confirm why it fails. If it passes unexpectedly, explain the existing behavior and revise the test.
+7. Implement the smallest production change that makes the test pass.
+8. Refactor only after tests pass.
+9. Repeat for the next behavior slice.
 
 Rules:
 - Prefer behavior tests over implementation-detail tests.
@@ -36,6 +37,8 @@ Output:
 - Tests added or changed.
 - Failing test command and result before implementation, or exception reason.
 - Passing test command and result after implementation.
+- Selected test boundary, rationale, and e2e-required decision.
+- E2E evidence, artifact path, or explicit blocker/skip reason when e2e is required.
 - Generated-test provenance if the agent wrote or substantially shaped a test.
 - Implementation files changed.
 - Verification commands and results.

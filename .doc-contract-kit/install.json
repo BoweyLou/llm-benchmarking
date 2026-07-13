@@ -1,7 +1,7 @@
 {
   "installed_at": "2026-06-30T23:52:13+00:00",
-  "kit_version": "0.6.41",
-  "last_updated_at": "2026-06-30T23:52:13+00:00",
+  "kit_version": "0.6.53",
+  "last_updated_at": "2026-07-13T00:13:38+00:00",
   "preset": "agentic",
   "profile_config_schema_version": 1,
   "profiles": [
@@ -28,9 +28,9 @@
       "templates/common/research-source-report.schema.json",
       "templates/common/research-synthesis.schema.json"
     ],
-    "snapshot_sha256": "979a2eb202fb391760ed8ce617b956ec5ba87a2f1c948622e0591f52b791235f",
+    "snapshot_sha256": "14cd96a8e4a18c2803cfeac33d21b296eb3d3a6ea81d92076993a7d54b734474",
     "source_prompt_root": "workflows/prompts",
-    "source_ref": "426899cea0f7517405166b5e24f3dc02dd87317c",
+    "source_ref": "9cfdde4e6497d30e189d9aa3611e95ba4b92ff4e",
     "source_url": "https://github.com/BoweyLou/repo-contract-kit",
     "vendored_at": "2026-06-18",
     "version": "0.4.60"
@@ -38,13 +38,13 @@
   "runtime_adapters": [],
   "schema_version": 1,
   "source_commits": {
-    "repo-contract-kit": "426899cea0f7517405166b5e24f3dc02dd87317c",
-    "workflow-source": "426899cea0f7517405166b5e24f3dc02dd87317c"
+    "repo-contract-kit": "9cfdde4e6497d30e189d9aa3611e95ba4b92ff4e",
+    "workflow-source": "9cfdde4e6497d30e189d9aa3611e95ba4b92ff4e"
   },
   "source_components": {
     "repo-contract-kit": {
-      "source_ref": "426899cea0f7517405166b5e24f3dc02dd87317c",
-      "version": "0.6.41"
+      "source_ref": "9cfdde4e6497d30e189d9aa3611e95ba4b92ff4e",
+      "version": "0.6.53"
     },
     "workflow-source": {
       "generated_adapter": "templates/profiles/*/files/.codex/prompts",
@@ -63,14 +63,14 @@
         "templates/common/research-source-report.schema.json",
         "templates/common/research-synthesis.schema.json"
       ],
-      "snapshot_sha256": "979a2eb202fb391760ed8ce617b956ec5ba87a2f1c948622e0591f52b791235f",
+      "snapshot_sha256": "14cd96a8e4a18c2803cfeac33d21b296eb3d3a6ea81d92076993a7d54b734474",
       "source_prompt_root": "workflows/prompts",
-      "source_ref": "426899cea0f7517405166b5e24f3dc02dd87317c",
+      "source_ref": "9cfdde4e6497d30e189d9aa3611e95ba4b92ff4e",
       "source_url": "https://github.com/BoweyLou/repo-contract-kit",
       "vendored_at": "2026-06-18",
       "version": "0.4.60"
     }
   },
-  "source_ref": "426899cea0f7517405166b5e24f3dc02dd87317c",
-  "source_version": "0.6.41"
+  "source_ref": "9cfdde4e6497d30e189d9aa3611e95ba4b92ff4e",
+  "source_version": "0.6.53"
 }

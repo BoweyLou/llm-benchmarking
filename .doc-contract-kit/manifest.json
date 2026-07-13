@@ -370,13 +370,13 @@
       "source_sha256": "35f12167ddd4f109f7576d0382860ee9d3628fa358da1a6e6bc3124d1f0a4590"
     },
     {
-      "installed_sha256": "f9512f0bd81777b2f56f8b081035694bb51279b38ce6cdb1908c348386ce609d",
+      "installed_sha256": "eaeccb63fa6163a17e9d76608083b877fa2a98e9b2feb5f6e5eaaeb016da136c",
       "managed": true,
       "owner": "kit",
       "path": ".codex/prompts/task-packet.md",
       "profile": "review-prompts",
       "source": "templates/profiles/review-prompts/files/.codex/prompts/task-packet.md",
-      "source_sha256": "f9512f0bd81777b2f56f8b081035694bb51279b38ce6cdb1908c348386ce609d"
+      "source_sha256": "eaeccb63fa6163a17e9d76608083b877fa2a98e9b2feb5f6e5eaaeb016da136c"
     },
     {
       "installed_sha256": "fee3d4cda0a1589e633159c544543f2be9f596f76f6c39097cb1c2d3584c11ba",
@@ -388,13 +388,13 @@
       "source_sha256": "fee3d4cda0a1589e633159c544543f2be9f596f76f6c39097cb1c2d3584c11ba"
     },
     {
-      "installed_sha256": "bb7b8bcf42e6b3be1b5805a2183c3387c9bf1cb7045e51b77d579237448122da",
+      "installed_sha256": "1b6c05b2247dbd5b82e2652a52433f13f2232e79f3c3eb2d168eb8f9de336430",
       "managed": true,
       "owner": "kit",
       "path": ".codex/prompts/tdd/README.md",
       "profile": "test-first",
       "source": "templates/profiles/test-first/files/.codex/prompts/tdd/README.md",
-      "source_sha256": "bb7b8bcf42e6b3be1b5805a2183c3387c9bf1cb7045e51b77d579237448122da"
+      "source_sha256": "1b6c05b2247dbd5b82e2652a52433f13f2232e79f3c3eb2d168eb8f9de336430"
     },
     {
       "installed_sha256": "a711f100a9c29207c62c6256f9c180f066ac3fc690c52943b9655033fbb0cdfd",
@@ -415,13 +415,13 @@
       "source_sha256": "82951cf5a9c3ff8cc6a04d8ade653d0de899338f45c3be69705b3477f9c05502"
     },
     {
-      "installed_sha256": "8053218ec41c5fa446b28568484e94c6ce7ab9e8a607e7037d8b83ecb4ec1ee5",
+      "installed_sha256": "a61ad5583c5a80bcca3d2a616db653a0ce055a2f75ed1827e3785ab469d03187",
       "managed": true,
       "owner": "kit",
       "path": ".codex/prompts/tdd/outside-in-acceptance-tdd.md",
       "profile": "test-first",
       "source": "templates/profiles/test-first/files/.codex/prompts/tdd/outside-in-acceptance-tdd.md",
-      "source_sha256": "8053218ec41c5fa446b28568484e94c6ce7ab9e8a607e7037d8b83ecb4ec1ee5"
+      "source_sha256": "a61ad5583c5a80bcca3d2a616db653a0ce055a2f75ed1827e3785ab469d03187"
     },
     {
       "installed_sha256": "505bd5125b90f0832d30a664e5d68e1ebfa986b639a5c97c40f12972c55a1911",
@@ -460,22 +460,22 @@
       "source_sha256": "170bb6d7aae0b2b9dc3bf2778c627bc8b1a3d5f4a490d6ae8af92345712b5a61"
     },
     {
-      "installed_sha256": "38c6d74b4d965275f32227ba6d3e13fdaedaae7e8cf49fdea00a40199f86853c",
+      "installed_sha256": "3b407c2ce94bbfd09feeecff915e76f3ef785bb348630cf9791c898d76a1d52f",
       "managed": true,
       "owner": "kit",
       "path": ".codex/prompts/tdd/test-first-feature.md",
       "profile": "test-first",
       "source": "templates/profiles/test-first/files/.codex/prompts/tdd/test-first-feature.md",
-      "source_sha256": "38c6d74b4d965275f32227ba6d3e13fdaedaae7e8cf49fdea00a40199f86853c"
+      "source_sha256": "3b407c2ce94bbfd09feeecff915e76f3ef785bb348630cf9791c898d76a1d52f"
     },
     {
-      "installed_sha256": "54f6ddfdd9693a3e721b08841f33db19fa1bd4d580c0472634fc752ff251f2b5",
+      "installed_sha256": "50513fe4a06395f30cd63f2a6773b50128f88bfd47306c852f9cac0b8bb85288",
       "managed": true,
       "owner": "kit",
       "path": ".codex/prompts/tdd/test-quality-sentinel.md",
       "profile": "test-first",
       "source": "templates/profiles/test-first/files/.codex/prompts/tdd/test-quality-sentinel.md",
-      "source_sha256": "54f6ddfdd9693a3e721b08841f33db19fa1bd4d580c0472634fc752ff251f2b5"
+      "source_sha256": "50513fe4a06395f30cd63f2a6773b50128f88bfd47306c852f9cac0b8bb85288"
     },
     {
       "installed_sha256": "4511b708d2e311acf61817d7e29120888afe58bcc656a63e284c257e323774bb",
@@ -505,22 +505,22 @@
       "source_sha256": "82fea42e8fa4eac4a11ee4795953ee593355344c061d4cfd09494db72f9efc31"
     },
     {
-      "installed_sha256": "207c42dd6ee31507d17392a43c3862fcf390e5892afef1cc710f1abc393e99a7",
+      "installed_sha256": "ad5fc6665d1b2bc2929daea643548dd50303f6a0aea8524e2d7e518fd13d63d3",
       "managed": true,
       "owner": "kit",
       "path": ".codex/prompts/templates/task-packet.md",
       "profile": "review-prompts",
       "source": "templates/profiles/review-prompts/files/.codex/prompts/templates/task-packet.md",
-      "source_sha256": "207c42dd6ee31507d17392a43c3862fcf390e5892afef1cc710f1abc393e99a7"
+      "source_sha256": "ad5fc6665d1b2bc2929daea643548dd50303f6a0aea8524e2d7e518fd13d63d3"
     },
     {
-      "installed_sha256": "b3627cb86559a753bceb6f49fd17cf042c1affe83b8c4969398686722eef7a14",
+      "installed_sha256": "895ddfd15b6098afcafcc8cb4e645bc4b66032f104e8e34c52786ac3ed64e8d1",
       "managed": true,
       "owner": "kit",
       "path": ".codex/prompts/verification-sentinel.md",
       "profile": "review-prompts",
       "source": "templates/profiles/review-prompts/files/.codex/prompts/verification-sentinel.md",
-      "source_sha256": "b3627cb86559a753bceb6f49fd17cf042c1affe83b8c4969398686722eef7a14"
+      "source_sha256": "895ddfd15b6098afcafcc8cb4e645bc4b66032f104e8e34c52786ac3ed64e8d1"
     },
     {
       "installed_sha256": "4e6772a1d65f9dec1a6ae08983d2bd3a58ceca839908bd6d3b2bf6bd8d09fc3a",
@@ -595,7 +595,7 @@
       "source_sha256": "3214ab977ff07aede6b56aa3682ca8147c2e8484856bbacaf55951fb205824b8"
     },
     {
-      "installed_sha256": "ac50d4a0591a2abcae373a6032782f79558299e86434d2de29096157111a6d48",
+      "installed_sha256": "388b23e249e9b774f1ecc79bf2a8274ca88092966366d5addb939fce430489c5",
       "managed": false,
       "owner": "target",
       "path": "CHANGELOG.md",
@@ -622,7 +622,7 @@
       "source_sha256": "a592ddd189bafa433a7a102641bb59ddd571663b5640dd7570b8aa59f6230354"
     },
     {
-      "installed_sha256": "e9dd8507f4bf0c6f42458e41aea833ad0bd3f6127272335eee9bf4d58541ed67",
+      "installed_sha256": "40b8eb4000a913a7791090535f291d3d369874162a89ef3c9e3d4e887a1b9e79",
       "managed": false,
       "owner": "target",
       "path": "VERSION",
@@ -649,13 +649,13 @@
       "source_sha256": "09c42b733e18458e7088f98e1af419238cf63ab62342723c6917af7bd746333a"
     },
     {
-      "installed_sha256": "e0b14a223fc3132b1f2f968337a1f68e222d3427d2278f9b655e7cae80b4e3b1",
+      "installed_sha256": "1ed124b378d2b75c21ee9a8f25b15efbef8ee6d81f88e6c10853ac4f3a69bbef",
       "managed": true,
       "owner": "kit",
       "path": "docs/adr/0001-testing-philosophy.md",
       "profile": "test-first",
       "source": "templates/profiles/test-first/files/docs/adr/0001-testing-philosophy.md",
-      "source_sha256": "e0b14a223fc3132b1f2f968337a1f68e222d3427d2278f9b655e7cae80b4e3b1"
+      "source_sha256": "1ed124b378d2b75c21ee9a8f25b15efbef8ee6d81f88e6c10853ac4f3a69bbef"
     },
     {
       "installed_sha256": "568c64070c02f078d37f7769e9a9109cd8b2e52909242067eef558cbdb1b2456",
@@ -667,13 +667,13 @@
       "source_sha256": "568c64070c02f078d37f7769e9a9109cd8b2e52909242067eef558cbdb1b2456"
     },
     {
-      "installed_sha256": "7bc96a2154db9fa284b6e4b1f16f764346f6e8033b9c1408597d1b45020a7646",
+      "installed_sha256": "2fd8ce7156445d7e39ba6a82b6df0d9d60b455ba5f6db2f0809086a512dbaaed",
       "managed": true,
       "owner": "kit",
       "path": "docs/harness-engineering.md",
       "profile": "common",
       "source": "templates/common/harness-engineering.md",
-      "source_sha256": "7bc96a2154db9fa284b6e4b1f16f764346f6e8033b9c1408597d1b45020a7646"
+      "source_sha256": "2fd8ce7156445d7e39ba6a82b6df0d9d60b455ba5f6db2f0809086a512dbaaed"
     },
     {
       "installed_sha256": "e8e221059b895c8bb5236dc9ef4ed08b54fc4d74e03a6d103eee64b70ebe6aaa",
@@ -703,13 +703,13 @@
       "source_sha256": "57e58f744ce2345c76895caae6d1d708cabdc7a15eff7205214a4500bafec49a"
     },
     {
-      "installed_sha256": "ec1eafe9388b991610dc867e2c2eac4267fdfd6f36772ecb58475a1328e99ea7",
+      "installed_sha256": "a88fd4b26bc0efef3f6b86a27b8d1da4b733fa665ae83c6975d1575cc42ee3ed",
       "managed": true,
       "owner": "kit",
       "path": "docs/ops/agent-workflow.md",
       "profile": "common",
       "source": "templates/common/ops-agent-workflow.md",
-      "source_sha256": "ec1eafe9388b991610dc867e2c2eac4267fdfd6f36772ecb58475a1328e99ea7"
+      "source_sha256": "a88fd4b26bc0efef3f6b86a27b8d1da4b733fa665ae83c6975d1575cc42ee3ed"
     },
     {
       "installed_sha256": "209fd44a376292a90c0d39f2e03f81306822e46a9a71a622357a128d68b6d966",
@@ -730,22 +730,22 @@
       "source_sha256": "a208a9af97a3836b9003215311ba1a3da7147ae6d765baaa5a3c7d1d691ec9b6"
     },
     {
-      "installed_sha256": "519d562356ede792b09e712857b4bb58ae39fa00fcc12043087d1545aba5568b",
+      "installed_sha256": "312f6dd281f664230e3e29fff2db3c6cf5b0252fd452f25f68d8e79c02a96aef",
       "managed": true,
       "owner": "kit",
       "path": "docs/sidecar-retention.md",
       "profile": "common",
       "source": "templates/common/sidecar-retention.md",
-      "source_sha256": "519d562356ede792b09e712857b4bb58ae39fa00fcc12043087d1545aba5568b"
+      "source_sha256": "312f6dd281f664230e3e29fff2db3c6cf5b0252fd452f25f68d8e79c02a96aef"
     },
     {
-      "installed_sha256": "69a7f809c672d4cb5718bf6b93f3a2ab30b614e911ed1bf20a434f869f2ea8a4",
+      "installed_sha256": "15ca680fab9148b2688d8270e2161716bf134a4ec324f760764b2e0fccca1530",
       "managed": true,
       "owner": "kit",
       "path": "docs/testing-strategy.md",
       "profile": "test-first",
       "source": "templates/profiles/test-first/files/docs/testing-strategy.md",
-      "source_sha256": "69a7f809c672d4cb5718bf6b93f3a2ab30b614e911ed1bf20a434f869f2ea8a4"
+      "source_sha256": "15ca680fab9148b2688d8270e2161716bf134a4ec324f760764b2e0fccca1530"
     },
     {
       "installed_sha256": "49ad38a5d65ea5e209ab25888d34a0b700296976f2bbde84afb60d0b5db4cee8",
@@ -791,6 +791,51 @@
       "profile": "common",
       "source": "templates/common/area-contracts.schema.json",
       "source_sha256": "5e901174f7c890f80d78cd919789f275260414791fa8725d47d798390c44a3e4"
+    },
+    {
+      "installed_sha256": "34d554cf504cd55e86caa663868b72033fc1ab320d97049153744810f4586f31",
+      "managed": true,
+      "owner": "kit",
+      "path": "schemas/learning-context.schema.json",
+      "profile": "common",
+      "source": "templates/common/learning-context.schema.json",
+      "source_sha256": "34d554cf504cd55e86caa663868b72033fc1ab320d97049153744810f4586f31"
+    },
+    {
+      "installed_sha256": "5dbfe15ba1fcc84a1b30454c9d81d18dcc7fa2a6d760d68ffe20fd7ee1c2986a",
+      "managed": true,
+      "owner": "kit",
+      "path": "schemas/learning-decision.schema.json",
+      "profile": "common",
+      "source": "templates/common/learning-decision.schema.json",
+      "source_sha256": "5dbfe15ba1fcc84a1b30454c9d81d18dcc7fa2a6d760d68ffe20fd7ee1c2986a"
+    },
+    {
+      "installed_sha256": "2cf8e0c6f80e29d1e3e6759b080d9e052f9ade77d77beea31fa2e46ccd3fedfe",
+      "managed": true,
+      "owner": "kit",
+      "path": "schemas/learning-event.schema.json",
+      "profile": "common",
+      "source": "templates/common/learning-event.schema.json",
+      "source_sha256": "2cf8e0c6f80e29d1e3e6759b080d9e052f9ade77d77beea31fa2e46ccd3fedfe"
+    },
+    {
+      "installed_sha256": "971cf89e82b3c89d5885f924f1f63cc7136854854832393c64e719fb661ce044",
+      "managed": true,
+      "owner": "kit",
+      "path": "schemas/learning-policy.schema.json",
+      "profile": "common",
+      "source": "templates/common/learning-policy.schema.json",
+      "source_sha256": "971cf89e82b3c89d5885f924f1f63cc7136854854832393c64e719fb661ce044"
+    },
+    {
+      "installed_sha256": "5b5ac03d7cf902cc52d6bc30c51bd32620220d669aa8f03fad8de9bf90e9de5e",
+      "managed": true,
+      "owner": "kit",
+      "path": "schemas/learning-proposal.schema.json",
+      "profile": "common",
+      "source": "templates/common/learning-proposal.schema.json",
+      "source_sha256": "5b5ac03d7cf902cc52d6bc30c51bd32620220d669aa8f03fad8de9bf90e9de5e"
     },
     {
       "installed_sha256": "7e6727bcce885ea06de59bc71bda2c685dfb7cad742c3e1c2f9844b245001a8a",
@@ -847,22 +892,22 @@
       "source_sha256": "cd6badb4dd882466a1d9107b64723169a79ca76b2af2bb7f351a94d7d950b8b3"
     },
     {
-      "installed_sha256": "414aa49804ca805ef2543e388052c34a20d1c63e171558b351a4e387eb072032",
+      "installed_sha256": "4d512a52fcbe780ad92a1f5acfc08347b6202d4c790c2eef8b88a0ef1a80b1a3",
       "managed": true,
       "owner": "kit",
       "path": "schemas/session-receipt.schema.json",
       "profile": "common",
       "source": "templates/common/session-receipt.schema.json",
-      "source_sha256": "414aa49804ca805ef2543e388052c34a20d1c63e171558b351a4e387eb072032"
+      "source_sha256": "4d512a52fcbe780ad92a1f5acfc08347b6202d4c790c2eef8b88a0ef1a80b1a3"
     },
     {
-      "installed_sha256": "e59cd47de48150651ad7c171738d7eba930ed7298bf6526fc8a92e3a6df0e0a9",
+      "installed_sha256": "a857a4e96d5d1ec0d6afa4ec3007deac52d55ee449996ff05242d84b33e756db",
       "managed": true,
       "owner": "kit",
       "path": "schemas/task-packet.schema.json",
       "profile": "common",
       "source": "templates/common/task-packet.schema.json",
-      "source_sha256": "e59cd47de48150651ad7c171738d7eba930ed7298bf6526fc8a92e3a6df0e0a9"
+      "source_sha256": "a857a4e96d5d1ec0d6afa4ec3007deac52d55ee449996ff05242d84b33e756db"
     },
     {
       "installed_sha256": "1a1fe269c775c13f59bce84a7432a503070c1311aff488440045347cc73ebe3a",
@@ -874,6 +919,15 @@
       "source_sha256": "1a1fe269c775c13f59bce84a7432a503070c1311aff488440045347cc73ebe3a"
     },
     {
+      "installed_sha256": "51932dba2a2aeadd73ff006bfdf75ec2d8b420211ac8f1f380ef8a169a698735",
+      "managed": true,
+      "owner": "kit",
+      "path": "scripts/agent_parallel_coordination.py",
+      "profile": "core-scripts",
+      "source": "scripts/agent_parallel_coordination.py",
+      "source_sha256": "51932dba2a2aeadd73ff006bfdf75ec2d8b420211ac8f1f380ef8a169a698735"
+    },
+    {
       "installed_sha256": "83bd30a9f6f508cd5c8c67a96c7767b5948c4997edde4e4734aae45cf6c2e363",
       "managed": true,
       "owner": "kit",
@@ -883,31 +937,31 @@
       "source_sha256": "83bd30a9f6f508cd5c8c67a96c7767b5948c4997edde4e4734aae45cf6c2e363"
     },
     {
-      "installed_sha256": "cb0343aac6c47f2fe6eb043fe44c02d705d2480004c2cd67a4147e0589093a4f",
+      "installed_sha256": "ec1babd3bcab1794acb43fe0566af3a04672326dc1aba456b7bcddbaa437db03",
       "managed": true,
       "owner": "kit",
       "path": "scripts/agent_review_run.py",
       "profile": "core-scripts",
       "source": "scripts/agent_review_run.py",
-      "source_sha256": "cb0343aac6c47f2fe6eb043fe44c02d705d2480004c2cd67a4147e0589093a4f"
+      "source_sha256": "ec1babd3bcab1794acb43fe0566af3a04672326dc1aba456b7bcddbaa437db03"
     },
     {
-      "installed_sha256": "cdc4484ef57ed8da91c1532d4ff797c2797533a34d81ac32ff654a5cc90d2b27",
+      "installed_sha256": "0cd55c0370f9f4f20f0ae6fb408279ac00d6c2623c6b21199c48980ea4edb2b6",
       "managed": true,
       "owner": "kit",
       "path": "scripts/agent_start.py",
       "profile": "core-scripts",
       "source": "scripts/agent_start.py",
-      "source_sha256": "cdc4484ef57ed8da91c1532d4ff797c2797533a34d81ac32ff654a5cc90d2b27"
+      "source_sha256": "0cd55c0370f9f4f20f0ae6fb408279ac00d6c2623c6b21199c48980ea4edb2b6"
     },
     {
-      "installed_sha256": "a4f41311b83cc6ae352ef53a08416ee7a0cc9084aa5b8c90186e07290a97f5c1",
+      "installed_sha256": "bf296a0e84568675bb560d0084f30a5fea5712309fa6e7ae3f3db0e1a635c928",
       "managed": true,
       "owner": "kit",
       "path": "scripts/agent_task_cleanup.py",
       "profile": "core-scripts",
       "source": "scripts/agent_task_cleanup.py",
-      "source_sha256": "a4f41311b83cc6ae352ef53a08416ee7a0cc9084aa5b8c90186e07290a97f5c1"
+      "source_sha256": "bf296a0e84568675bb560d0084f30a5fea5712309fa6e7ae3f3db0e1a635c928"
     },
     {
       "installed_sha256": "1831021784283da5c67fe8ee49dac0b4c995c5ac52253341d70efed28b75573c",
@@ -928,13 +982,13 @@
       "source_sha256": "45f390a959e5ca93862b865edca45f4b6e063f9c1bf5195d4c385e3cead45f21"
     },
     {
-      "installed_sha256": "7317abd1deee888c64825462bd7fd8e75f2da2d63f79000161d8a66e9dbb4bc2",
+      "installed_sha256": "a8ba025f4acd7bda33576200ba5a61ee49eccc1cd042b4a01a5afe3932faa919",
       "managed": true,
       "owner": "kit",
       "path": "scripts/agent_task_prepare.py",
       "profile": "core-scripts",
       "source": "scripts/agent_task_prepare.py",
-      "source_sha256": "7317abd1deee888c64825462bd7fd8e75f2da2d63f79000161d8a66e9dbb4bc2"
+      "source_sha256": "a8ba025f4acd7bda33576200ba5a61ee49eccc1cd042b4a01a5afe3932faa919"
     },
     {
       "installed_sha256": "e260d44af2434d99ea54bdcfda07d8065cd90080a2c3a17d3082c6d47095aa48",
@@ -946,13 +1000,13 @@
       "source_sha256": "e260d44af2434d99ea54bdcfda07d8065cd90080a2c3a17d3082c6d47095aa48"
     },
     {
-      "installed_sha256": "8fa49839591f7f1e799c5711218f182744c505a4d6db7ab3827dfa9684260182",
+      "installed_sha256": "aaa94ad6f9c2e4d510829323a2ed3938df8ff241f87dfa7f3c2e0ac7e635abf7",
       "managed": true,
       "owner": "kit",
       "path": "scripts/agent_task_status.py",
       "profile": "core-scripts",
       "source": "scripts/agent_task_status.py",
-      "source_sha256": "8fa49839591f7f1e799c5711218f182744c505a4d6db7ab3827dfa9684260182"
+      "source_sha256": "aaa94ad6f9c2e4d510829323a2ed3938df8ff241f87dfa7f3c2e0ac7e635abf7"
     },
     {
       "installed_sha256": "0e8ce2a237aac34d93b24f1f69dcd5ee322f7a5096439b91b1a2ffd9e6fc3ebc",
@@ -1018,6 +1072,24 @@
       "source_sha256": "5d5e488cc48259e52c37982ea66aafd327751f2d827e71af0c94cbb147bff80d"
     },
     {
+      "installed_sha256": "0881a7810ee7af29257be93d4ae34706ef529c01b4d3bfe5a35af7f594e99ea8",
+      "managed": true,
+      "owner": "kit",
+      "path": "scripts/closeout_explanations.py",
+      "profile": "core-scripts",
+      "source": "scripts/closeout_explanations.py",
+      "source_sha256": "0881a7810ee7af29257be93d4ae34706ef529c01b4d3bfe5a35af7f594e99ea8"
+    },
+    {
+      "installed_sha256": "bbf33e262c6f4f313cdb35dab32dfb0409afd7cf7bfd8706677ccf9a026368fc",
+      "managed": true,
+      "owner": "kit",
+      "path": "scripts/closeout_fix.py",
+      "profile": "core-scripts",
+      "source": "scripts/closeout_fix.py",
+      "source_sha256": "bbf33e262c6f4f313cdb35dab32dfb0409afd7cf7bfd8706677ccf9a026368fc"
+    },
+    {
       "installed_sha256": "8ae5001db05902e1766f86eaaf4d42465cf071f57c88b6cbf2cce2eb724dd13b",
       "managed": true,
       "owner": "kit",
@@ -1081,22 +1153,22 @@
       "source_sha256": "0e91a2a63af412f6d4303b242368c10b15000ca2b76e6ca9cb9b52207e6ed809"
     },
     {
-      "installed_sha256": "98d44a0d625ca51753af364221257dbc34089233846f6ae3063e298b625b3c32",
+      "installed_sha256": "6593ee9724d204e78a88d60c158bfe855f0208b7d0320796e735aaf1862e68c3",
       "managed": true,
       "owner": "kit",
       "path": "scripts/repo_contract_kit.py",
       "profile": "core-scripts",
       "source": "scripts/repo_contract_kit.py",
-      "source_sha256": "98d44a0d625ca51753af364221257dbc34089233846f6ae3063e298b625b3c32"
+      "source_sha256": "6593ee9724d204e78a88d60c158bfe855f0208b7d0320796e735aaf1862e68c3"
     },
     {
-      "installed_sha256": "21a2e186d9f5b3cd6658bd3b23a8f0cc433738f635c912ccb37af00f879300a0",
+      "installed_sha256": "4b73d50d22ac7dfc0782ae0156bcf80d511a44827383280c4d2a805b3b69188b",
       "managed": true,
       "owner": "kit",
       "path": "scripts/verify_agent_receipt.py",
       "profile": "core-scripts",
       "source": "scripts/verify_agent_receipt.py",
-      "source_sha256": "21a2e186d9f5b3cd6658bd3b23a8f0cc433738f635c912ccb37af00f879300a0"
+      "source_sha256": "4b73d50d22ac7dfc0782ae0156bcf80d511a44827383280c4d2a805b3b69188b"
     },
     {
       "installed_sha256": "fe1994438d11bb503fb450231084f58eae8d1c2514172356bf60ccf2fbb968d1",
@@ -1108,8 +1180,8 @@
       "source_sha256": "fe1994438d11bb503fb450231084f58eae8d1c2514172356bf60ccf2fbb968d1"
     }
   ],
-  "generated_at": "2026-06-30T23:52:13+00:00",
-  "kit_version": "0.6.41",
+  "generated_at": "2026-07-13T00:13:38+00:00",
+  "kit_version": "0.6.53",
   "preset": "agentic",
   "profile_config_schema_version": 1,
   "profiles": [
@@ -1136,9 +1208,9 @@
       "templates/common/research-source-report.schema.json",
       "templates/common/research-synthesis.schema.json"
     ],
-    "snapshot_sha256": "979a2eb202fb391760ed8ce617b956ec5ba87a2f1c948622e0591f52b791235f",
+    "snapshot_sha256": "14cd96a8e4a18c2803cfeac33d21b296eb3d3a6ea81d92076993a7d54b734474",
     "source_prompt_root": "workflows/prompts",
-    "source_ref": "426899cea0f7517405166b5e24f3dc02dd87317c",
+    "source_ref": "9cfdde4e6497d30e189d9aa3611e95ba4b92ff4e",
     "source_url": "https://github.com/BoweyLou/repo-contract-kit",
     "vendored_at": "2026-06-18",
     "version": "0.4.60"
@@ -1147,8 +1219,8 @@
   "schema_version": 1,
   "source_components": {
     "repo-contract-kit": {
-      "source_ref": "426899cea0f7517405166b5e24f3dc02dd87317c",
-      "version": "0.6.41"
+      "source_ref": "9cfdde4e6497d30e189d9aa3611e95ba4b92ff4e",
+      "version": "0.6.53"
     },
     "workflow-source": {
       "generated_adapter": "templates/profiles/*/files/.codex/prompts",
@@ -1167,14 +1239,14 @@
         "templates/common/research-source-report.schema.json",
         "templates/common/research-synthesis.schema.json"
       ],
-      "snapshot_sha256": "979a2eb202fb391760ed8ce617b956ec5ba87a2f1c948622e0591f52b791235f",
+      "snapshot_sha256": "14cd96a8e4a18c2803cfeac33d21b296eb3d3a6ea81d92076993a7d54b734474",
       "source_prompt_root": "workflows/prompts",
-      "source_ref": "426899cea0f7517405166b5e24f3dc02dd87317c",
+      "source_ref": "9cfdde4e6497d30e189d9aa3611e95ba4b92ff4e",
       "source_url": "https://github.com/BoweyLou/repo-contract-kit",
       "vendored_at": "2026-06-18",
       "version": "0.4.60"
     }
   },
-  "source_ref": "426899cea0f7517405166b5e24f3dc02dd87317c",
-  "source_version": "0.6.41"
+  "source_ref": "9cfdde4e6497d30e189d9aa3611e95ba4b92ff4e",
+  "source_version": "0.6.53"
 }
