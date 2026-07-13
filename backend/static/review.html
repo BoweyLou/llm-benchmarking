@@ -320,7 +320,7 @@
       min-width: 0;
       min-height: 0;
       display: grid;
-      grid-template-rows: 48px auto 1fr 48px;
+      grid-template-rows: 48px auto auto 1fr 48px;
       background: #fff;
     }
 
@@ -367,6 +367,92 @@
     .tab.active .count {
       background: var(--blue-soft);
       color: var(--blue);
+    }
+
+    .update-summary {
+      display: grid;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .update-summary-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .update-summary-title {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .update-summary-title strong {
+      font-size: 13px;
+    }
+
+    .update-summary-title span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .update-summary-metrics,
+    .update-change-list {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .metric-pill {
+      padding: 3px 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: #394354;
+      background: #f6f8fb;
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .update-change-item {
+      min-width: 190px;
+      max-width: 310px;
+      padding: 7px 8px;
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--blue);
+      border-radius: 6px;
+      background: #fbfcfe;
+    }
+
+    .update-change-item.changed {
+      border-left-color: var(--orange);
+    }
+
+    .update-change-item.removed {
+      border-left-color: var(--red);
+    }
+
+    .update-change-name {
+      display: block;
+      overflow: hidden;
+      color: var(--text);
+      font-weight: 680;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .update-change-meta {
+      display: block;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .table-head {
@@ -1089,7 +1175,7 @@
       }
 
       .content {
-        grid-template-rows: auto auto minmax(420px, 1fr) 48px;
+        grid-template-rows: auto auto auto minmax(420px, 1fr) 48px;
       }
 
       .table-head {
@@ -1228,6 +1314,7 @@
             <select id="approvalFilter" class="select">
               <option value="">All approvals</option>
               <option value="approved">Approved</option>
+              <option value="pending">Pending</option>
               <option value="not_approved">Not approved</option>
             </select>
           </div>
@@ -1275,6 +1362,7 @@
 
       <section class="content">
         <nav class="tabs" id="tabs"></nav>
+        <section class="update-summary" id="updateSummaryPanel" aria-live="polite" hidden></section>
         <div>
           <div class="table-head">
             <div class="table-title">
@@ -1408,7 +1496,7 @@
       activeModelId: null,
       activeUseCaseId: null,
       inspectorTab: "usecases",
-      sort: { key: "name", direction: "asc" },
+      sort: { key: "release_date", direction: "desc" },
       page: 1,
       pageSize: 50,
       update: {
@@ -1474,6 +1562,7 @@
       updateProgressCount: document.getElementById("updateProgressCount"),
       updateProgressBar: document.getElementById("updateProgressBar"),
       updateProgressSteps: document.getElementById("updateProgressSteps"),
+      updateSummaryPanel: document.getElementById("updateSummaryPanel"),
       saveDecision: document.getElementById("saveDecision"),
       saveNext: document.getElementById("saveNext"),
       saveStatus: document.getElementById("saveStatus"),
@@ -1557,6 +1646,8 @@
       els.updateProgressCount.textContent = "";
       els.updateProgressBar.style.width = "0%";
       els.updateProgressSteps.innerHTML = "";
+      els.updateSummaryPanel.hidden = true;
+      els.updateSummaryPanel.innerHTML = "";
     }
 
     async function pollUpdateStatus() {
@@ -1565,10 +1656,11 @@
       try {
         const log = await request(`/api/update/status/${state.update.logId}`, { method: "GET" });
         renderUpdateProgress(log);
+        renderUpdateChangeSummary(log);
         if (log.status === "completed" || log.status === "failed") {
           stopUpdatePolling();
           if (log.status === "completed") {
-            toast(`Update complete: ${log.scores_added || 0} added, ${log.scores_updated || 0} updated`);
+            toast(updateCompleteToast(log));
             await loadCatalog();
           } else {
             toast("Update failed");
@@ -1626,6 +1718,85 @@
       if (log.status === "completed") {
         els.updateProgressCount.textContent = `${log.scores_added || 0} added, ${log.scores_updated || 0} updated`;
       }
+    }
+
+    function renderUpdateChangeSummary(log) {
+      const summary = log.change_summary || null;
+      if (!summary || log.status === "running") {
+        els.updateSummaryPanel.hidden = true;
+        els.updateSummaryPanel.innerHTML = "";
+        return;
+      }
+
+      const newCount = Number(summary.new_model_count || 0);
+      const changedCount = Number(summary.changed_model_count || 0);
+      const removedCount = Number(summary.removed_model_count || 0);
+      const scoreAdded = Number(log.scores_added || 0);
+      const scoreUpdated = Number(log.scores_updated || 0);
+      const sourceRecords = Number(summary.source_record_count || 0);
+      const sourceFailures = Number(summary.source_failure_count || 0);
+      const changeItems = [
+        ...updateChangeItems(summary.new_models, "new"),
+        ...updateChangeItems(summary.changed_models, "changed"),
+        ...updateChangeItems(summary.removed_models, "removed")
+      ].slice(0, 12);
+      const noCatalogChanges = !newCount && !changedCount && !removedCount;
+      const generatedAt = summary.generated_at ? new Date(summary.generated_at).toLocaleTimeString() : "";
+
+      els.updateSummaryPanel.hidden = false;
+      els.updateSummaryPanel.innerHTML = `
+        <div class="update-summary-head">
+          <div class="update-summary-title">
+            <strong>${log.status === "failed" ? "Update changes before failure" : "Latest update changes"}</strong>
+            <span>${generatedAt ? `Completed ${escapeHtml(generatedAt)}` : "Completed update run"}</span>
+          </div>
+          <div class="update-summary-metrics">
+            <span class="metric-pill">${newCount} new models</span>
+            <span class="metric-pill">${changedCount} model changes</span>
+            <span class="metric-pill">${removedCount} removed</span>
+            <span class="metric-pill">${scoreAdded} scores added</span>
+            <span class="metric-pill">${scoreUpdated} scores updated</span>
+            <span class="metric-pill">${sourceRecords} source records</span>
+            ${sourceFailures ? `<span class="metric-pill">${sourceFailures} source failures</span>` : ""}
+          </div>
+        </div>
+        ${summary.error ? `<div class="subtle">Change summary unavailable: ${escapeHtml(summary.error)}</div>` : ""}
+        ${noCatalogChanges && !summary.error ? '<div class="subtle">No new or changed models were detected in the active catalog.</div>' : ""}
+        ${changeItems.length ? `<div class="update-change-list">${changeItems.join("")}</div>` : ""}
+        ${renderUpdateTruncation(summary)}
+      `;
+    }
+
+    function updateChangeItems(models, kind) {
+      if (!Array.isArray(models)) return [];
+      return models.map((model) => {
+        const name = model.name || model.id || "Unknown model";
+        const provider = model.provider || "Unknown provider";
+        const roles = Array.isArray(model.model_roles) && model.model_roles.length
+          ? ` - ${model.model_roles.join(", ")}`
+          : "";
+        const fields = Array.isArray(model.changed_fields) && model.changed_fields.length
+          ? ` - ${model.changed_fields.slice(0, 4).join(", ")}`
+          : "";
+        const kindLabel = kind === "new" ? "New" : kind === "removed" ? "Removed" : "Changed";
+        return `
+          <div class="update-change-item ${kind === "changed" ? "changed" : kind === "removed" ? "removed" : ""}" title="${escapeAttr(name)}">
+            <span class="update-change-name">${escapeHtml(kindLabel)}: ${escapeHtml(name)}</span>
+            <span class="update-change-meta">${escapeHtml(provider)}${escapeHtml(roles)}${escapeHtml(fields)}</span>
+          </div>
+        `;
+      });
+    }
+
+    function renderUpdateTruncation(summary) {
+      const truncated = summary.truncated || {};
+      const count = Number(truncated.new_models || 0) + Number(truncated.changed_models || 0) + Number(truncated.removed_models || 0);
+      return count ? `<div class="subtle">Showing the first 12 changed rows in the UI; ${count} more are available in the update status API.</div>` : "";
+    }
+
+    function updateCompleteToast(log) {
+      const summary = log.change_summary || {};
+      return `Update complete: ${summary.new_model_count || 0} new models, ${summary.changed_model_count || 0} model changes`;
     }
 
     function updateStatusLabel(status, stepLabel) {
@@ -1726,7 +1897,7 @@
         if (state.filters.role && !(model.model_roles || []).includes(state.filters.role)) return false;
         if (state.filters.capability && !(model.capabilities || []).includes(state.filters.capability)) return false;
         if (state.filters.smallOnly && !model.small_model_candidate) return false;
-        if (useCaseId && !approvals[useCaseId]) return false;
+        if (useCaseId && !approvals[useCaseId] && state.filters.approval !== "pending") return false;
         if (state.filters.generalApproval) {
           if (generalApprovalStatus(model) !== state.filters.generalApproval) return false;
         }
@@ -1758,7 +1929,7 @@
       if (key === "effective") return statusFor(model).effective;
       if (key === "manual") return statusFor(model).manual;
       if (key === "proposed") return statusFor(model).proposed;
-      if (key === "approval") return statusFor(model).approved ? "approved" : "not";
+      if (key === "approval") return statusFor(model).approval;
       if (key === "general_approval") return generalApprovalStatus(model);
       if (key === "release_date") return modelReleaseInfo(model).sortValue;
       return model[key] || "";
@@ -1767,7 +1938,7 @@
     function firstApproval(model) {
       const approvals = model.use_case_approvals || {};
       const selected = state.filters.useCase;
-      if (selected && approvals[selected]) return approvals[selected];
+      if (selected) return approvals[selected] || defaultUseCaseApproval(selected);
       if (useCaseScopedFiltersActive()) {
         const matching = matchingUseCaseApproval(model, {
           ignoreManual: state.filters.manualRecommendation === "unrated" && !state.filters.useCase
@@ -1778,6 +1949,25 @@
       if (preferred && approvals[preferred]) return approvals[preferred];
       if (state.activeUseCaseId && approvals[state.activeUseCaseId]) return approvals[state.activeUseCaseId];
       return Object.values(approvals)[0] || null;
+    }
+
+    function defaultUseCaseApproval(useCaseId) {
+      return {
+        use_case_id: useCaseId,
+        approved_for_use: false,
+        approval_notes: null,
+        approval_updated_at: null,
+        recommendation_status: "unrated",
+        recommendation_notes: null,
+        recommendation_updated_at: null,
+        proposed_recommendation_status: "unrated",
+        proposed_recommendation_blockers: [],
+        proposed_recommendation_warnings: [],
+        proposed_recommendation_reasons: [],
+        proposed_recommendation_required_controls: [],
+        effective_recommendation_status: "unrated",
+        inference_route_approvals: []
+      };
     }
 
     function useCaseApprovalValues(model) {
@@ -1803,7 +1993,11 @@
     }
 
     function approvalMatchesUseCaseFilters(approval, options = {}) {
-      if (!approval || typeof approval !== "object") return false;
+      if (!approval || typeof approval !== "object") {
+        return !state.filters.recommendation &&
+          !state.filters.manualRecommendation &&
+          state.filters.approval === "pending";
+      }
       if (state.filters.recommendation) {
         const status = approval.effective_recommendation_status || "unrated";
         if (status !== state.filters.recommendation) return false;
@@ -1813,10 +2007,27 @@
         if (manualStatus !== state.filters.manualRecommendation) return false;
       }
       if (state.filters.approval) {
-        const approved = approval.approved_for_use ? "approved" : "not_approved";
-        if (approved !== state.filters.approval) return false;
+        if (useCaseApprovalStatus(approval) !== state.filters.approval) return false;
       }
       return true;
+    }
+
+    function useCaseApprovalStatus(approval) {
+      if (!approval || typeof approval !== "object") return "pending";
+      if (approval.approved_for_use) return "approved";
+      return approval.approval_updated_at ? "not_approved" : "pending";
+    }
+
+    function useCaseApprovalLabel(status) {
+      if (status === "approved") return "Approved";
+      if (status === "not_approved") return "Not approved";
+      return "Pending";
+    }
+
+    function useCaseApprovalClass(status) {
+      if (status === "approved") return "green";
+      if (status === "not_approved") return "red";
+      return "orange";
     }
 
     function countryEntriesFor(model) {
@@ -1864,11 +2075,13 @@
 
     function statusFor(model) {
       const approval = firstApproval(model) || {};
+      const approvalStatus = useCaseApprovalStatus(approval);
       return {
         proposed: approval.proposed_recommendation_status || "unrated",
         manual: approval.recommendation_status || "unrated",
         effective: approval.effective_recommendation_status || "unrated",
-        approved: Boolean(approval.approved_for_use),
+        approval: approvalStatus,
+        approved: approvalStatus === "approved",
         controls: (approval.proposed_recommendation_required_controls || []).length,
         blockers: (approval.proposed_recommendation_blockers || []).length,
         warnings: (approval.proposed_recommendation_warnings || []).length
@@ -2354,7 +2567,7 @@
         <td>${compactBadge(status.proposed, recommendationClass(status.proposed))}</td>
         <td>${status.manual === "unrated" ? '<span class="subtle">-</span>' : compactBadge(status.manual, recommendationClass(status.manual))}</td>
         <td>${compactBadge(status.effective, recommendationClass(status.effective))}</td>
-        <td>${badge(status.approved ? "Approved" : "Pending", status.approved ? "green" : "orange")}</td>
+        <td>${badge(useCaseApprovalLabel(status.approval), useCaseApprovalClass(status.approval))}</td>
         <td><span class="${status.controls ? "status-ok" : "subtle"}">${status.controls} / ${status.blockers + status.warnings + status.controls}</span></td>
         <td><div class="release-cell" title="${escapeAttr(releaseInfo.title)}"><span class="release-date">${escapeHtml(releaseInfo.label)}</span><span class="release-basis">${escapeHtml(releaseInfo.basisLabel)}</span></div></td>
       </tr>`;
@@ -2411,7 +2624,7 @@
       }
       const approvals = model.use_case_approvals || {};
       const activeUseCaseId = normalizeActiveUseCaseId(model, approvals);
-      const activeApproval = approvals[activeUseCaseId] || {};
+      const activeApproval = approvals[activeUseCaseId] || defaultUseCaseApproval(activeUseCaseId);
       const activeUseCase = state.catalog.use_cases.find((item) => item.id === activeUseCaseId) || {};
       const activeUseCaseLabel = activeUseCase.label || activeUseCaseId || "selected use case";
       const generalStatus = generalApprovalStatus(model);
@@ -2595,7 +2808,7 @@
         {
           title: "Use-case approval",
           when: activeApproval.approval_updated_at,
-          detail: activeApproval.approved_for_use ? "Approved" : "Not approved"
+          detail: useCaseApprovalLabel(useCaseApprovalStatus(activeApproval))
         },
         {
           title: "Manual recommendation",

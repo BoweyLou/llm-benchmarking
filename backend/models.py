@@ -627,6 +627,44 @@ class UpdateProgressStepOut(APIModel):
     error_message: str | None = None
 
 
+class UpdateModelFieldChangeOut(APIModel):
+    field: str
+    label: str
+    before: Any = None
+    after: Any = None
+
+
+class UpdateModelChangeOut(APIModel):
+    id: str
+    name: str | None = None
+    provider: str | None = None
+    catalog_status: str | None = None
+    model_roles: list[str] = Field(default_factory=list)
+    metadata_source_name: str | None = None
+    metadata_source_url: str | None = None
+    discovered_at: datetime | None = None
+    changed_fields: list[str] = Field(default_factory=list)
+    field_changes: list[UpdateModelFieldChangeOut] = Field(default_factory=list)
+
+
+class UpdateChangeSummaryOut(APIModel):
+    generated_at: datetime | None = None
+    model_count_before: int = 0
+    model_count_after: int = 0
+    model_count_delta: int = 0
+    new_model_count: int = 0
+    changed_model_count: int = 0
+    removed_model_count: int = 0
+    unchanged_model_count: int = 0
+    source_record_count: int = 0
+    source_failure_count: int = 0
+    new_models: list[UpdateModelChangeOut] = Field(default_factory=list)
+    changed_models: list[UpdateModelChangeOut] = Field(default_factory=list)
+    removed_models: list[UpdateModelChangeOut] = Field(default_factory=list)
+    truncated: dict[str, int] = Field(default_factory=dict)
+    error: str | None = None
+
+
 class UpdateLogOut(APIModel):
     id: int
     started_at: datetime
@@ -646,6 +684,7 @@ class UpdateLogOut(APIModel):
     progress_steps: list[UpdateProgressStepOut] = Field(default_factory=list)
     audit_summary: AuditSummaryOut | None = None
     source_runs: list[SourceRunOut] = Field(default_factory=list)
+    change_summary: UpdateChangeSummaryOut | None = None
 
 
 class SourceRunOut(APIModel):
@@ -790,6 +829,9 @@ __all__ = [
     "SourceFreshnessOut",
     "SourceRunOut",
     "UpdateLogOut",
+    "UpdateChangeSummaryOut",
+    "UpdateModelChangeOut",
+    "UpdateModelFieldChangeOut",
     "UpdateStartIn",
     "UpdateStartOut",
     "UpdateStatus",

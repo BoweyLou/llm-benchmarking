@@ -17,6 +17,7 @@ class DatabaseMigrationTests(unittest.TestCase):
             migration_ids = _migration_ids(conn)
             table_names = _tables(conn)
             model_columns = _columns(conn, "models")
+            update_log_columns = _columns(conn, "update_log")
             latest_scores_view = conn.exec_driver_sql(
                 "SELECT name FROM sqlite_master WHERE type = 'view' AND name = 'latest_scores'"
             ).fetchone()
@@ -36,6 +37,7 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("general_approved_for_use", model_columns)
         self.assertIn("general_approval_notes", model_columns)
         self.assertIn("general_approval_updated_at", model_columns)
+        self.assertIn("change_summary_json", update_log_columns)
         self.assertIsNotNone(latest_scores_view)
 
     def test_legacy_schema_upgrade_adds_missing_columns_once(self) -> None:
@@ -81,6 +83,7 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("approval_updated_at", inference_approval_columns)
         self.assertIn("current_step_key", update_log_columns)
         self.assertIn("steps_json", update_log_columns)
+        self.assertIn("change_summary_json", update_log_columns)
         self.assertIn("model_source_listings", table_names)
         self.assertTrue(
             {
@@ -100,6 +103,8 @@ class DatabaseMigrationTests(unittest.TestCase):
                 "source_metadata_json",
             }.issubset(score_columns)
         )
+        self.assertIn("20260708_001_update_change_summary", migration_ids)
+        self.assertIn("20260713_001_score_evidence", migration_ids)
 
     def test_speech_to_text_role_migration_backfills_transcription_capabilities(self) -> None:
         engine = init_db(get_engine("sqlite:///:memory:"))

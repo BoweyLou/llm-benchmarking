@@ -149,6 +149,10 @@ Use `Sync now` for a quick reload from the current SQLite catalog. Use
 `Run updates` to start the full background update pipeline from the browser; the
 workbench shows the active update step, progress count, and score totals as the
 update status API advances, then reloads the catalog when the run completes.
+Completed update runs also show a change summary under the review tabs,
+including new models, changed model metadata, removed active catalog rows,
+score changes, source record counts, and any source failures reported by the
+update status payload.
 
 On tablet-width screens, the workbench keeps the filters and table usable first
 and moves the inspector below the table so review controls remain reachable.
@@ -184,8 +188,9 @@ read the table columns as:
 - `Manual`: the reviewer override saved in SQLite.
 - `Effective`: the value used by review/export surfaces. Manual wins when set,
   otherwise hard blockers win, otherwise the generated proposal is used.
-- `Approval`: the separate approved/not-approved decision for that model and use
-  case.
+- `Approval`: the separate approved/pending/not-approved decision for that model
+  and use case. `Pending` means no explicit use-case approval decision has been
+  saved yet.
 
 General model approval is reviewed separately in the top panel of the right
 inspector. Use `Approve model` or `Reject model` for model-level decisions, or
@@ -213,6 +218,8 @@ the model in the recommendation notes.
 Use `Effective recommendation` to filter the final status shown in exports and
 use `Manual recommendation` to filter only reviewer-saved overrides, including
 rows where the manual rating has been cleared to `Unrated`.
+Choose a specific `Use case` and set `Use-case approval = Pending` to find
+models that still need an explicit approval decision for that use case.
 When `Use case` is left blank, `Manual recommendation = Unrated` finds models
 with no saved manual recommendation in any use case. Combine it with
 `General approval = Approved` for first-cut triage of approved models that still
@@ -494,7 +501,7 @@ The core API is in [backend/main.py](backend/main.py). High-level groups:
 - rankings: `/api/rankings`
 - review workbench: `/review`, `/api/review/catalog`, `/api/review/decisions`, `/api/review/model-approvals`, `/api/review/models`, `/api/review/snapshots/export`, and `/api/review/snapshots/import`
 - admin edits for provider metadata, approvals, inference-route approvals, manual benchmark scores, and model curation
-- update operations: `/api/update`, `/api/update/status/{log_id}`, `/api/update/history`, source-run detail, raw source records, and audit output
+- update operations: `/api/update`, `/api/update/status/{log_id}`, `/api/update/history`, source-run detail, raw source records, audit output, and per-run catalog change summaries
 - market snapshots: `/api/market-snapshots`
 
 POST/PATCH/PUT mutation routes require either the local admin token described in

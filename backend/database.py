@@ -338,6 +338,7 @@ update_log = Table(
     Column("current_step_index", Integer, nullable=False, server_default=text("0")),
     Column("total_steps", Integer, nullable=False, server_default=text("0")),
     Column("steps_json", Text),
+    Column("change_summary_json", Text),
 )
 
 source_runs = Table(
@@ -764,7 +765,8 @@ def _create_schema_sql() -> list[str]:
             current_step_started_at TEXT,
             current_step_index INTEGER NOT NULL DEFAULT 0,
             total_steps INTEGER NOT NULL DEFAULT 0,
-            steps_json TEXT
+            steps_json TEXT,
+            change_summary_json TEXT
         )
         """,
         """
@@ -1189,6 +1191,7 @@ def _migration_20260701_schema_repairs(conn: Connection) -> None:
         "current_step_index": "ALTER TABLE update_log ADD COLUMN current_step_index INTEGER NOT NULL DEFAULT 0",
         "total_steps": "ALTER TABLE update_log ADD COLUMN total_steps INTEGER NOT NULL DEFAULT 0",
         "steps_json": "ALTER TABLE update_log ADD COLUMN steps_json TEXT",
+        "change_summary_json": "ALTER TABLE update_log ADD COLUMN change_summary_json TEXT",
     }
     for column_name, statement in expected_update_log_columns.items():
         if column_name not in update_log_columns:
@@ -1402,6 +1405,15 @@ def _migration_20260703_text_to_speech_roles(conn: Connection) -> None:
         )
 
 
+def _migration_20260708_update_change_summary(conn: Connection) -> None:
+    update_log_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(update_log)").fetchall()
+    }
+    if "change_summary_json" not in update_log_columns:
+        conn.exec_driver_sql("ALTER TABLE update_log ADD COLUMN change_summary_json TEXT")
+
+
 def _migration_json_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value if str(item or "").strip()]
@@ -1522,6 +1534,7 @@ SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260702_002_general_model_approvals", _migration_20260702_general_model_approvals),
     ("20260703_001_speech_to_text_roles", _migration_20260703_speech_to_text_roles),
     ("20260703_002_text_to_speech_roles", _migration_20260703_text_to_speech_roles),
+    ("20260708_001_update_change_summary", _migration_20260708_update_change_summary),
     ("20260713_001_score_evidence", _migration_20260713_score_evidence),
 )
 

@@ -79,6 +79,34 @@ from .sources.base import BaseSourceAdapter, RawSourceRecord, ScoreCandidate, So
 ENGINE = get_engine()
 UPDATE_LOCK = threading.Lock()
 UPDATE_SCHEDULE_LOCK = threading.Lock()
+UPDATE_CHANGE_ITEM_LIMIT = 50
+UPDATE_MODEL_CHANGE_FIELD_LABELS = {
+    "name": "Name",
+    "provider": "Provider",
+    "catalog_status": "Catalog status",
+    "model_roles": "Model roles",
+    "capabilities": "Capabilities",
+    "release_date": "Release date",
+    "context_window_tokens": "Context window",
+    "max_output_tokens": "Max output",
+    "parameter_count_b": "Parameters",
+    "active_parameter_count_b": "Active parameters",
+    "model_size_class": "Size class",
+    "small_model_candidate": "Small model flag",
+    "price_input_per_mtok": "Input price",
+    "price_output_per_mtok": "Output price",
+    "openrouter_canonical_slug": "OpenRouter slug",
+    "openrouter_global_rank": "OpenRouter rank",
+    "openrouter_programming_rank": "Programming rank",
+    "huggingface_repo_id": "Hugging Face repo",
+    "metadata_source_name": "Metadata source",
+    "metadata_source_url": "Metadata source URL",
+    "model_card_url": "Model card",
+    "license_name": "License",
+    "base_models": "Base models",
+    "family_id": "Family",
+    "canonical_model_id": "Canonical model",
+}
 BOOTSTRAP_LOCK = threading.Lock()
 BOOTSTRAPPED = False
 HTTP_HEADERS = {
@@ -2721,6 +2749,247 @@ def _should_refresh_model_discovery(
     return not selected_benchmarks
 
 
+def _update_model_change_snapshot() -> dict[str, dict[str, Any]]:
+    with get_connection(ENGINE) as conn:
+        rows = fetch_all(
+            conn,
+            select(
+                models_table.c.id,
+                models_table.c.name,
+                models_table.c.provider,
+                models_table.c.catalog_status,
+                models_table.c.model_roles_json,
+                models_table.c.capabilities_json,
+                models_table.c.release_date,
+                models_table.c.context_window_tokens,
+                models_table.c.max_output_tokens,
+                models_table.c.parameter_count_b,
+                models_table.c.active_parameter_count_b,
+                models_table.c.model_size_class,
+                models_table.c.small_model_candidate,
+                models_table.c.price_input_per_mtok,
+                models_table.c.price_output_per_mtok,
+                models_table.c.openrouter_canonical_slug,
+                models_table.c.openrouter_global_rank,
+                models_table.c.openrouter_programming_rank,
+                models_table.c.huggingface_repo_id,
+                models_table.c.metadata_source_name,
+                models_table.c.metadata_source_url,
+                models_table.c.model_card_url,
+                models_table.c.license_name,
+                models_table.c.base_models_json,
+                models_table.c.family_id,
+                models_table.c.canonical_model_id,
+                models_table.c.discovered_at,
+            ).where(models_table.c.active == 1),
+        )
+    return {
+        str(row["id"]): _normalize_update_model_snapshot(row)
+        for row in rows
+        if str(row.get("id") or "").strip()
+    }
+
+
+def _normalize_update_model_snapshot(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row.get("id") or ""),
+        "name": _clean_text(row.get("name")),
+        "provider": _clean_text(row.get("provider")),
+        "catalog_status": _clean_text(row.get("catalog_status")),
+        "model_roles": sorted(dict.fromkeys(_decode_json_string_list(row.get("model_roles_json")))),
+        "capabilities": sorted(dict.fromkeys(_decode_json_string_list(row.get("capabilities_json")))),
+        "release_date": _clean_text(row.get("release_date")),
+        "context_window_tokens": _optional_int(row.get("context_window_tokens")),
+        "max_output_tokens": _optional_int(row.get("max_output_tokens")),
+        "parameter_count_b": _optional_float(row.get("parameter_count_b")),
+        "active_parameter_count_b": _optional_float(row.get("active_parameter_count_b")),
+        "model_size_class": _clean_text(row.get("model_size_class")),
+        "small_model_candidate": bool(row.get("small_model_candidate")),
+        "price_input_per_mtok": _optional_float(row.get("price_input_per_mtok")),
+        "price_output_per_mtok": _optional_float(row.get("price_output_per_mtok")),
+        "openrouter_canonical_slug": _clean_text(row.get("openrouter_canonical_slug")),
+        "openrouter_global_rank": _optional_int(row.get("openrouter_global_rank")),
+        "openrouter_programming_rank": _optional_int(row.get("openrouter_programming_rank")),
+        "huggingface_repo_id": _clean_text(row.get("huggingface_repo_id")),
+        "metadata_source_name": _clean_text(row.get("metadata_source_name")),
+        "metadata_source_url": _clean_text(row.get("metadata_source_url")),
+        "model_card_url": _clean_text(row.get("model_card_url")),
+        "license_name": _clean_text(row.get("license_name")),
+        "base_models": sorted(dict.fromkeys(_decode_json_string_list(row.get("base_models_json")))),
+        "family_id": _clean_text(row.get("family_id")),
+        "canonical_model_id": _clean_text(row.get("canonical_model_id")),
+        "discovered_at": _clean_text(row.get("discovered_at")),
+    }
+
+
+def _safe_update_change_summary(
+    *,
+    log_id: int,
+    before: dict[str, dict[str, Any]] | None,
+    snapshot_error: str | None = None,
+) -> dict[str, Any]:
+    if snapshot_error:
+        try:
+            model_count_after = len(_update_model_change_snapshot())
+        except Exception:
+            model_count_after = 0
+        return {
+            "generated_at": utc_now_iso(),
+            "model_count_before": len(before or {}),
+            "model_count_after": model_count_after,
+            "model_count_delta": 0,
+            "new_model_count": 0,
+            "changed_model_count": 0,
+            "removed_model_count": 0,
+            "unchanged_model_count": 0,
+            "source_record_count": 0,
+            "source_failure_count": 0,
+            "new_models": [],
+            "changed_models": [],
+            "removed_models": [],
+            "truncated": {},
+            "error": f"Initial catalog snapshot failed: {snapshot_error}",
+        }
+    try:
+        after = _update_model_change_snapshot()
+        return _build_update_change_summary(
+            before or {},
+            after,
+            log_id=log_id,
+        )
+    except Exception as exc:
+        return {
+            "generated_at": utc_now_iso(),
+            "model_count_before": len(before or {}),
+            "model_count_after": 0,
+            "model_count_delta": 0,
+            "new_model_count": 0,
+            "changed_model_count": 0,
+            "removed_model_count": 0,
+            "unchanged_model_count": 0,
+            "source_record_count": 0,
+            "source_failure_count": 0,
+            "new_models": [],
+            "changed_models": [],
+            "removed_models": [],
+            "truncated": {},
+            "error": str(exc),
+        }
+
+
+def _build_update_change_summary(
+    before: dict[str, dict[str, Any]],
+    after: dict[str, dict[str, Any]],
+    *,
+    log_id: int,
+) -> dict[str, Any]:
+    before_ids = set(before)
+    after_ids = set(after)
+    new_ids = sorted(after_ids - before_ids, key=lambda model_id: _model_sort_key(after[model_id]))
+    removed_ids = sorted(before_ids - after_ids, key=lambda model_id: _model_sort_key(before[model_id]))
+
+    changed: list[tuple[str, list[dict[str, Any]]]] = []
+    for model_id in sorted(before_ids & after_ids, key=lambda item: _model_sort_key(after[item])):
+        field_changes = _model_field_changes(before[model_id], after[model_id])
+        if field_changes:
+            changed.append((model_id, field_changes))
+
+    source_runs = list_source_runs(log_id)
+    source_record_count = sum(int(source_run.get("records_found") or 0) for source_run in source_runs)
+    source_failure_count = sum(1 for source_run in source_runs if source_run.get("status") == "failed")
+
+    new_models = [_update_model_change_item(after[model_id]) for model_id in new_ids]
+    changed_models = [
+        _update_model_change_item(after[model_id], field_changes=field_changes)
+        for model_id, field_changes in changed
+    ]
+    removed_models = [_update_model_change_item(before[model_id]) for model_id in removed_ids]
+
+    return {
+        "generated_at": utc_now_iso(),
+        "model_count_before": len(before),
+        "model_count_after": len(after),
+        "model_count_delta": len(after) - len(before),
+        "new_model_count": len(new_models),
+        "changed_model_count": len(changed_models),
+        "removed_model_count": len(removed_models),
+        "unchanged_model_count": len(before_ids & after_ids) - len(changed_models),
+        "source_record_count": source_record_count,
+        "source_failure_count": source_failure_count,
+        "new_models": new_models[:UPDATE_CHANGE_ITEM_LIMIT],
+        "changed_models": changed_models[:UPDATE_CHANGE_ITEM_LIMIT],
+        "removed_models": removed_models[:UPDATE_CHANGE_ITEM_LIMIT],
+        "truncated": {
+            "new_models": max(0, len(new_models) - UPDATE_CHANGE_ITEM_LIMIT),
+            "changed_models": max(0, len(changed_models) - UPDATE_CHANGE_ITEM_LIMIT),
+            "removed_models": max(0, len(removed_models) - UPDATE_CHANGE_ITEM_LIMIT),
+        },
+        "error": None,
+    }
+
+
+def _model_field_changes(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
+    for field, label in UPDATE_MODEL_CHANGE_FIELD_LABELS.items():
+        if before.get(field) == after.get(field):
+            continue
+        changes.append(
+            {
+                "field": field,
+                "label": label,
+                "before": before.get(field),
+                "after": after.get(field),
+            }
+        )
+    return changes
+
+
+def _update_model_change_item(
+    model: dict[str, Any],
+    *,
+    field_changes: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    changes = field_changes or []
+    return {
+        "id": model["id"],
+        "name": model.get("name"),
+        "provider": model.get("provider"),
+        "catalog_status": model.get("catalog_status"),
+        "model_roles": model.get("model_roles") or [],
+        "metadata_source_name": model.get("metadata_source_name"),
+        "metadata_source_url": model.get("metadata_source_url"),
+        "discovered_at": model.get("discovered_at"),
+        "changed_fields": [str(change.get("label") or change.get("field") or "") for change in changes],
+        "field_changes": changes,
+    }
+
+
+def _model_sort_key(model: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(model.get("provider") or "").lower(),
+        str(model.get("name") or "").lower(),
+        str(model.get("id") or "").lower(),
+    )
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def schedule_update(
     benchmarks: Iterable[str] | None = None,
     triggered_by: str = "manual",
@@ -2935,6 +3204,12 @@ def _run_update_job(
     audit_result: dict[str, Any] | None = None
     total_steps = len(step_plan)
     current_step_index = 0
+    snapshot_error: str | None = None
+    try:
+        model_snapshot_before = _update_model_change_snapshot()
+    except Exception as exc:
+        model_snapshot_before = {}
+        snapshot_error = str(exc)
 
     try:
         with UPDATE_LOCK:
@@ -3085,6 +3360,11 @@ def _run_update_job(
             scores_updated=scores_updated,
             errors=errors,
             audit_result=audit_result,
+            change_summary=_safe_update_change_summary(
+                log_id=log_id,
+                before=model_snapshot_before,
+                snapshot_error=snapshot_error,
+            ),
         )
         return
 
@@ -3098,6 +3378,11 @@ def _run_update_job(
         scores_updated=scores_updated,
         errors=errors,
         audit_result=audit_result,
+        change_summary=_safe_update_change_summary(
+            log_id=log_id,
+            before=model_snapshot_before,
+            snapshot_error=snapshot_error,
+        ),
         step=step_plan[-1] if step_plan else None,
         step_index=total_steps,
         total_steps=total_steps,
@@ -3112,6 +3397,7 @@ def _finalize_update_log(
     scores_updated: int,
     errors: list[dict[str, Any]],
     audit_result: dict[str, Any] | None,
+    change_summary: dict[str, Any] | None = None,
     step: dict[str, Any] | None = None,
     step_index: int | None = None,
     total_steps: int | None = None,
@@ -3122,6 +3408,7 @@ def _finalize_update_log(
         "scores_added": scores_added,
         "scores_updated": scores_updated,
         "errors": json.dumps(errors + (_audit_errors(audit_result) if audit_result else [])),
+        "change_summary_json": json.dumps(change_summary or {}, ensure_ascii=True),
     }
     if step is not None:
         values.update(
@@ -3162,6 +3449,7 @@ def _create_update_log(triggered_by: str, step_plan: list[dict[str, Any]] | None
                 current_step_index=0,
                 total_steps=len(resolved_step_plan),
                 steps_json=json.dumps(resolved_step_plan),
+                change_summary_json=json.dumps({}, ensure_ascii=True),
             )
         )
         return int(result.inserted_primary_key[0])
@@ -7227,6 +7515,8 @@ def _serialize_update_log(
 ) -> dict[str, Any]:
     payload = dict(row)
     payload["errors"] = _decode_json_list(payload.get("errors"))
+    change_summary = _decode_json_object(payload.get("change_summary_json"))
+    payload["change_summary"] = change_summary or None
     payload["source_runs"] = source_runs or []
     payload["total_steps"] = int(payload.get("total_steps") or len(_decode_update_steps(payload.get("steps_json"))))
     payload["current_step_index"] = int(payload.get("current_step_index") or 0)
@@ -7236,6 +7526,7 @@ def _serialize_update_log(
     payload["progress_percent"] = progress_percent
     payload["audit_summary"] = audit_summary
     payload.pop("steps_json", None)
+    payload.pop("change_summary_json", None)
     return payload
 
 

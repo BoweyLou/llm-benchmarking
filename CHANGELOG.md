@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 - Unreleased
+
+- Added authenticated provider API catalog discovery for OpenAI, Anthropic, Google Gemini, Mistral, Cohere, and xAI, with credential-safe errors, provisional discovery policy, and non-blocking skipped runs when optional provider keys are absent.
+- Added official OpenAI GPT-5.6 Sol, Terra, and Luna catalog discovery rows.
+- Added per-run update change summaries so the review workbench shows new models, changed model metadata, removed active catalog rows, source record counts, and score changes after `Run updates`.
+- Changed the review workbench default model listing order to newest release first.
+- Added an explicit `Pending` use-case approval filter so selected use-case rows without saved approval decisions no longer disappear from review triage.
+- Fixed filtered multi-use-case review saves so each selected use case receives the intended decision, and removed misleading Effective/model-level Proposed table and CSV export surfaces (LBM-061).
+
 ## 0.3.0 - Unreleased
 
 - Replaced the fragile rendered LM Arena scrape with cross-subset revision-pinned official Parquet ingestion, distinct raw/style-controlled Text and category/WebDev/Agent/Vision/Document/Search benchmarks, generic structured score evidence, first/last-seen listing evidence, no-create identity handling, hardened audits, and a live isolated-database E2E contract.
@@ -15,8 +24,6 @@
 - Added restricted-access provider catalog rows for Claude Mythos 5 and GPT-5.5-Cyber, including trusted-access capability tags and official source links.
 - Fixed manual embedding/reranker review curation so browser-added models carry their selected model role and save/bulk actions default to role-compatible use cases instead of a stale generator use case.
 - Added a review workbench `Run updates` control that starts the full background update pipeline and shows live step progress from the update status API.
-- Added official OpenAI GPT-5.6 Sol, Terra, and Luna catalog discovery rows.
-- Added authenticated provider API catalog discovery for OpenAI, Anthropic, Google Gemini, Mistral, Cohere, and xAI, with skipped source-run accounting when optional provider keys are absent.
 - Added `Unreviewed` as an explicit general-approval triage state in the review workbench and review API.
 - Fixed the review workbench inspector tabs so `Controls`, `Activity`, and `Notes` switch to separate usable panels.
 - Added RTEB Finance as a finance-domain retrieval benchmark from the official MTEB leaderboard dataset and included it as an optional retrieval-embedding ranking signal.

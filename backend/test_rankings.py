@@ -150,6 +150,7 @@ class RankingTests(unittest.TestCase):
         current_step_index: int = 0,
         total_steps: int = 0,
         steps_json: str | None = None,
+        change_summary: dict | None = None,
     ) -> None:
         with self.engine.begin() as conn:
             conn.execute(
@@ -170,6 +171,7 @@ class RankingTests(unittest.TestCase):
                         "current_step_index": current_step_index,
                         "total_steps": total_steps,
                         "steps_json": steps_json,
+                        "change_summary_json": json.dumps(change_summary or {}),
                     }
                 ],
             )
@@ -2650,6 +2652,113 @@ January 2026
         self.assertEqual(log["progress_steps"][0]["status"], "completed")
         self.assertEqual(log["progress_steps"][1]["status"], "running")
         self.assertEqual(log["progress_steps"][2]["status"], "pending")
+
+    def test_get_update_log_includes_change_summary(self) -> None:
+        self.add_update_log(
+            904,
+            change_summary={
+                "generated_at": "2026-04-08T00:05:00Z",
+                "model_count_before": 1,
+                "model_count_after": 2,
+                "model_count_delta": 1,
+                "new_model_count": 1,
+                "changed_model_count": 1,
+                "removed_model_count": 0,
+                "unchanged_model_count": 0,
+                "source_record_count": 12,
+                "source_failure_count": 0,
+                "new_models": [
+                    {
+                        "id": "new-model",
+                        "name": "New Model",
+                        "provider": "Provider",
+                        "catalog_status": "provisional",
+                        "model_roles": ["generator"],
+                    }
+                ],
+                "changed_models": [
+                    {
+                        "id": "existing-model",
+                        "name": "Existing Model",
+                        "provider": "Provider",
+                        "catalog_status": "tracked",
+                        "model_roles": ["generator"],
+                        "changed_fields": ["Model card"],
+                    }
+                ],
+                "removed_models": [],
+                "truncated": {"new_models": 0, "changed_models": 0, "removed_models": 0},
+            },
+        )
+
+        log = update_engine.get_update_log(904)
+
+        self.assertIsNotNone(log)
+        assert log is not None
+        self.assertEqual(log["change_summary"]["new_model_count"], 1)
+        self.assertEqual(log["change_summary"]["changed_model_count"], 1)
+        self.assertEqual(log["change_summary"]["new_models"][0]["id"], "new-model")
+        self.assertEqual(log["change_summary"]["changed_models"][0]["changed_fields"], ["Model card"])
+
+    def test_update_change_summary_detects_new_and_changed_models(self) -> None:
+        self.add_update_log(905)
+        with self.engine.begin() as conn:
+            conn.execute(
+                source_runs_table.insert(),
+                [
+                    {
+                        "update_log_id": 905,
+                        "source_name": "catalog_model_discovery",
+                        "benchmark_id": "model_discovery",
+                        "started_at": "2026-04-08T00:00:10Z",
+                        "completed_at": "2026-04-08T00:00:20Z",
+                        "status": "completed",
+                        "records_found": 7,
+                    },
+                    {
+                        "update_log_id": 905,
+                        "source_name": "model_card_metadata",
+                        "benchmark_id": None,
+                        "started_at": "2026-04-08T00:00:30Z",
+                        "completed_at": "2026-04-08T00:00:40Z",
+                        "status": "failed",
+                        "records_found": 0,
+                    },
+                ],
+            )
+        before = {
+            "existing-model": {
+                "id": "existing-model",
+                "name": "Existing Model",
+                "provider": "Provider",
+                "catalog_status": "tracked",
+                "model_roles": ["generator"],
+                "release_date": None,
+            }
+        }
+        after = {
+            "existing-model": {
+                **before["existing-model"],
+                "release_date": "2026-04-08",
+                "metadata_source_name": "model_card",
+            },
+            "new-model": {
+                "id": "new-model",
+                "name": "New Model",
+                "provider": "Provider",
+                "catalog_status": "provisional",
+                "model_roles": ["generator"],
+            },
+        }
+
+        summary = update_engine._build_update_change_summary(before, after, log_id=905)
+
+        self.assertEqual(summary["new_model_count"], 1)
+        self.assertEqual(summary["changed_model_count"], 1)
+        self.assertEqual(summary["source_record_count"], 7)
+        self.assertEqual(summary["source_failure_count"], 1)
+        self.assertEqual(summary["new_models"][0]["id"], "new-model")
+        self.assertIn("Release date", summary["changed_models"][0]["changed_fields"])
 
     def test_schedule_update_reuses_existing_running_log(self) -> None:
         self.add_update_log(902, status="running", completed_at=None)
