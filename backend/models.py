@@ -17,6 +17,7 @@ AuditSeverity = Literal["blocker", "warning", "info"]
 FamilyApprovalScope = Literal["family", "delta"]
 RecommendationStatusIn = Literal["unrated", "recommended", "not_recommended", "discouraged", "restricted"]
 RecommendationStatusOut = Literal["unrated", "recommended", "not_recommended", "discouraged", "restricted", "mixed"]
+GeneralRecommendationStatusIn = Literal["unrated", "recommended", "not_recommended", "restricted"]
 CatalogStatusIn = Literal["tracked", "provisional", "deprecated"]
 GeneralApprovalStatusIn = Literal["approved", "not_approved", "unreviewed"]
 UpdateProgressStatus = Literal["pending", "running", "completed", "failed"]
@@ -389,7 +390,7 @@ class ModelOut(APIModel):
     general_approved_for_use: bool = False
     general_approval_notes: str | None = None
     general_approval_updated_at: datetime | None = None
-    general_recommendation_status: RecommendationStatusIn = "unrated"
+    general_recommendation_status: GeneralRecommendationStatusIn = "unrated"
     general_recommendation_notes: str | None = None
     general_recommendation_updated_at: datetime | None = None
     suggested_use_cases: list[SuggestedUseCaseOut] = Field(default_factory=list)
@@ -490,7 +491,7 @@ class ModelSummaryOut(APIModel):
     general_approved_for_use: bool = False
     general_approval_notes: str | None = None
     general_approval_updated_at: datetime | None = None
-    general_recommendation_status: RecommendationStatusIn = "unrated"
+    general_recommendation_status: GeneralRecommendationStatusIn = "unrated"
     general_recommendation_notes: str | None = None
     general_recommendation_updated_at: datetime | None = None
     suggested_use_cases: list[SuggestedUseCaseOut] = Field(default_factory=list)
@@ -551,8 +552,13 @@ class ReviewModelDecisionIn(APIModel):
     model_ids: list[str] = Field(default_factory=list)
     approval_status: GeneralApprovalStatusIn | None = None
     approval_notes: str | None = None
-    recommendation_status: RecommendationStatusIn | None = None
+    recommendation_status: GeneralRecommendationStatusIn | None = None
     recommendation_notes: str | None = None
+
+    @field_validator("recommendation_status", mode="before")
+    @classmethod
+    def normalize_legacy_general_recommendation(cls, value: Any) -> Any:
+        return "not_recommended" if value == "discouraged" else value
 
 
 class ReviewModelCreateIn(APIModel):

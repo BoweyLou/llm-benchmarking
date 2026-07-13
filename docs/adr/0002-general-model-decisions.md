@@ -21,8 +21,9 @@ confidence, reasons, warnings, and controls for each use case.
 Human review has two model-level decisions:
 
 - general approval: `approved`, `not_approved`, or `unreviewed`;
-- general recommendation: `recommended`, `restricted`, `discouraged`,
-  `not_recommended`, or `unrated`.
+- general recommendation: `recommended`, `restricted`, `not_recommended`, or
+  `unrated`. Legacy general `discouraged` values are normalized to
+  `not_recommended`; the legacy use-case contract remains unchanged.
 
 The `/api/review/model-decisions` endpoint saves either or both decisions on the
 `models` row. It does not create or update model/use-case decision rows.
@@ -37,9 +38,19 @@ legacy compatibility/audit surface. Existing rows are not rolled up into the
 new general recommendation because multiple use-case decisions can conflict.
 The current review UI does not read or write the legacy decision surface.
 
+The review queue may combine source records for presentation only when their
+normalized display name, non-empty canonical model ID, and model role agree.
+The database rows are never merged or deleted. A decision on a combined row is
+written explicitly to every represented model ID. Same-name rows that do not
+meet all three conditions stay separate.
+
 ## Consequences
 
 - Reviewers make one approval and one recommendation per model.
+- Reviewers can select all models matching the current filters and confirm one
+  general decision for the explicit underlying model-ID set.
+- Safe duplicate groups reduce queue noise without hiding ambiguous records or
+  changing source data.
 - Suggested use cases explain likely fit without implying authorization.
 - New databases and upgraded databases gain general recommendation columns.
 - Review snapshots include general recommendations while version 1 imports

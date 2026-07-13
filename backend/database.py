@@ -1569,6 +1569,23 @@ def _migration_20260714_general_model_recommendations(conn: Connection) -> None:
             conn.exec_driver_sql(statement)
 
 
+def _migration_20260714_general_recommendation_simplification(conn: Connection) -> None:
+    """Fold the retired general discouraged state into not_recommended."""
+    model_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(models)").fetchall()
+    }
+    if "general_recommendation_status" not in model_columns:
+        return
+    conn.exec_driver_sql(
+        """
+        UPDATE models
+        SET general_recommendation_status = 'not_recommended'
+        WHERE lower(trim(general_recommendation_status)) = 'discouraged'
+        """
+    )
+
+
 SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
     ("20260701_002_model_roles", _migration_20260701_model_roles),
@@ -1581,6 +1598,7 @@ SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260708_001_update_change_summary", _migration_20260708_update_change_summary),
     ("20260713_001_score_evidence", _migration_20260713_score_evidence),
     ("20260714_001_general_model_recommendations", _migration_20260714_general_model_recommendations),
+    ("20260714_002_general_recommendation_simplification", _migration_20260714_general_recommendation_simplification),
 )
 
 

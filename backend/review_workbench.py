@@ -32,6 +32,7 @@ from .database import (
 from .model_evidence import enrich_models_with_selection_evidence
 
 SNAPSHOT_SCHEMA_VERSION = 2
+GENERAL_RECOMMENDATION_STATUSES = ("unrated", "recommended", "restricted", "not_recommended")
 
 
 def build_review_catalog() -> dict[str, Any]:
@@ -39,6 +40,9 @@ def build_review_catalog() -> dict[str, Any]:
     models = build_model_metadata_list()
     for model in models:
         model["general_approval_status"] = _general_approval_status(model)
+        model["general_recommendation_status"] = _normalize_general_recommendation_status(
+            model.get("general_recommendation_status")
+        )
     use_cases = update_engine.list_use_cases()
     benchmarks = update_engine.list_benchmarks()
     enrich_models_with_selection_evidence(models, use_cases=use_cases, benchmarks=benchmarks)
@@ -201,7 +205,7 @@ def apply_model_decisions(
             else saved_at,
         )
     if recommendation_status is not None:
-        normalized_recommendation_status = _validate_recommendation_status(recommendation_status)
+        normalized_recommendation_status = _normalize_general_recommendation_status(recommendation_status)
         values.update(
             general_recommendation_status=normalized_recommendation_status,
             general_recommendation_notes=None
@@ -316,6 +320,10 @@ def export_review_snapshot() -> dict[str, Any]:
         )
 
     model_approvals = [_row_to_dict(row) for row in model_approval_rows]
+    for row in model_approvals:
+        row["general_recommendation_status"] = _normalize_general_recommendation_status(
+            row.get("general_recommendation_status")
+        )
 
     return {
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
@@ -413,12 +421,12 @@ def _build_facets(
     role_counts: dict[str, int] = {}
     capability_counts: dict[str, int] = {}
     general_approval_counts = {"approved": 0, "not_approved": 0, "unreviewed": 0}
-    general_recommendation_counts = {status: 0 for status in VALID_RECOMMENDATION_STATUSES}
+    general_recommendation_counts = {status: 0 for status in GENERAL_RECOMMENDATION_STATUSES}
     approval_counts = {"approved": 0, "not_approved": 0}
     for model in models:
         general_approval_counts[_general_approval_status(model)] += 1
         general_recommendation_counts[
-            _validate_recommendation_status(str(model.get("general_recommendation_status") or "unrated"))
+            _normalize_general_recommendation_status(model.get("general_recommendation_status"))
         ] += 1
         for country in _model_country_entries(model):
             country_id = country["id"]
@@ -525,7 +533,7 @@ def _model_hyperscaler_entries(model: dict[str, Any]) -> list[str]:
 def _model_needs_decision(model: dict[str, Any]) -> bool:
     return (
         _general_approval_status(model) == "unreviewed"
-        or str(model.get("general_recommendation_status") or "unrated") == "unrated"
+        or _normalize_general_recommendation_status(model.get("general_recommendation_status")) == "unrated"
     )
 
 
@@ -594,7 +602,7 @@ def _import_model_approvals(rows: Iterable[Any]) -> int:
                     general_approval_updated_at=None
                     if approval_status == "unreviewed"
                     else (_clean_text(row.get("general_approval_updated_at")) or utc_now_iso()),
-                    general_recommendation_status=_validate_recommendation_status(
+                    general_recommendation_status=_normalize_general_recommendation_status(
                         _clean_text(row.get("general_recommendation_status")) or "unrated"
                     ),
                     general_recommendation_notes=_clean_text(row.get("general_recommendation_notes")),
@@ -704,6 +712,11 @@ def _validate_recommendation_status(value: str | None) -> str:
     if normalized not in VALID_RECOMMENDATION_STATUSES:
         raise ValueError(f"Unsupported recommendation status: {value}")
     return normalized
+
+
+def _normalize_general_recommendation_status(value: Any) -> str:
+    normalized = _validate_recommendation_status(_clean_text(value) or "unrated")
+    return "not_recommended" if normalized == "discouraged" else normalized
 
 
 def _decode_model_roles(value: Any) -> list[str]:

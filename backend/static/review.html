@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <title>LLM Model Tool</title>
   <style>
     :root {
@@ -56,21 +57,29 @@
     .filter-note { margin-top: 20px; padding: 12px; border-radius: 8px; background: var(--panel-soft); color: var(--muted); font-size: 12px; line-height: 1.45; }
     .queue { min-width: 0; display: flex; flex-direction: column; }
     .queue-head { padding: 18px 17px 13px; border-bottom: 1px solid var(--line); }
-    .queue-title { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    .queue-title { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+    .queue-tools, .selection-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
     .queue-title span { color: var(--muted); font-size: 12px; }
+    .selection-tools { margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--line); }
+    .selection-tools[hidden] { display: none; }
     .queue-list { overflow: auto; }
-    .model-row { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; padding: 15px 17px; border: 0; border-bottom: 1px solid var(--line); background: #fff; color: inherit; text-align: left; }
+    .load-more { display: block; margin: 14px auto; }
+    .model-row { position: relative; display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: #fff; }
     .model-row:hover { background: #f9fbfe; }
-    .model-row.active { position: relative; background: var(--blue-soft); }
+    .model-row.active { background: var(--blue-soft); }
     .model-row.active::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--blue); }
-    .model-row > div { min-width: 0; }
+    .model-row.selected { background: #f3f7fd; }
+    .row-select { width: 46px; display: grid; place-items: center; flex: 0 0 46px; }
+    .row-select input { width: 17px; height: 17px; accent-color: var(--blue); }
+    .model-open { min-width: 0; flex: 1; display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; padding: 15px 17px; border: 0; background: transparent; color: inherit; text-align: left; }
+    .model-open > div { min-width: 0; }
     .model-name { font-weight: 730; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .provider { margin-top: 3px; color: var(--muted); font-size: 12px; }
     .row-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
     .badge { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); font-size: 11px; font-weight: 680; }
     .badge.approved, .badge.recommended { border-color: #b8dfc3; color: var(--green); background: var(--green-soft); }
     .badge.not-approved, .badge.not-recommended { border-color: #edc0bc; color: var(--red); background: var(--red-soft); }
-    .badge.restricted, .badge.discouraged { border-color: #f0d0a9; color: var(--amber); background: var(--amber-soft); }
+    .badge.restricted, .badge.mixed { border-color: #f0d0a9; color: var(--amber); background: var(--amber-soft); }
     .detail { min-width: 0; padding: 24px; overflow: auto; }
     .empty { height: 100%; min-height: 360px; display: grid; place-items: center; color: var(--muted); text-align: center; }
     .detail-header { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
@@ -108,11 +117,24 @@
     .details-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
     .detail-item span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 11px; }
     .detail-item strong { font-size: 13px; font-weight: 650; }
-    .toast { position: fixed; right: 20px; bottom: 20px; z-index: 5; max-width: 360px; padding: 11px 14px; border-radius: 8px; background: #172033; color: #fff; box-shadow: var(--shadow); opacity: 0; transform: translateY(8px); pointer-events: none; transition: .18s ease; }
+    .source-records { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; color: var(--muted); }
+    .source-records summary { cursor: pointer; color: var(--text); font-weight: 690; }
+    .source-records ul { margin: 10px 0 0; padding-left: 20px; line-height: 1.55; }
+    .bulk-bar { position: fixed; z-index: 4; left: 50%; bottom: 18px; width: min(720px, calc(100vw - 32px)); display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 13px 14px 13px 18px; border: 1px solid #32445f; border-radius: 11px; color: #fff; background: #172033; box-shadow: 0 14px 50px rgba(20,32,51,.3); transform: translateX(-50%); }
+    .bulk-bar[hidden] { display: none; }
+    .bulk-bar strong, .bulk-bar span { display: block; }
+    .bulk-bar span { margin-top: 3px; color: #cbd5e1; font-size: 12px; }
+    .bulk-bar .btn { flex: 0 0 auto; }
+    .bulk-preview { max-height: 150px; overflow: auto; margin: 14px 0; padding: 10px 12px; border-radius: 8px; background: var(--panel-soft); color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .bulk-safety { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .toast { position: fixed; right: 20px; bottom: 20px; z-index: 8; max-width: 360px; padding: 11px 14px; border-radius: 8px; background: #172033; color: #fff; box-shadow: var(--shadow); opacity: 0; transform: translateY(8px); pointer-events: none; transition: .18s ease; }
     .toast.show { opacity: 1; transform: translateY(0); }
     dialog { width: min(460px, calc(100vw - 32px)); border: 0; border-radius: 12px; padding: 0; box-shadow: 0 20px 70px rgba(20,32,51,.28); }
     dialog::backdrop { background: rgba(20,32,51,.36); }
     .dialog-body { padding: 20px; }
+    .bulk-dialog { width: min(580px, calc(100vw - 32px)); }
+    .bulk-dialog .dialog-body { padding: 24px; }
+    .bulk-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
     .error { color: var(--red); }
     @media (max-width: 1180px) {
@@ -131,6 +153,9 @@
       .queue { max-height: 390px; border-bottom: 1px solid var(--line); }
       .detail { padding: 17px; }
       .details-grid { grid-template-columns: 1fr 1fr; }
+      .bulk-dialog { width: 100%; max-width: none; margin: auto 0 0; border-radius: 16px 16px 0 0; }
+      .bulk-form-grid { grid-template-columns: 1fr; gap: 0; }
+      .bulk-bar { bottom: 10px; }
     }
   </style>
 </head>
@@ -165,7 +190,7 @@
         </label>
         <label class="field-label">General recommendation
           <select class="select" id="recommendationFilter">
-            <option value="">Any recommendation</option><option value="unrated">Unrated</option><option value="recommended">Recommended</option><option value="restricted">Restricted</option><option value="discouraged">Discouraged</option><option value="not_recommended">Not recommended</option>
+            <option value="">Any recommendation</option><option value="unrated">Unrated</option><option value="recommended">Recommended</option><option value="restricted">Restricted</option><option value="not_recommended">Not recommended</option>
           </select>
         </label>
         <label class="check"><input type="checkbox" id="needsDecision"> Needs a decision</label>
@@ -175,12 +200,17 @@
     </aside>
 
     <section class="queue">
-      <div class="queue-head"><div class="queue-title"><h2>Models</h2><span id="queueCount">0 models</span></div></div>
+      <div class="queue-head">
+        <div class="queue-title"><h2>Models</h2><div class="queue-tools"><span id="queueCount">0 models</span><button class="btn" id="toggleSelection">Select</button></div></div>
+        <div class="selection-tools" id="selectionTools" hidden><strong id="selectionCount">0 selected</strong><button class="btn ghost" id="selectAllFiltered">Select all filtered</button><button class="btn ghost" id="clearSelection">Clear</button></div>
+      </div>
       <div class="queue-list" id="queueList"></div>
     </section>
 
     <main class="detail" id="detail"><div class="empty">Loading model evidence…</div></main>
   </div>
+
+  <div class="bulk-bar" id="bulkBar" hidden><div><strong id="bulkBarTitle">0 models selected</strong><span id="bulkBarMeta">0 source records</span></div><button class="btn primary" id="openBulkDecision">Apply general decision</button></div>
 
   <dialog id="settingsDialog">
     <form method="dialog" class="dialog-body">
@@ -190,23 +220,47 @@
       <div class="dialog-actions"><button class="btn" value="cancel">Cancel</button><button class="btn primary" id="saveToken" value="default">Save token</button></div>
     </form>
   </dialog>
+  <dialog id="bulkDecisionDialog" class="bulk-dialog">
+    <form class="dialog-body" id="bulkDecisionForm">
+      <p class="eyebrow">Bulk review</p><h2>Apply general decision</h2>
+      <p class="intro">Choose only the fields you want to change. This decision applies to each selected model, never to an individual use case.</p>
+      <div class="bulk-form-grid">
+        <label class="field-label">Approval<select class="select" id="bulkApproval"><option value="">Leave unchanged</option><option value="approved">Approved</option><option value="not_approved">Not approved</option><option value="unreviewed">Unreviewed</option></select></label>
+        <label class="field-label">Recommendation<select class="select" id="bulkRecommendation"><option value="">Leave unchanged</option><option value="recommended">Recommended</option><option value="restricted">Restricted</option><option value="not_recommended">Not recommended</option><option value="unrated">Unrated</option></select></label>
+      </div>
+      <label class="field-label">Shared rationale<textarea class="textarea" id="bulkNotes" placeholder="Why does this decision apply to the selected models?"></textarea></label>
+      <div class="bulk-preview" id="bulkPreview"></div>
+      <p class="bulk-safety"><strong>Suggested use cases remain read-only.</strong> This action changes only the general model decision.</p>
+      <div class="dialog-actions"><button type="button" class="btn" id="cancelBulkDecision">Cancel</button><button type="submit" class="btn primary" id="applyBulkDecision">Apply to selected models</button></div>
+    </form>
+  </dialog>
   <div class="toast" id="toast"></div>
 
   <script>
     const state = {
       catalog: null,
-      activeModelId: null,
+      activeGroupId: null,
       filters: { search: "", provider: "", approval: "", recommendation: "", needsDecision: false },
       draft: null,
       saving: false,
       updating: false,
-      showAllSuggestions: false
+      showAllSuggestions: false,
+      selectionMode: false,
+      selectedGroupIds: new Set(),
+      bulkSaving: false,
+      visibleLimit: 200,
+      groupCacheCatalog: null,
+      groupCache: []
     };
 
     const els = Object.fromEntries([
       "databaseUpdated", "lastSynced", "runUpdates", "openSettings", "search", "providerFilter",
       "approvalFilter", "recommendationFilter", "needsDecision", "resetFilters", "queueCount",
-      "queueList", "detail", "settingsDialog", "adminToken", "saveToken", "toast"
+      "queueList", "detail", "settingsDialog", "adminToken", "saveToken", "toast", "toggleSelection",
+      "selectionTools", "selectionCount", "selectAllFiltered", "clearSelection",
+      "bulkBar", "bulkBarTitle", "bulkBarMeta", "openBulkDecision", "bulkDecisionDialog",
+      "bulkDecisionForm", "bulkApproval", "bulkRecommendation", "bulkNotes", "bulkPreview",
+      "cancelBulkDecision", "applyBulkDecision"
     ].map((id) => [id, document.getElementById(id)]));
 
     function adminHeaders() {
@@ -233,18 +287,66 @@
     function label(value) { return String(value || "").replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase()); }
     function formatDate(value) { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString(); }
     function approvalStatus(model) { return model.general_approval_status || (model.general_approved_for_use ? "approved" : (model.general_approval_updated_at ? "not_approved" : "unreviewed")); }
-    function recommendationStatus(model) { return model.general_recommendation_status || "unrated"; }
+    function recommendationStatus(model) { return model.general_recommendation_status === "discouraged" ? "not_recommended" : (model.general_recommendation_status || "unrated"); }
     function badge(status) { return `<span class="badge ${escapeHtml(String(status).replaceAll("_", "-"))}">${escapeHtml(label(status))}</span>`; }
 
-    function filteredModels() {
+    function normalizedName(model) { return String(model.name || model.canonical_model_name || "").trim().toLowerCase().replace(/\s+/g, " "); }
+    function roleKey(model) { return [...(model.model_roles || [model.type || "model"])].sort().join("|"); }
+    function evidenceWeight(model) {
+      return Object.values(model.scores || {}).filter((score) => score && score.value !== undefined).length * 10
+        + (model.suggested_use_cases || []).length * 3 + Object.values(model).filter((value) => value !== null && value !== "").length;
+    }
+    function unanimous(models, getter, fallback) {
+      const values = [...new Set(models.map(getter))];
+      return values.length === 1 ? values[0] : (values.length ? "mixed" : fallback);
+    }
+    function reviewGroups() {
+      if (!state.catalog) return [];
+      if (state.groupCacheCatalog === state.catalog) return state.groupCache;
+      const buckets = new Map();
+      state.catalog.models.forEach((model) => {
+        const canonicalId = String(model.canonical_model_id || "").trim().toLowerCase();
+        const safeKey = canonicalId && normalizedName(model)
+          ? `canonical:${canonicalId}:${normalizedName(model)}:${roleKey(model)}`
+          : `model:${model.id}`;
+        if (!buckets.has(safeKey)) buckets.set(safeKey, []);
+        buckets.get(safeKey).push(model);
+      });
+      state.groupCache = [...buckets.entries()].map(([groupId, members]) => {
+        const representative = [...members].sort((left, right) => evidenceWeight(right) - evidenceWeight(left))[0];
+        const suggestions = new Map();
+        members.flatMap((model) => model.suggested_use_cases || []).forEach((item) => {
+          const key = item.id || item.use_case_id || item.label;
+          const existing = suggestions.get(key);
+          if (!existing || Number(item.fit_score || 0) > Number(existing.fit_score || 0)) suggestions.set(key, item);
+        });
+        const providers = [...new Set(members.map((model) => model.provider).filter(Boolean))];
+        return {
+          ...representative,
+          group_id: groupId,
+          members,
+          member_ids: members.map((model) => model.id),
+          source_record_count: members.length,
+          provider: providers.length === 1 ? providers[0] : "Multiple providers",
+          general_approval_status: unanimous(members, approvalStatus, "unreviewed"),
+          general_recommendation_status: unanimous(members, recommendationStatus, "unrated"),
+          suggested_use_cases: [...suggestions.values()].sort((left, right) => Number(right.fit_score || 0) - Number(left.fit_score || 0)),
+          searchable: members.map((model) => `${model.name} ${model.provider} ${model.id} ${model.canonical_model_id || ""}`).join(" ").toLowerCase()
+        };
+      });
+      state.groupCacheCatalog = state.catalog;
+      return state.groupCache;
+    }
+
+    function filteredGroups() {
       if (!state.catalog) return [];
       const search = state.filters.search.trim().toLowerCase();
-      return state.catalog.models.filter((model) => {
-        if (search && !`${model.name} ${model.provider} ${model.id}`.toLowerCase().includes(search)) return false;
-        if (state.filters.provider && model.provider !== state.filters.provider) return false;
-        if (state.filters.approval && approvalStatus(model) !== state.filters.approval) return false;
-        if (state.filters.recommendation && recommendationStatus(model) !== state.filters.recommendation) return false;
-        if (state.filters.needsDecision && approvalStatus(model) !== "unreviewed" && recommendationStatus(model) !== "unrated") return false;
+      return reviewGroups().filter((model) => {
+        if (search && !model.searchable.includes(search)) return false;
+        if (state.filters.provider && !model.members.some((member) => member.provider === state.filters.provider)) return false;
+        if (state.filters.approval && model.general_approval_status !== state.filters.approval) return false;
+        if (state.filters.recommendation && model.general_recommendation_status !== state.filters.recommendation) return false;
+        if (state.filters.needsDecision && model.general_approval_status !== "unreviewed" && model.general_approval_status !== "mixed" && model.general_recommendation_status !== "unrated" && model.general_recommendation_status !== "mixed") return false;
         return true;
       }).sort((left, right) => {
         const leftSuggestions = left.suggested_use_cases || [];
@@ -257,30 +359,39 @@
       });
     }
 
-    function activeModel() { return state.catalog?.models.find((model) => model.id === state.activeModelId) || null; }
+    function activeModel() { return reviewGroups().find((model) => model.group_id === state.activeGroupId) || null; }
     function setDraft(model) {
       state.draft = {
-        approval: approvalStatus(model),
-        recommendation: recommendationStatus(model),
-        notes: model.general_recommendation_notes || model.general_approval_notes || ""
+        approval: approvalStatus(model) === "mixed" ? null : approvalStatus(model),
+        recommendation: recommendationStatus(model) === "mixed" ? null : recommendationStatus(model),
+        notes: model.members.every((member) => (member.general_recommendation_notes || member.general_approval_notes || "") === (model.general_recommendation_notes || model.general_approval_notes || "")) ? (model.general_recommendation_notes || model.general_approval_notes || "") : ""
       };
     }
-    function selectModel(modelId) { state.activeModelId = modelId; state.showAllSuggestions = false; const model = activeModel(); if (model) setDraft(model); render(); }
+    function selectModel(groupId) { state.activeGroupId = groupId; state.showAllSuggestions = false; const model = activeModel(); if (model) setDraft(model); render(); }
 
     function renderQueue() {
-      const models = filteredModels();
-      els.queueCount.textContent = `${models.length} model${models.length === 1 ? "" : "s"}`;
+      const models = filteredGroups();
+      const hiddenRecords = models.reduce((sum, model) => sum + model.source_record_count - 1, 0);
+      els.queueCount.textContent = `${models.length} model${models.length === 1 ? "" : "s"}${hiddenRecords ? ` · ${hiddenRecords} duplicates combined` : ""}`;
+      els.selectionTools.hidden = !state.selectionMode;
+      els.toggleSelection.textContent = state.selectionMode ? "Done" : "Select";
+      els.selectionCount.textContent = `${state.selectedGroupIds.size} selected`;
+      els.selectAllFiltered.textContent = `Select all ${models.length} filtered`;
       if (!models.length) { els.queueList.innerHTML = '<div class="empty">No models match these filters.</div>'; return; }
-      if (!models.some((model) => model.id === state.activeModelId)) {
-        state.activeModelId = models[0].id;
+      if (!models.some((model) => model.group_id === state.activeGroupId)) {
+        state.activeGroupId = models[0].group_id;
         setDraft(models[0]);
       }
-      els.queueList.innerHTML = models.map((model) => `
-        <button class="model-row ${model.id === state.activeModelId ? "active" : ""}" data-model-id="${escapeHtml(model.id)}">
-          <div><div class="model-name">${escapeHtml(model.name)}</div><div class="provider">${escapeHtml(model.provider)}</div></div>
-          <span class="badge">${(model.suggested_use_cases || []).length} fits</span>
-          <div class="row-meta">${badge(approvalStatus(model))}${badge(recommendationStatus(model))}</div>
-        </button>`).join("");
+      const visibleModels = models.slice(0, state.visibleLimit);
+      els.queueList.innerHTML = visibleModels.map((model) => `
+        <div class="model-row ${model.group_id === state.activeGroupId ? "active" : ""} ${state.selectedGroupIds.has(model.group_id) ? "selected" : ""}">
+          ${state.selectionMode ? `<label class="row-select"><input type="checkbox" data-select-group-id="${escapeHtml(model.group_id)}" aria-label="Select ${escapeHtml(model.name)}" ${state.selectedGroupIds.has(model.group_id) ? "checked" : ""}></label>` : ""}
+          <button class="model-open" data-open-group-id="${escapeHtml(model.group_id)}">
+            <div><div class="model-name">${escapeHtml(model.name)}</div><div class="provider">${escapeHtml(model.provider)}${model.source_record_count > 1 ? ` · ${model.source_record_count} source records` : ""}</div></div>
+            <span class="badge">${(model.suggested_use_cases || []).length} fits</span>
+            <div class="row-meta">${badge(approvalStatus(model))}${badge(recommendationStatus(model))}</div>
+          </button>
+        </div>`).join("") + (visibleModels.length < models.length ? `<button class="btn load-more" id="loadMoreModels">Show next ${Math.min(200, models.length - visibleModels.length)} of ${models.length}</button>` : "");
     }
 
     function topMetrics(model) {
@@ -318,7 +429,7 @@
       const metrics = topMetrics(model);
       els.detail.innerHTML = `
         <div class="detail-header">
-          <div><p class="eyebrow">General model review</p><h2>${escapeHtml(model.name)}</h2><div class="detail-sub">${escapeHtml(model.provider)} · ${escapeHtml(label(model.type || "model"))}</div></div>
+          <div><p class="eyebrow">General model review</p><h2>${escapeHtml(model.name)}</h2><div class="detail-sub">${escapeHtml(model.provider)} · ${escapeHtml(label(model.type || "model"))}${model.source_record_count > 1 ? ` · ${model.source_record_count} source records combined` : ""}</div></div>
           <div class="detail-actions">${badge(approvalStatus(model))}${badge(recommendationStatus(model))}</div>
         </div>
         <section class="section">
@@ -329,7 +440,7 @@
           <div class="section-head"><div><h3>Your general decision</h3><p>Make one decision for the model. It applies across the catalog, not to individual use cases.</p></div></div>
           <div class="decision-grid">
             <div class="decision-group"><span>Approval</span>${choiceGroup("approval", ["approved", "not_approved", "unreviewed"], state.draft.approval)}</div>
-            <div class="decision-group"><span>Recommendation</span>${choiceGroup("recommendation", ["recommended", "restricted", "discouraged", "not_recommended", "unrated"], state.draft.recommendation)}</div>
+            <div class="decision-group"><span>Recommendation</span>${choiceGroup("recommendation", ["recommended", "restricted", "not_recommended", "unrated"], state.draft.recommendation)}</div>
           </div>
           <label class="rationale">Decision rationale<textarea class="textarea" id="decisionNotes" placeholder="Why is this the right general decision?">${escapeHtml(state.draft.notes)}</textarea></label>
           <div class="save-row"><span>Last decision: ${escapeHtml(formatDate(model.general_recommendation_updated_at || model.general_approval_updated_at))}</span><div><button class="btn ghost" id="skipModel">Decide later</button> <button class="btn primary" id="saveDecision" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Save and next"}</button></div></div>
@@ -348,15 +459,24 @@
             <div class="detail-item"><span>Inference platforms</span><strong>${escapeHtml((model.inference_summary?.platform_names || []).join(", ") || "—")}</strong></div>
             <div class="detail-item"><span>Catalog status</span><strong>${escapeHtml(label(model.catalog_status || "tracked"))}</strong></div>
           </div>
+          ${model.source_record_count > 1 ? `<details class="source-records"><summary>${model.source_record_count} source records combined</summary><ul>${model.members.map((member) => `<li>${escapeHtml(member.provider)} · ${escapeHtml(member.id)}${member.canonical_model_id ? ` · canonical ${escapeHtml(member.canonical_model_id)}` : ""}</li>`).join("")}</ul></details>` : ""}
         </section>`;
     }
 
-    function render() { renderQueue(); renderDetail(); }
+    function selectedGroups() { const selected = state.selectedGroupIds; return reviewGroups().filter((model) => selected.has(model.group_id)); }
+    function renderBulkBar() {
+      const groups = selectedGroups();
+      const records = groups.reduce((sum, group) => sum + group.member_ids.length, 0);
+      els.bulkBar.hidden = !groups.length;
+      els.bulkBarTitle.textContent = `${groups.length} model${groups.length === 1 ? "" : "s"} selected`;
+      els.bulkBarMeta.textContent = `${records} source record${records === 1 ? "" : "s"} will be updated`;
+    }
+    function render() { renderQueue(); renderDetail(); renderBulkBar(); }
     function selectNext() {
-      const models = filteredModels();
-      const index = models.findIndex((model) => model.id === state.activeModelId);
+      const models = filteredGroups();
+      const index = models.findIndex((model) => model.group_id === state.activeGroupId);
       if (!models.length) return;
-      selectModel(models[(index + 1) % models.length].id);
+      selectModel(models[(index + 1) % models.length].group_id);
     }
 
     async function saveDecision() {
@@ -365,15 +485,56 @@
       const notes = document.getElementById("decisionNotes")?.value || "";
       state.saving = true; renderDetail();
       try {
-        await request("/api/review/model-decisions", { method: "POST", body: JSON.stringify({
-          model_ids: [model.id], approval_status: state.draft.approval, approval_notes: notes,
+        if (!state.draft.approval && !state.draft.recommendation) throw new Error("Choose an approval or recommendation first");
+        const result = await request("/api/review/model-decisions", { method: "POST", body: JSON.stringify({
+          model_ids: model.member_ids, approval_status: state.draft.approval, approval_notes: notes,
           recommendation_status: state.draft.recommendation, recommendation_notes: notes
         }) });
-        toast("General decision saved");
+        if (result.updated_count !== model.member_ids.length) throw new Error(`Expected ${model.member_ids.length} updates but received ${result.updated_count}`);
+        toast(`General decision saved for ${model.member_ids.length} source record${model.member_ids.length === 1 ? "" : "s"}`);
         await loadCatalog(model.id);
         selectNext();
       } catch (error) { toast(error.message, true); }
       finally { state.saving = false; render(); }
+    }
+
+    function openBulkDialog() {
+      const groups = selectedGroups();
+      if (!groups.length) return;
+      const records = groups.reduce((sum, group) => sum + group.member_ids.length, 0);
+      els.bulkApproval.value = "";
+      els.bulkRecommendation.value = "";
+      els.bulkNotes.value = "";
+      els.bulkPreview.innerHTML = `<strong>${groups.length} model${groups.length === 1 ? "" : "s"} · ${records} source record${records === 1 ? "" : "s"}</strong><br>${groups.slice(0, 12).map((group) => escapeHtml(group.name)).join(" · ")}${groups.length > 12 ? ` · and ${groups.length - 12} more` : ""}`;
+      els.applyBulkDecision.textContent = `Apply to ${groups.length} model${groups.length === 1 ? "" : "s"}`;
+      els.bulkDecisionDialog.showModal();
+    }
+
+    async function applyBulkDecision(event) {
+      event.preventDefault();
+      if (state.bulkSaving) return;
+      const groups = selectedGroups();
+      const modelIds = [...new Set(groups.flatMap((group) => group.member_ids))];
+      const approval = els.bulkApproval.value;
+      const recommendation = els.bulkRecommendation.value;
+      const notes = els.bulkNotes.value.trim();
+      if (!approval && !recommendation) { toast("Choose an approval or recommendation to change", true); return; }
+      const payload = { model_ids: modelIds };
+      if (approval) { payload.approval_status = approval; payload.approval_notes = notes; }
+      if (recommendation) { payload.recommendation_status = recommendation; payload.recommendation_notes = notes; }
+      state.bulkSaving = true;
+      els.applyBulkDecision.disabled = true;
+      els.applyBulkDecision.textContent = "Applying…";
+      try {
+        const result = await request("/api/review/model-decisions", { method: "POST", body: JSON.stringify(payload) });
+        if (result.updated_count !== modelIds.length) throw new Error(`Expected ${modelIds.length} updates but received ${result.updated_count}`);
+        els.bulkDecisionDialog.close();
+        state.selectedGroupIds.clear();
+        state.selectionMode = false;
+        await loadCatalog();
+        toast(`Decision applied to ${groups.length} model${groups.length === 1 ? "" : "s"}`);
+      } catch (error) { toast(error.message, true); }
+      finally { state.bulkSaving = false; els.applyBulkDecision.disabled = false; render(); }
     }
 
     async function runUpdates() {
@@ -402,9 +563,10 @@
       const providers = [...new Set(catalog.models.map((model) => model.provider))].sort();
       els.providerFilter.innerHTML = '<option value="">All providers</option>' + providers.map((provider) => `<option value="${escapeHtml(provider)}">${escapeHtml(provider)}</option>`).join("");
       els.providerFilter.value = state.filters.provider;
-      const selected = preferredModelId || state.activeModelId;
-      state.activeModelId = catalog.models.some((model) => model.id === selected) ? selected : null;
-      if (!state.activeModelId) state.activeModelId = filteredModels()[0]?.id || null;
+      const selected = preferredModelId || activeModel()?.id;
+      const selectedGroup = reviewGroups().find((group) => group.member_ids.includes(selected));
+      state.activeGroupId = selectedGroup?.group_id || null;
+      if (!state.activeGroupId) state.activeGroupId = filteredGroups()[0]?.group_id || null;
       const model = activeModel(); if (model) setDraft(model);
       render();
     }
@@ -418,14 +580,24 @@
     [
       [els.search, "search", "input"], [els.providerFilter, "provider", "change"],
       [els.approvalFilter, "approval", "change"], [els.recommendationFilter, "recommendation", "change"]
-    ].forEach(([element, key, event]) => element.addEventListener(event, () => { state.filters[key] = element.value; render(); }));
-    els.needsDecision.addEventListener("change", () => { state.filters.needsDecision = els.needsDecision.checked; render(); });
+    ].forEach(([element, key, event]) => element.addEventListener(event, () => { state.filters[key] = element.value; state.visibleLimit = 200; render(); }));
+    els.needsDecision.addEventListener("change", () => { state.filters.needsDecision = els.needsDecision.checked; state.visibleLimit = 200; render(); });
     els.resetFilters.addEventListener("click", () => {
       state.filters = { search: "", provider: "", approval: "", recommendation: "", needsDecision: false };
       [els.search, els.providerFilter, els.approvalFilter, els.recommendationFilter].forEach((element) => { element.value = ""; });
-      els.needsDecision.checked = false; render();
+      els.needsDecision.checked = false; state.visibleLimit = 200; render();
     });
-    els.queueList.addEventListener("click", (event) => { const row = event.target.closest("[data-model-id]"); if (row) selectModel(row.dataset.modelId); });
+    els.queueList.addEventListener("click", (event) => {
+      const checkbox = event.target.closest("[data-select-group-id]");
+      if (checkbox) {
+        const groupId = checkbox.dataset.selectGroupId;
+        if (checkbox.checked) state.selectedGroupIds.add(groupId); else state.selectedGroupIds.delete(groupId);
+        render(); return;
+      }
+      if (event.target.closest("#loadMoreModels")) { state.visibleLimit += 200; render(); return; }
+      const row = event.target.closest("[data-open-group-id]");
+      if (row) selectModel(row.dataset.openGroupId);
+    });
     els.detail.addEventListener("click", (event) => {
       const choice = event.target.closest("[data-choice-group]");
       if (choice) { state.draft[choice.dataset.choiceGroup] = choice.dataset.choiceValue; renderDetail(); return; }
@@ -437,6 +609,12 @@
     els.openSettings.addEventListener("click", () => { els.adminToken.value = sessionStorage.getItem("llm_benchmarking_admin_token") || ""; els.settingsDialog.showModal(); });
     els.saveToken.addEventListener("click", () => { sessionStorage.setItem("llm_benchmarking_admin_token", els.adminToken.value); toast("Admin token saved for this tab"); });
     els.runUpdates.addEventListener("click", runUpdates);
+    els.toggleSelection.addEventListener("click", () => { state.selectionMode = !state.selectionMode; render(); });
+    els.selectAllFiltered.addEventListener("click", () => { state.selectedGroupIds = new Set(filteredGroups().map((group) => group.group_id)); render(); });
+    els.clearSelection.addEventListener("click", () => { state.selectedGroupIds.clear(); render(); });
+    els.openBulkDecision.addEventListener("click", openBulkDialog);
+    els.cancelBulkDecision.addEventListener("click", () => els.bulkDecisionDialog.close());
+    els.bulkDecisionForm.addEventListener("submit", applyBulkDecision);
 
     loadCatalog().catch((error) => { els.detail.innerHTML = `<div class="empty error">${escapeHtml(error.message)}</div>`; });
   </script>

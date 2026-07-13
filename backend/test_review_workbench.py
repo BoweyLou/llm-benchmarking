@@ -91,6 +91,13 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Your general decision", app_response.text)
         self.assertIn("General recommendation", app_response.text)
         self.assertIn("Restricted", app_response.text)
+        self.assertNotIn("Discouraged", app_response.text)
+        self.assertIn("Select all", app_response.text)
+        self.assertIn("Apply general decision", app_response.text)
+        self.assertIn("selectedGroupIds", app_response.text)
+        self.assertIn("reviewGroups", app_response.text)
+        self.assertIn("visibleLimit: 200", app_response.text)
+        self.assertIn("Show next", app_response.text)
         self.assertIn('/api/review/model-decisions', app_response.text)
         self.assertNotIn('/api/review/decisions', app_response.text)
         self.assertNotIn("Manual recommendation", app_response.text)
@@ -116,6 +123,10 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("facets", payload)
         self.assertNotIn("recommendations", payload["facets"])
         self.assertIn("general_recommendations", payload["facets"])
+        self.assertNotIn(
+            "discouraged",
+            {item["id"] for item in payload["facets"]["general_recommendations"]},
+        )
         self.assertIn("countries", payload["facets"])
         self.assertTrue(payload["facets"]["countries"])
         self.assertIn("hyperscalers", payload["facets"])
@@ -477,12 +488,13 @@ class ReviewWorkbenchTests(unittest.TestCase):
     def test_review_model_decision_route_saves_general_approval_and_recommendation_only(self) -> None:
         os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
         self._insert_review_model("general-decision-model")
+        self._insert_review_model("general-decision-model-alias")
 
         with patch("backend.main.bootstrap"):
             response = TestClient(main.app).post(
                 "/api/review/model-decisions",
                 json={
-                    "model_ids": ["general-decision-model"],
+                    "model_ids": ["general-decision-model", "general-decision-model-alias"],
                     "approval_status": "approved",
                     "approval_notes": "Approved after general review.",
                     "recommendation_status": "restricted",
@@ -492,21 +504,52 @@ class ReviewWorkbenchTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["updated_count"], 2)
         self.assertEqual(response.json()["approval_status"], "approved")
         self.assertEqual(response.json()["recommendation_status"], "restricted")
         with self.engine.begin() as conn:
-            model_row = conn.execute(
-                models_table.select().where(models_table.c.id == "general-decision-model")
-            ).mappings().one()
-            legacy_rows = conn.execute(
-                model_use_case_approvals_table.select().where(
-                    model_use_case_approvals_table.c.model_id == "general-decision-model"
+            model_rows = conn.execute(
+                models_table.select().where(
+                    models_table.c.id.in_(["general-decision-model", "general-decision-model-alias"])
                 )
             ).mappings().all()
-        self.assertEqual(model_row["general_approved_for_use"], 1)
-        self.assertEqual(model_row["general_recommendation_status"], "restricted")
-        self.assertEqual(model_row["general_recommendation_notes"], "Use only with human oversight.")
+            legacy_rows = conn.execute(
+                model_use_case_approvals_table.select().where(
+                    model_use_case_approvals_table.c.model_id.in_(
+                        ["general-decision-model", "general-decision-model-alias"]
+                    )
+                )
+            ).mappings().all()
+        self.assertEqual({row["general_approved_for_use"] for row in model_rows}, {1})
+        self.assertEqual({row["general_recommendation_status"] for row in model_rows}, {"restricted"})
+        self.assertEqual(
+            {row["general_recommendation_notes"] for row in model_rows},
+            {"Use only with human oversight."},
+        )
         self.assertEqual(legacy_rows, [])
+
+    def test_general_model_decision_normalizes_discouraged_to_not_recommended(self) -> None:
+        os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
+        self._insert_review_model("discouraged-alias-model")
+
+        with patch("backend.main.bootstrap"):
+            response = TestClient(main.app).post(
+                "/api/review/model-decisions",
+                json={
+                    "model_ids": ["discouraged-alias-model"],
+                    "recommendation_status": "discouraged",
+                    "recommendation_notes": "Legacy discouraged decision.",
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["recommendation_status"], "not_recommended")
+        with self.engine.begin() as conn:
+            model_row = conn.execute(
+                models_table.select().where(models_table.c.id == "discouraged-alias-model")
+            ).mappings().one()
+        self.assertEqual(model_row["general_recommendation_status"], "not_recommended")
 
     def test_catalog_lists_positive_metric_use_case_fits_without_decision_statuses(self) -> None:
         self._insert_review_model("suggested-use-model")

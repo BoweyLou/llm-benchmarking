@@ -157,6 +157,27 @@ class DatabaseMigrationTests(unittest.TestCase):
 
         self.assertEqual(json.loads(str(row["model_roles_json"])), ["text_to_speech"])
 
+    def test_general_recommendation_simplification_migrates_discouraged(self) -> None:
+        engine = init_db(get_engine("sqlite:///:memory:"))
+        with engine.begin() as conn:
+            conn.execute(
+                models_table.insert(),
+                {
+                    "id": "discouraged-general-model",
+                    "name": "Discouraged General Model",
+                    "provider": "Test Provider",
+                    "type": "proprietary",
+                    "general_recommendation_status": "discouraged",
+                    "active": 1,
+                },
+            )
+            database._migration_20260714_general_recommendation_simplification(conn)
+            row = conn.execute(
+                models_table.select().where(models_table.c.id == "discouraged-general-model")
+            ).mappings().one()
+
+        self.assertEqual(row["general_recommendation_status"], "not_recommended")
+
     def test_speech_to_text_role_migration_does_not_backfill_tts_name_only_rows(self) -> None:
         engine = init_db(get_engine("sqlite:///:memory:"))
         with engine.begin() as conn:

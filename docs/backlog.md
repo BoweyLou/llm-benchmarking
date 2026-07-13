@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-069: P1 Add bulk general decisions and safe canonical review groups
+  - Source: Human request 2026-07-14 after reviewing the simplified general-decision workflow.
+  - Problem: general review still required repetitive one-model saves, `Discouraged` duplicated the meaning of `Not recommended`, and safe duplicate source rows cluttered the queue.
+  - Scope: add explicit all-filtered selection and confirmed bulk general decisions; retire general `Discouraged`; group only same-name records that share a non-empty canonical model ID and model role; preserve every source row and keep ambiguous same-name records separate.
+  - Acceptance: bulk writes target the exact selected underlying model IDs; suggested use cases remain read-only; general discouraged values normalize to not recommended; grouped rows expose their source records; no database records are merged or deleted.
+  - Validation: migration/API regressions, full backend suite, docs/version checks, inline-script parse, desktop/mobile browser QA, deployed API/HTML verification.
+  - Completed: 2026-07-14. Bulk general review and conservative canonical grouping are available in the current review surface.
+
 - [x] LBM-068: P1 Replace use-case decisions with general model decisions
   - Source: Human request 2026-07-14 after trying the use-case approval and recommendation workflow.
   - Problem: per-use-case approval, recommendation, restriction, filters, and actions obscured the model evidence needed for a straightforward general decision.

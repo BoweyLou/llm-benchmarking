@@ -94,7 +94,7 @@ python -m backend list-models --format raw-csv --output output/model-metadata-ra
 
 ## Recommendation Proposals
 
-Manual use-case recommendation ratings remain the source of human approval. The recommendation proposal engine adds a separate, auditable policy layer that can be regenerated from the current catalog:
+Human review now records one general approval and one general recommendation per model. The recommendation proposal engine remains a separate, auditable use-case fit layer that can be regenerated from the current catalog:
 
 ```bash
 python -m backend recommendation-audit
@@ -106,7 +106,8 @@ python -m backend list-models --output output/model-metadata.json
 
 The first profile is `australian_bank`. It applies conservative gates for regulated banking use: commercial license and unverified derivative provenance blockers, tracked-catalog requirements for governed use cases, model-card requirements, bank-approved inference-route requirements, Australian-route requirements for customer or personal-information use cases, and benchmark score/confidence thresholds. The profile was shaped around official guidance from [APRA CPS 230](https://www.apra.gov.au/standards/cps-230), [APRA CPS 234 cyber security guidance](https://www.apra.gov.au/cyber-security), [OAIC commercial AI privacy guidance](https://www.oaic.gov.au/privacy/privacy-guidance-for-organisations-and-government-agencies/guidance-on-privacy-and-the-use-of-commercially-available-ai-products), and [ASIC AI governance observations](https://www.asic.gov.au/about-asic/news-centre/find-a-media-release/2024-releases/24-238mr-asic-warns-governance-gap-could-emerge-in-first-report-on-ai-adoption-by-licensees/).
 
-Each use-case approval can then carry:
+Legacy use-case records can still carry the following compatibility fields, but
+the current review UI does not expose them as human decisions:
 
 - `recommendation_status`: manual human rating.
 - `auto_recommendation_status`: existing automatic hard blockers from license/provenance overlays.
@@ -120,19 +121,12 @@ team members. Store the audience or access condition in recommendation notes.
 ## LLM Model Tool
 
 For interactive model review, run the FastAPI app locally and open `/review`.
-The LLM Model Tool shows the model catalog with provider, provider-origin
-country, use-case, general-approval, manual-recommendation, use-case approval,
-family, catalog-status, model-role,
-small-model, and hyperscaler-availability filters; a sortable model table; family and needs-decision
-views; and a detail inspector for model approval plus per-use-case approval
-notes, manual ratings, generated blockers, warnings, and required controls.
-The `Rankings` view keeps benchmark comparison separate from manual review. It
-can show weighted use-case rankings from `/api/rankings` or raw benchmark
-leaderboards from the loaded score data. Ranking lanes stay model-role aware:
-generator use cases rank generator models, retrieval embeddings rank embedding
-models, retrieval reranking ranks reranker models, voice-to-text ranks
-speech-to-text models, and text-to-speech ranks synthesis models.
-The model table `Release` column shows the best available release indicator:
+The LLM Model Tool presents a focused queue with provider, general approval,
+general recommendation, and needs-decision filters. Selecting a model puts its
+benchmark evidence, one general decision, read-only suggested use cases, and
+reference facts in one detail view. The queue combines duplicate source records
+only when normalized name, non-empty canonical model ID, and model role all
+agree; ambiguous same-name records remain separate.
 trusted source release date first, then proxy dates such as Hugging Face
 repository creation, OpenRouter addition, or local catalog discovery when an
 official release date is not available.
@@ -175,7 +169,8 @@ Saved decisions write to SQLite:
 - `models.general_recommendation_status`,
   `models.general_recommendation_notes`, and
   `models.general_recommendation_updated_at` store one general recommendation:
-  `Recommended`, `Restricted`, `Discouraged`, `Not recommended`, or `Unrated`.
+  `Recommended`, `Restricted`, `Not recommended`, or `Unrated`. Upgrades and
+  legacy API inputs normalize general `Discouraged` to `Not recommended`.
 - `models.catalog_status` stores listing state such as `tracked`,
   `provisional`, or `deprecated`.
 - `model_use_case_recommendation_proposals` remains generated policy output and
@@ -191,6 +186,16 @@ suggested use cases, then save one general approval and one general
 recommendation. Use `Needs a decision` to find models whose approval is still
 `Unreviewed` or recommendation is still `Unrated`. `Restricted` applies to the
 model generally; record the access boundary in the shared decision rationale.
+
+For bulk review, choose `Select`, optionally narrow the queue with filters, and
+use `Select all filtered`. The fixed action bar shows both the number of visible
+model groups and the exact underlying source-record count. The confirmation
+dialog changes only the selected general approval and/or recommendation fields;
+fields set to `Leave unchanged` and all suggested-use-case evidence are left
+untouched. A decision on a combined row writes to every listed source record.
+The queue renders results in progressive 200-row batches for responsiveness;
+`Select all filtered` still targets the complete filtered result, including
+rows not yet rendered.
 
 The workbench can export and import a JSON review snapshot. Use that snapshot
 when rebuilding a database so manual listings, deprecation markers, and
@@ -373,14 +378,13 @@ Metadata and catalog enrichments:
 
 ## Governance Model
 
-The approval model is more than a global allow-list:
+The current human review contract is intentionally model-level:
 
-- general model approval is stored separately from use-case approval
-- approval is stored per `model x use case`
-- recommendation is stored separately from approval
-- recommendation proposals are regenerated policy output stored separately from manual ratings
+- general approval and general recommendation are separate fields on each model
+- use-case recommendation proposals are regenerated metric evidence, not human authorization
+- legacy per-use-case approval and recommendation rows remain available only for compatibility and audit
 - inference-route approval can be stored per `model x use case x provider x location`
-- family bulk approval actions write through to exact models rather than using hidden inheritance
+- bulk general decisions write through to exact model IDs rather than using hidden inheritance
 - new models discovered in updates can be surfaced for review
 - provider-origin and model-curation state can be exported back to repo-backed baselines
 
@@ -442,7 +446,7 @@ Notes:
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.
 - `recommendation-audit` previews generated use-case recommendation proposals. `recommendation-sync` persists them so `list-models`, CSV export, and the API include proposed/effective recommendation fields.
-- `/review` is the interactive LLM Model Tool and can export all, filtered, or selected model rows to CSV from the browser. It can also start `/api/update` and show live progress from `/api/update/status/{log_id}`. `banking-review export` writes the review-friendly combined CSV from the CLI. `banking-review set` and `banking-review deprecate` apply model- or family-scoped manual approval and recommendation decisions from the CLI.
+- `/review` is the interactive LLM Model Tool for single and all-filtered bulk general decisions. It can also start `/api/update` and show live progress from `/api/update/status/{log_id}`. `banking-review export` writes the review-friendly combined CSV from the CLI; legacy `banking-review set` and `banking-review deprecate` commands remain available for compatibility workflows.
 - `model-license-sync` fills missing licenses using safe open-weight family propagation, a `Proprietary` fallback for missing proprietary licenses, and tracked exact/family overrides from [backend/model_license_baseline.json](backend/model_license_baseline.json).
 - `list-models` writes a clean CSV bundle to `output/model-list*.csv` by default in addition to the requested stdout/file format; pass `--no-csv` when you do not want the bundle, or `--no-csv-sidecars` when you only want the main model CSV.
 - `provider-origin-export` and `model-curation-export` push live curation back into the tracked baseline JSON files.

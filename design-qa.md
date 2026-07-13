@@ -1,10 +1,10 @@
 # Design QA: General Model Decisions
 
 - Source visual truth: `/Users/yannickbowe/.codex/generated_images/019f59f8-ead5-77f3-8ce2-e977cb152398/exec-b46eac6a-21b4-4822-a61d-6b5848f057ce.png`
-- Browser-rendered implementation: `/tmp/lbm-general-model-decisions-review-top-final.png`
-- Full-view comparison: `/tmp/lbm-general-model-decisions-comparison-final.png`
-- Viewport: browser capture 1487 x 720; source normalized to the same height for comparison
-- State: Claude Opus 4.6 selected; general approval `approved`; general recommendation `restricted`; metric evidence loaded
+- Desktop bulk confirmation: `output/playwright/lbm-bulk-general-desktop.png`
+- Mobile bulk confirmation: `output/playwright/lbm-bulk-general-mobile.png`
+- Viewports: desktop 1200 x 800; mobile 390 x 844
+- State: all 10 filtered model groups selected; bulk confirmation open; both decision fields initially set to `Leave unchanged`
 
 The source visual predates the approved contract change and still contains a
 single use-case decision. It is used as the visual hierarchy, density, palette,
@@ -28,6 +28,9 @@ No actionable P0, P1, or P2 findings remain.
 - Copy and content: the UI consistently calls the states general approval and
   general recommendation, and explicitly says suggested use cases are read-only
   evidence rather than approvals or recommendations.
+- Responsive behavior: the desktop confirmation stays compact and centered;
+  at phone width it becomes a full-width bottom sheet with one-column fields,
+  visible model/source-record counts, and reachable primary actions.
 
 Focused-region comparison was not required because the full-view composite at
 original output resolution keeps the metrics, decision controls, state colors,
@@ -60,7 +63,18 @@ and copy legible.
 - `Save and next` persisted the general decision and advanced to the next model.
 - SQLite verification confirmed the model-level `approved` + `restricted`
   result and shared rationale.
-- Browser console errors/warnings checked after load and save: none.
+- Selection mode exposed a checkbox per model and `Select all 10 filtered`
+  selected the complete filtered queue.
+- The fixed action bar and confirmation dialog both reported 10 model groups
+  and 10 exact underlying source records.
+- Synthetic grouping verification combined two records sharing normalized
+  name, canonical ID, and role, while leaving the same-name record with a
+  different canonical ID separate.
+- Live full-catalog verification reported 2,303 visible model groups from 2,361
+  source records. Cached grouping and progressive 200-row rendering avoid a
+  2,303-row initial DOM while full-filter selection retains all group IDs.
+- Browser console errors/warnings checked after load: only the browser's
+  pre-fix favicon request; the inline data favicon removes that request.
 
 ## Follow-up Polish
 

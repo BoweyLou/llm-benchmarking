@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0 - 2026-07-14
+
+- Added explicit all-filtered bulk general decisions with a confirmation step, shared rationale, exact selected-model and source-record counts, and responsive mobile controls.
+- Combined the general `Discouraged` state into `Not recommended`, including migration and legacy-input normalization, while leaving legacy use-case recommendation states intact for compatibility.
+- Combined duplicate review rows only when normalized model name, canonical model ID, and model role agree; ambiguous same-name records remain separate and all underlying source records remain intact.
+- Kept the full-catalog queue responsive with cached grouping and progressive 200-row rendering while preserving full all-filtered bulk selection.
+
 ## 0.5.0 - 2026-07-14
 
 - Simplified human review to one general approval and one general recommendation per model, replacing the current workbench's use-case decision controls with a guided model-level flow.
