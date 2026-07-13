@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 - 2026-07-14
+
+- Simplified human review to one general approval and one general recommendation per model, replacing the current workbench's use-case decision controls with a guided model-level flow.
+- Added metric-derived, read-only suggested use cases with fit score, confidence, reasons, warnings, and required controls.
+- Added the `/api/review/model-decisions` contract, durable general recommendation columns, snapshot version 2 support, and general-decision export fields while retaining legacy use-case rows and routes for audit compatibility (LBM-068).
+
 ## 0.4.3 - Unreleased
 
 - Renamed the visible review surface and current deployment labels to `LLM Model Tool`, replacing the banking-specific header and subtitle while retaining compatible banking workflow identifiers (LBM-067).

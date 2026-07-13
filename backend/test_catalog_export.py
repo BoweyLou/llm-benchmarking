@@ -79,6 +79,18 @@ class CatalogExportTests(unittest.TestCase):
                 "huggingface_created_at": "2026-06-16T12:00:00Z",
                 "huggingface_last_modified_at": "2026-06-25T18:30:00Z",
                 "model_roles": ["embedding", "reranker"],
+                "general_recommendation_status": "restricted",
+                "suggested_use_cases": [
+                    {
+                        "use_case_id": "customer_support",
+                        "label": "Customer support",
+                        "fit_score": 88.4,
+                        "confidence": 0.81,
+                        "reasons": ["Strong instruction following"],
+                        "warnings": ["Monitor hallucinations"],
+                        "required_controls": ["Human escalation"],
+                    }
+                ],
                 "provider_origin_countries": [{"code": "US", "name": "United States"}],
                 "scores": {"benchmark": {
                     "value": 95.0,
@@ -137,6 +149,9 @@ class CatalogExportTests(unittest.TestCase):
         self.assertEqual(rows[0]["score_count"], "1")
         self.assertEqual(rows[0]["verified_score_count"], "1")
         self.assertEqual(rows[0]["benchmark_ids_with_scores"], "benchmark")
+        self.assertEqual(rows[0]["general_recommendation_status"], "restricted")
+        self.assertEqual(rows[0]["suggested_use_case_count"], "1")
+        self.assertEqual(rows[0]["suggested_use_case_ids"], "customer_support")
         self.assertEqual(rows[0]["inference_destination_count"], "1")
         self.assertEqual(rows[0]["inference_platform_names"], "AWS Bedrock")
         self.assertEqual(rows[0]["inference_region_names"], "us-east-1")
@@ -197,6 +212,18 @@ class CatalogExportTests(unittest.TestCase):
                         "effective_recommendation_status": "recommended",
                     }
                 },
+                "suggested_use_cases": [{
+                    "use_case_id": "customer_support",
+                    "label": "Customer support",
+                    "description": "Customer-facing assistance",
+                    "fit_score": 88.4,
+                    "confidence": 0.81,
+                    "reasons": ["Strong instruction following"],
+                    "warnings": ["Monitor hallucinations"],
+                    "required_controls": ["Human escalation"],
+                    "policy_version": "test-policy",
+                    "computed_at": "2026-07-14T00:00:00Z",
+                }],
                 "inference_destinations": [
                     {
                         "id": "aws-bedrock",
@@ -241,6 +268,11 @@ class CatalogExportTests(unittest.TestCase):
         self.assertEqual(approval_rows[0]["use_case_id"], "customer_support")
         self.assertEqual(approval_rows[0]["proposed_recommendation_required_controls"], "PIA")
         self.assertNotIn("effective_recommendation_status", approval_rows[0])
+
+        suggestion_rows = list(csv.DictReader(io.StringIO(bundle["suggested-use-cases"])))
+        self.assertEqual(suggestion_rows[0]["use_case_id"], "customer_support")
+        self.assertEqual(suggestion_rows[0]["fit_score"], "88.4")
+        self.assertEqual(suggestion_rows[0]["required_controls"], "Human escalation")
 
         destination_rows = list(csv.DictReader(io.StringIO(bundle["inference-destinations"])))
         self.assertEqual(destination_rows[0]["destination_id"], "aws-bedrock")

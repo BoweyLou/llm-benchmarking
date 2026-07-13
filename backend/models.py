@@ -182,6 +182,19 @@ class UseCaseApprovalIn(APIModel):
     recommendation_notes: str | None = None
 
 
+class SuggestedUseCaseOut(APIModel):
+    use_case_id: str
+    label: str
+    description: str | None = None
+    fit_score: float
+    confidence: float | None = None
+    reasons: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    required_controls: list[str] = Field(default_factory=list)
+    policy_version: str | None = None
+    computed_at: datetime | None = None
+
+
 class InferenceRouteApprovalOut(APIModel):
     use_case_id: str
     destination_id: str
@@ -376,6 +389,10 @@ class ModelOut(APIModel):
     general_approved_for_use: bool = False
     general_approval_notes: str | None = None
     general_approval_updated_at: datetime | None = None
+    general_recommendation_status: RecommendationStatusIn = "unrated"
+    general_recommendation_notes: str | None = None
+    general_recommendation_updated_at: datetime | None = None
+    suggested_use_cases: list[SuggestedUseCaseOut] = Field(default_factory=list)
     approved_for_use: bool = False
     approval_use_case_count: int = 0
     use_case_approvals: dict[str, UseCaseApprovalOut] = Field(default_factory=dict)
@@ -473,6 +490,10 @@ class ModelSummaryOut(APIModel):
     general_approved_for_use: bool = False
     general_approval_notes: str | None = None
     general_approval_updated_at: datetime | None = None
+    general_recommendation_status: RecommendationStatusIn = "unrated"
+    general_recommendation_notes: str | None = None
+    general_recommendation_updated_at: datetime | None = None
+    suggested_use_cases: list[SuggestedUseCaseOut] = Field(default_factory=list)
     approved_for_use: bool = False
     approval_use_case_count: int = 0
     use_case_approvals: dict[str, UseCaseApprovalOut] = Field(default_factory=dict)
@@ -524,6 +545,14 @@ class ReviewModelApprovalIn(APIModel):
     approved_for_use: bool = False
     approval_status: GeneralApprovalStatusIn | None = None
     approval_notes: str | None = None
+
+
+class ReviewModelDecisionIn(APIModel):
+    model_ids: list[str] = Field(default_factory=list)
+    approval_status: GeneralApprovalStatusIn | None = None
+    approval_notes: str | None = None
+    recommendation_status: RecommendationStatusIn | None = None
+    recommendation_notes: str | None = None
 
 
 class ReviewModelCreateIn(APIModel):

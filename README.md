@@ -169,85 +169,38 @@ Saved decisions write to SQLite:
 
 - `models.general_approved_for_use`, `models.general_approval_notes`, and
   `models.general_approval_updated_at` store model-level approval independent
-  of use-case decisions. General approval has three review states: `Approved`,
+  of use cases. General approval has three review states: `Approved`,
   `Not approved`, and `Unreviewed`; `Unreviewed` means no timestamped general
   approval decision has been saved yet.
-- `model_use_case_approvals` stores use-case approval, manual recommendation
-  status, and notes.
+- `models.general_recommendation_status`,
+  `models.general_recommendation_notes`, and
+  `models.general_recommendation_updated_at` store one general recommendation:
+  `Recommended`, `Restricted`, `Discouraged`, `Not recommended`, or `Unrated`.
 - `models.catalog_status` stores listing state such as `tracked`,
   `provisional`, or `deprecated`.
 - `model_use_case_recommendation_proposals` remains generated policy output and
-  can be regenerated without overwriting manual decisions.
+  is transformed into read-only `suggested_use_cases` entries with fit score,
+  confidence, reasons, warnings, and required controls. Suggestions never write
+  approval or recommendation state.
+- `model_use_case_approvals` is retained as a legacy audit/backward-
+  compatibility table. The current review UI does not read or write it as a
+  decision surface.
 
-Use-case recommendations are reviewed through the active use case. Switch to
-`Use-case review`, choose a use case in the left filter or right inspector, then
-use the model table for reviewer-saved `Manual` ratings and separate `Use-case`
-approval status. `Pending` means no explicit use-case approval decision has been
-saved yet. Generated banking-profile proposals stay in the per-use-case
-inspector controls and the use-case approval export rather than being summarized
-as model-level recommendation columns.
-
-General model approval is reviewed separately in the top panel of the right
-inspector. Use `Approve model` or `Reject model` for model-level decisions, or
-set the model back to `Unreviewed` from the inspector when it should return to
-the untriaged queue.
-Use `Approve use case` or `Not approved use case` only for the active use-case
-approval.
-
-Use `Country` to filter by provider-origin country across providers. When a
-provider has multiple origin countries, the model appears under each listed
-country.
-
-Select a model to review it in the right inspector. Use the inspector tabs to
-choose a use case, read blockers/warnings/required controls, review timestamp
-activity, or edit notes and manual decisions. Change `Manual rating` and
-use-case `Approval` in `Notes`, then save. For many models, filter first, use
-`Select all filtered` when needed, and apply the bulk recommendation or approval
-action to the exact selected model IDs.
-In `Rankings`, select a use-case ranking or a benchmark leaderboard, then select
-a ranked row to inspect score, coverage, missing evidence, and raw benchmark
-details. Ranking evidence is read-only; use the review tabs for approval and
-recommendation decisions.
-Use `Restricted` for limited-audience access decisions and record who may use
-the model in the recommendation notes.
-Use `Manual recommendation` to filter only reviewer-saved ratings, including rows
-where the manual rating has been cleared to `Unrated`.
-Choose a specific `Use case` and set `Use-case approval = Pending` to find
-models that still need an explicit approval decision for that use case.
-When `Use case` is left blank, `Manual recommendation = Unrated` finds models
-with no saved manual recommendation in any use case. Combine it with
-`General approval = Approved` for first-cut triage of approved models that still
-need a human rating.
+Select a model, review its strongest benchmark evidence and metric-derived
+suggested use cases, then save one general approval and one general
+recommendation. Use `Needs a decision` to find models whose approval is still
+`Unreviewed` or recommendation is still `Unrated`. `Restricted` applies to the
+model generally; record the access boundary in the shared decision rationale.
 
 The workbench can export and import a JSON review snapshot. Use that snapshot
 when rebuilding a database so manual listings, deprecation markers, and
-general model approvals plus use-case approval/recommendation rows can be
-restored.
+general model decisions can be restored. Version 2 snapshots also include the
+general recommendation fields; version 1 snapshots remain importable.
 
-The model table can also export CSV directly from the browser. Choose filtered,
-selected, or all rows in the table toolbar, then use `Export CSV`. The CSV
-contains the model listing fields, general model approval, active use-case approval,
-manual/proposed/effective recommendation, proposal blockers, warnings, and
-required controls. It includes `best_release_date`,
-`best_release_date_basis`, and `best_release_date_confidence` alongside the raw
-official release-date fields. It also includes derived model type and selection
-evidence fields: `model_type_primary`, `model_type_tags`,
-`evidence_context_use_case_id`, `strongest_signal_kind`,
-`strongest_signal_label`, `strongest_signal_value`,
-`strongest_signal_source_url`, `ranking_rank`, `ranking_score`,
-`ranking_coverage`, `cost_signal`, `speed_signal`, `hyperscaler_signal`, and
-`inference_location_signal`. Filter `General approval` to `Approved` before
-exporting when you need the model-level approved list; use-case approval remains
-a separate field in the same CSV.
-
-Bulk review actions can target the current visible page with the table checkbox
-or the full filtered result set with `Select all filtered`. Selecting all
-filtered rows replaces the current selection with the exact filtered model IDs
-before a bulk action is saved.
-Use `Reject model` to clear model-level approval in bulk. Use `Not approved use
-case` to clear approval for the active use case. Use `Clear rating` only when you
-want to reset the manual recommendation rating to `unrated` while leaving
-approval state unchanged.
+Clean CSV exports include general approval, general recommendation, and
+`suggested_use_case_count` / `suggested_use_case_ids`. The normalized CSV bundle
+adds `suggested-use-cases.csv` with the metric fit evidence. The legacy
+`use-case-approvals.csv` sidecar remains available for audit compatibility.
 
 To run the workbench on the Proxmox tailnet host, use the deploy script:
 
@@ -501,7 +454,7 @@ The core API is in [backend/main.py](backend/main.py). High-level groups:
 - model list: `/` and `/api/models`
 - catalog metadata: `/api/providers`, `/api/benchmarks`, `/api/use-cases`
 - rankings: `/api/rankings`
-- LLM Model Tool: `/review`, `/api/review/catalog`, `/api/review/decisions`, `/api/review/model-approvals`, `/api/review/models`, `/api/review/snapshots/export`, and `/api/review/snapshots/import`
+- LLM Model Tool: `/review`, `/api/review/catalog`, `/api/review/model-decisions`, the compatibility routes `/api/review/model-approvals` and `/api/review/decisions`, `/api/review/models`, `/api/review/snapshots/export`, and `/api/review/snapshots/import`
 - admin edits for provider metadata, approvals, inference-route approvals, manual benchmark scores, and model curation
 - update operations: `/api/update`, `/api/update/status/{log_id}`, `/api/update/history`, source-run detail, raw source records, audit output, and per-run catalog change summaries
 - market snapshots: `/api/market-snapshots`

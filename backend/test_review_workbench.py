@@ -15,6 +15,7 @@ from backend.database import (
     init_db,
     model_inference_destinations as model_inference_destinations_table,
     model_use_case_approvals as model_use_case_approvals_table,
+    model_use_case_recommendation_proposals as recommendation_proposals_table,
     models as models_table,
     scores as scores_table,
     sqlite_database_updated_at,
@@ -84,85 +85,24 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("<title>LLM Model Tool</title>", app_response.text)
         self.assertIn('<div class="brand-mark">LLM</div>', app_response.text)
         self.assertIn("<h1>Model Tool</h1>", app_response.text)
-        self.assertNotIn("Banking Model Review", app_response.text)
-        self.assertNotIn("Internal Data Review Workbench", app_response.text)
-        self.assertNotIn(">BR<", app_response.text)
-        self.assertIn("Manual recommendation", app_response.text)
+        self.assertIn("General model review", app_response.text)
+        self.assertIn("Suggested use cases", app_response.text)
+        self.assertIn("These are not approvals or recommendations", app_response.text)
+        self.assertIn("Your general decision", app_response.text)
+        self.assertIn("General recommendation", app_response.text)
         self.assertIn("Restricted", app_response.text)
-        self.assertIn('data-action="restricted"', app_response.text)
-        self.assertNotIn('${header("proposed", "Proposed")}', app_response.text)
-        self.assertNotIn('["proposed_recommendation",', app_response.text)
-        self.assertNotIn("Effective recommendation", app_response.text)
-        self.assertNotIn('${header("effective", "Effective")}', app_response.text)
-        self.assertNotIn("recommendationFilter", app_response.text)
-        self.assertNotIn("effective_recommendation_status", app_response.text)
-        self.assertIn("manualRecommendationFilter", app_response.text)
-        self.assertIn("hasSavedManualRecommendation", app_response.text)
-        self.assertIn('<option value="pending">Pending</option>', app_response.text)
-        self.assertIn("useCaseApprovalStatus", app_response.text)
-        self.assertIn('state.filters.approval !== "pending"', app_response.text)
-        self.assertIn("All matching use cases", app_response.text)
-        self.assertIn("countryFilter", app_response.text)
-        self.assertIn("Country", app_response.text)
-        self.assertIn("hyperscalerFilter", app_response.text)
-        self.assertIn("Hyperscaler availability", app_response.text)
+        self.assertIn('/api/review/model-decisions', app_response.text)
+        self.assertNotIn('/api/review/decisions', app_response.text)
+        self.assertNotIn("Manual recommendation", app_response.text)
+        self.assertNotIn("useCaseApprovalStatus", app_response.text)
+        self.assertNotIn("bulkUseCaseTargetsForModels", app_response.text)
         self.assertIn("runUpdates", app_response.text)
         self.assertIn("Run updates", app_response.text)
         self.assertIn('id="databaseUpdated">Database updated:', app_response.text)
         self.assertIn('id="lastSynced">Last sync:', app_response.text)
-        self.assertIn("state.catalog.database_updated_at", app_response.text)
-        self.assertIn("state.catalog.last_sync_at", app_response.text)
         self.assertIn("toLocaleString()", app_response.text)
-        self.assertNotIn("Last synced:", app_response.text)
-        self.assertIn("updateProgressPanel", app_response.text)
         self.assertIn("/api/update/status/", app_response.text)
-        self.assertIn("updateSummaryPanel", app_response.text)
-        self.assertIn("renderUpdateChangeSummary", app_response.text)
-        self.assertIn("Latest update changes", app_response.text)
-        self.assertIn('sort: { key: "release_date", direction: "desc" }', app_response.text)
-        self.assertIn('name="model_roles"', app_response.text)
-        self.assertIn('value="embedding"', app_response.text)
-        self.assertIn("body.model_roles = [body.model_roles]", app_response.text)
-        self.assertIn("preferredUseCaseIdForModel", app_response.text)
-        self.assertIn("bulkUseCaseIdForModels", app_response.text)
-        self.assertIn("matchingUseCaseIdForModel", app_response.text)
-        self.assertIn("matchingUseCaseIdsForModel", app_response.text)
-        self.assertIn("decisionUseCaseIdsForModel", app_response.text)
-        self.assertIn("bulkUseCaseTargetsForModels", app_response.text)
-        self.assertIn("shouldTargetMatchingUseCaseFilters", app_response.text)
-        self.assertIn("matchingUseCaseFilterOptions", app_response.text)
-        self.assertIn("useCaseApprovalStatus", app_response.text)
-        self.assertIn("useCaseApprovalClass", app_response.text)
-        self.assertIn('return "pending"', app_response.text)
-        self.assertIn('${header("release_date", "Release")}', app_response.text)
-        self.assertIn("modelReleaseInfo", app_response.text)
-        self.assertIn("best_release_date", app_response.text)
-        self.assertNotIn('${header("approval_updated_at", "Updated")}', app_response.text)
         self.assertIn("Unreviewed", app_response.text)
-        self.assertIn("general_approval_status", app_response.text)
-        self.assertIn('data-inspector-tab="controls"', app_response.text)
-        self.assertIn('data-inspector-tab="activity"', app_response.text)
-        self.assertIn('data-inspector-tab="notes"', app_response.text)
-        self.assertIn("renderControlsPanel", app_response.text)
-        self.assertIn("renderActivityPanel", app_response.text)
-        self.assertIn("renderNotesPanel", app_response.text)
-        self.assertIn("Rankings", app_response.text)
-        self.assertIn("renderRankingsView", app_response.text)
-        self.assertIn("rankingUseCaseSelect", app_response.text)
-        self.assertIn("rankingBenchmarkSelect", app_response.text)
-        self.assertIn("/api/rankings?use_case=", app_response.text)
-        self.assertIn("/api/benchmarks", app_response.text)
-        self.assertIn("Benchmark leaderboard", app_response.text)
-        self.assertIn("benchmarkCompatibleRoles", app_response.text)
-        self.assertIn("Speech to text", app_response.text)
-        self.assertIn("Text to speech", app_response.text)
-        self.assertIn("capabilityFilter", app_response.text)
-        self.assertIn("Capability", app_response.text)
-        self.assertIn("General approval", app_response.text)
-        self.assertIn("approve_model", app_response.text)
-        self.assertIn("model_type_primary", app_response.text)
-        self.assertIn("strongest_signal_kind", app_response.text)
-        self.assertIn("evidenceForExport", app_response.text)
         self.assertEqual(catalog_response.status_code, 200)
         payload = catalog_response.json()
         self.assertEqual(payload["schema_version"], 2)
@@ -175,6 +115,7 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("families", payload)
         self.assertIn("facets", payload)
         self.assertNotIn("recommendations", payload["facets"])
+        self.assertIn("general_recommendations", payload["facets"])
         self.assertIn("countries", payload["facets"])
         self.assertTrue(payload["facets"]["countries"])
         self.assertIn("hyperscalers", payload["facets"])
@@ -533,6 +474,91 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertTrue(model["general_approved_for_use"])
         self.assertFalse(model["use_case_approvals"]["customer_support"]["approved_for_use"])
 
+    def test_review_model_decision_route_saves_general_approval_and_recommendation_only(self) -> None:
+        os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
+        self._insert_review_model("general-decision-model")
+
+        with patch("backend.main.bootstrap"):
+            response = TestClient(main.app).post(
+                "/api/review/model-decisions",
+                json={
+                    "model_ids": ["general-decision-model"],
+                    "approval_status": "approved",
+                    "approval_notes": "Approved after general review.",
+                    "recommendation_status": "restricted",
+                    "recommendation_notes": "Use only with human oversight.",
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["approval_status"], "approved")
+        self.assertEqual(response.json()["recommendation_status"], "restricted")
+        with self.engine.begin() as conn:
+            model_row = conn.execute(
+                models_table.select().where(models_table.c.id == "general-decision-model")
+            ).mappings().one()
+            legacy_rows = conn.execute(
+                model_use_case_approvals_table.select().where(
+                    model_use_case_approvals_table.c.model_id == "general-decision-model"
+                )
+            ).mappings().all()
+        self.assertEqual(model_row["general_approved_for_use"], 1)
+        self.assertEqual(model_row["general_recommendation_status"], "restricted")
+        self.assertEqual(model_row["general_recommendation_notes"], "Use only with human oversight.")
+        self.assertEqual(legacy_rows, [])
+
+    def test_catalog_lists_positive_metric_use_case_fits_without_decision_statuses(self) -> None:
+        self._insert_review_model("suggested-use-model")
+        with self.engine.begin() as conn:
+            conn.execute(
+                recommendation_proposals_table.insert(),
+                [
+                    {
+                        "profile_id": "australian_bank",
+                        "model_id": "suggested-use-model",
+                        "use_case_id": "customer_support",
+                        "proposed_status": "recommended",
+                        "score": 87.5,
+                        "confidence": 0.82,
+                        "blockers_json": "[]",
+                        "warnings_json": '["Monitor hallucinations."]',
+                        "reasons_json": '["Strong instruction following."]',
+                        "required_controls_json": '["Human escalation"]',
+                        "policy_version": "test-policy",
+                        "computed_at": "2026-07-14T00:00:00Z",
+                        "source_profile_json": "{}",
+                    },
+                    {
+                        "profile_id": "australian_bank",
+                        "model_id": "suggested-use-model",
+                        "use_case_id": "high_risk_decisions",
+                        "proposed_status": "not_recommended",
+                        "score": 91.0,
+                        "confidence": 0.9,
+                        "blockers_json": '["High risk."]',
+                        "warnings_json": "[]",
+                        "reasons_json": "[]",
+                        "required_controls_json": "[]",
+                        "policy_version": "test-policy",
+                        "computed_at": "2026-07-14T00:00:00Z",
+                        "source_profile_json": "{}",
+                    },
+                ],
+            )
+
+        model = next(
+            model for model in review_workbench.build_review_catalog()["models"]
+            if model["id"] == "suggested-use-model"
+        )
+
+        self.assertEqual(len(model["suggested_use_cases"]), 1)
+        suggestion = model["suggested_use_cases"][0]
+        self.assertEqual(suggestion["use_case_id"], "customer_support")
+        self.assertEqual(suggestion["fit_score"], 87.5)
+        self.assertNotIn("recommendation_status", suggestion)
+        self.assertNotIn("approved_for_use", suggestion)
+
     def test_review_model_approval_route_tracks_unreviewed_state(self) -> None:
         os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
         self._insert_review_model("triage-model")
@@ -650,10 +676,12 @@ class ReviewWorkbenchTests(unittest.TestCase):
             recommendation_status="not_recommended",
             recommendation_notes="Snapshot decision.",
         )
-        review_workbench.apply_model_approvals(
+        review_workbench.apply_model_decisions(
             model_ids=["snapshot-manual-model"],
-            approved_for_use=True,
+            approval_status="approved",
             approval_notes="Snapshot general model approval.",
+            recommendation_status="recommended",
+            recommendation_notes="Snapshot general recommendation.",
         )
 
         with patch("backend.main.bootstrap"):
@@ -667,6 +695,7 @@ class ReviewWorkbenchTests(unittest.TestCase):
         snapshot = export_response.json()
         self.assertEqual(len(snapshot["model_approvals"]), 1)
         self.assertEqual(snapshot["model_approvals"][0]["approval_status"], "approved")
+        self.assertEqual(snapshot["model_approvals"][0]["general_recommendation_status"], "recommended")
 
         second_tempdir = tempfile.TemporaryDirectory()
         second_engine = get_engine(f"sqlite:///{Path(second_tempdir.name) / 'import.sqlite'}")
@@ -694,6 +723,8 @@ class ReviewWorkbenchTests(unittest.TestCase):
             self.assertEqual(imported_model["catalog_status"], "deprecated")
             self.assertTrue(imported_model["general_approved_for_use"])
             self.assertEqual(imported_model["general_approval_notes"], "Snapshot general model approval.")
+            self.assertEqual(imported_model["general_recommendation_status"], "recommended")
+            self.assertEqual(imported_model["general_recommendation_notes"], "Snapshot general recommendation.")
             approval = imported_model["use_case_approvals"]["customer_support"]
             self.assertTrue(approval["approved_for_use"])
             self.assertEqual(approval["recommendation_status"], "not_recommended")

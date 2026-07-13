@@ -35,6 +35,7 @@ from .models import (
     RankingsResponseOut,
     ReviewDecisionIn,
     ReviewModelApprovalIn,
+    ReviewModelDecisionIn,
     ReviewModelCreateIn,
     ReviewSnapshotIn,
     SourceRunOut,
@@ -73,6 +74,7 @@ from .update_engine import (
 )
 from .review_workbench import (
     add_review_model,
+    apply_model_decisions,
     apply_model_approvals,
     apply_review_decisions,
     build_review_catalog,
@@ -211,6 +213,20 @@ def api_apply_review_model_approvals(payload: ReviewModelApprovalIn) -> dict[str
             approved_for_use=payload.approved_for_use,
             approval_status=payload.approval_status,
             approval_notes=payload.approval_notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/review/model-decisions", response_model=dict[str, Any], dependencies=[Depends(require_local_admin)])
+def api_apply_review_model_decisions(payload: ReviewModelDecisionIn) -> dict[str, Any]:
+    try:
+        return apply_model_decisions(
+            model_ids=payload.model_ids,
+            approval_status=payload.approval_status,
+            approval_notes=payload.approval_notes,
+            recommendation_status=payload.recommendation_status,
+            recommendation_notes=payload.recommendation_notes,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -898,6 +898,48 @@ def _attach_recommendation_proposals(
     _attach_effective_recommendation_statuses(use_case_approvals)
 
 
+def _build_suggested_use_cases(
+    proposals_by_use_case: dict[str, dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Return positive metric-derived use-case fits without creating decision state."""
+    use_case_lookup = {
+        str(use_case.get("id") or ""): use_case
+        for use_case in USE_CASES
+        if str(use_case.get("id") or "").strip()
+    }
+    suggestions: list[dict[str, Any]] = []
+    for use_case_id, proposal in (proposals_by_use_case or {}).items():
+        proposed_status = _normalize_recommendation_status(proposal.get("proposed_status"))
+        score = proposal.get("score")
+        if proposed_status not in {RECOMMENDATION_STATUS_RECOMMENDED, RECOMMENDATION_STATUS_RESTRICTED}:
+            continue
+        if score is None:
+            continue
+        use_case = use_case_lookup.get(str(use_case_id), {})
+        suggestions.append(
+            {
+                "use_case_id": str(use_case_id),
+                "label": str(use_case.get("label") or use_case_id),
+                "description": _clean_text(use_case.get("description")),
+                "fit_score": float(score),
+                "confidence": proposal.get("confidence"),
+                "reasons": _decode_json_string_list(proposal.get("reasons")),
+                "warnings": _decode_json_string_list(proposal.get("warnings")),
+                "required_controls": _decode_json_string_list(proposal.get("required_controls")),
+                "policy_version": _clean_text(proposal.get("policy_version")),
+                "computed_at": proposal.get("computed_at"),
+            }
+        )
+    return sorted(
+        suggestions,
+        key=lambda suggestion: (
+            -float(suggestion.get("fit_score") or 0.0),
+            -float(suggestion.get("confidence") or 0.0),
+            str(suggestion.get("label") or ""),
+        ),
+    )
+
+
 def _attach_effective_recommendation_statuses(use_case_approvals: dict[str, dict[str, Any]]) -> None:
     for approval in use_case_approvals.values():
         manual_status = _normalize_recommendation_status(
@@ -7377,6 +7419,12 @@ def _serialize_model(
     payload["general_approved_for_use"] = bool(payload.get("general_approved_for_use", 0))
     payload["general_approval_notes"] = _clean_text(payload.get("general_approval_notes"))
     payload["general_approval_updated_at"] = payload.get("general_approval_updated_at")
+    payload["general_recommendation_status"] = _normalize_recommendation_status(
+        payload.get("general_recommendation_status")
+    )
+    payload["general_recommendation_notes"] = _clean_text(payload.get("general_recommendation_notes"))
+    payload["general_recommendation_updated_at"] = payload.get("general_recommendation_updated_at")
+    payload["suggested_use_cases"] = _build_suggested_use_cases(recommendation_proposals)
     payload.update(_model_age_payload(payload))
     payload["use_case_approvals"] = {
         use_case_id: dict(approval)

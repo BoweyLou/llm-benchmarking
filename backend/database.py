@@ -208,6 +208,9 @@ models = Table(
     Column("general_approved_for_use", Integer, nullable=False, server_default=text("0")),
     Column("general_approval_notes", Text),
     Column("general_approval_updated_at", String),
+    Column("general_recommendation_status", String, nullable=False, server_default=text("'unrated'")),
+    Column("general_recommendation_notes", Text),
+    Column("general_recommendation_updated_at", String),
     Column("approved_for_use", Integer, nullable=False, server_default=text("0")),
     Column("approval_notes", Text),
     Column("approval_updated_at", String),
@@ -579,6 +582,9 @@ def _create_schema_sql() -> list[str]:
             general_approved_for_use INTEGER NOT NULL DEFAULT 0,
             general_approval_notes TEXT,
             general_approval_updated_at TEXT,
+            general_recommendation_status TEXT NOT NULL DEFAULT 'unrated',
+            general_recommendation_notes TEXT,
+            general_recommendation_updated_at TEXT,
             approved_for_use INTEGER NOT NULL DEFAULT 0,
             approval_notes TEXT,
             approval_updated_at TEXT,
@@ -1035,6 +1041,9 @@ def _migration_20260701_schema_repairs(conn: Connection) -> None:
         "general_approved_for_use": "ALTER TABLE models ADD COLUMN general_approved_for_use INTEGER NOT NULL DEFAULT 0",
         "general_approval_notes": "ALTER TABLE models ADD COLUMN general_approval_notes TEXT",
         "general_approval_updated_at": "ALTER TABLE models ADD COLUMN general_approval_updated_at TEXT",
+        "general_recommendation_status": "ALTER TABLE models ADD COLUMN general_recommendation_status TEXT NOT NULL DEFAULT 'unrated'",
+        "general_recommendation_notes": "ALTER TABLE models ADD COLUMN general_recommendation_notes TEXT",
+        "general_recommendation_updated_at": "ALTER TABLE models ADD COLUMN general_recommendation_updated_at TEXT",
         "approved_for_use": "ALTER TABLE models ADD COLUMN approved_for_use INTEGER NOT NULL DEFAULT 0",
         "approval_notes": "ALTER TABLE models ADD COLUMN approval_notes TEXT",
         "approval_updated_at": "ALTER TABLE models ADD COLUMN approval_updated_at TEXT",
@@ -1545,6 +1554,21 @@ def _migration_20260713_score_evidence(conn: Connection) -> None:
     )
 
 
+def _migration_20260714_general_model_recommendations(conn: Connection) -> None:
+    model_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(models)").fetchall()
+    }
+    expected_model_columns = {
+        "general_recommendation_status": "ALTER TABLE models ADD COLUMN general_recommendation_status TEXT NOT NULL DEFAULT 'unrated'",
+        "general_recommendation_notes": "ALTER TABLE models ADD COLUMN general_recommendation_notes TEXT",
+        "general_recommendation_updated_at": "ALTER TABLE models ADD COLUMN general_recommendation_updated_at TEXT",
+    }
+    for column_name, statement in expected_model_columns.items():
+        if column_name not in model_columns:
+            conn.exec_driver_sql(statement)
+
+
 SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
     ("20260701_002_model_roles", _migration_20260701_model_roles),
@@ -1556,6 +1580,7 @@ SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260703_002_text_to_speech_roles", _migration_20260703_text_to_speech_roles),
     ("20260708_001_update_change_summary", _migration_20260708_update_change_summary),
     ("20260713_001_score_evidence", _migration_20260713_score_evidence),
+    ("20260714_001_general_model_recommendations", _migration_20260714_general_model_recommendations),
 )
 
 

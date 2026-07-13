@@ -7,3726 +7,438 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f8fa;
-      --panel: #ffffff;
-      --panel-muted: #f9fafb;
-      --text: #111827;
-      --muted: #5b6472;
-      --faint: #8a94a3;
-      --line: #d9dee7;
-      --line-strong: #c6cedb;
+      --bg: #f4f6f8;
+      --panel: #fff;
+      --panel-soft: #f8fafc;
+      --text: #152033;
+      --muted: #627084;
+      --faint: #8a96a7;
+      --line: #dce2ea;
+      --line-strong: #c8d1de;
+      --navy: #17355e;
       --blue: #0b63ce;
-      --blue-soft: #e8f1ff;
-      --green: #197a3a;
-      --green-soft: #eaf7ee;
-      --orange: #c75f00;
-      --orange-soft: #fff3e5;
-      --red: #c81e1e;
-      --red-soft: #fff0f0;
-      --purple: #7650c7;
-      --shadow: 0 1px 2px rgba(17, 24, 39, 0.08);
-      --header-h: 58px;
+      --blue-soft: #eaf2ff;
+      --green: #18743a;
+      --green-soft: #e9f6ed;
+      --amber: #a85508;
+      --amber-soft: #fff4e5;
+      --red: #b42318;
+      --red-soft: #fff0ee;
+      --shadow: 0 1px 2px rgba(20, 32, 51, .08), 0 8px 28px rgba(20, 32, 51, .05);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      min-width: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-size: 13px;
-      letter-spacing: 0;
-    }
-
-    button,
-    input,
-    select,
-    textarea {
-      font: inherit;
-      letter-spacing: 0;
-    }
-
-    [hidden] {
-      display: none !important;
-    }
-
-    button {
-      cursor: pointer;
-    }
-
-    button:disabled {
-      cursor: not-allowed;
-      opacity: 0.56;
-    }
-
-    .app {
-      display: grid;
-      grid-template-rows: var(--header-h) 1fr 46px;
-      min-height: 100vh;
-    }
-
-    .topbar {
-      display: grid;
-      grid-template-columns: 244px minmax(0, 1fr) 396px;
-      align-items: center;
-      background: var(--panel);
-      border-bottom: 1px solid var(--line);
-    }
-
-    .brand {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      padding: 0 18px;
-      height: 100%;
-      border-right: 1px solid var(--line);
-    }
-
-    .brand-mark {
-      display: grid;
-      place-items: center;
-      width: 34px;
-      height: 34px;
-      color: #fff;
-      background: #17355e;
-      border-radius: 4px;
-      font-weight: 800;
-      font-size: 15px;
-    }
-
-    .brand h1 {
-      margin: 0;
-      font-size: 16px;
-      line-height: 1.1;
-      font-weight: 720;
-      white-space: nowrap;
-    }
-
-    .brand p {
-      margin: 3px 0 0;
-      color: var(--muted);
-      font-size: 12px;
-      white-space: nowrap;
-    }
-
-    .sync-strip {
-      display: flex;
-      justify-content: flex-end;
-      align-items: center;
-      gap: 18px;
-      padding: 0 20px;
-      color: var(--muted);
-      min-width: 0;
-    }
-
-    .sync-strip > button,
-    .sync-strip > span {
-      flex: 0 0 auto;
-    }
-
-    .update-progress {
-      display: grid;
-      gap: 4px;
-      flex: 1 1 260px;
-      min-width: 220px;
-      max-width: 380px;
-      color: var(--muted);
-    }
-
-    .update-progress[hidden] {
-      display: none;
-    }
-
-    .update-progress-line {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      min-width: 0;
-      font-size: 12px;
-    }
-
-    .update-progress-line span:first-child {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: var(--text);
-      font-weight: 650;
-    }
-
-    .progress-track {
-      height: 6px;
-      overflow: hidden;
-      border-radius: 999px;
-      background: #edf1f6;
-    }
-
-    .progress-fill {
-      width: 0%;
-      height: 100%;
-      border-radius: inherit;
-      background: var(--blue);
-      transition: width 180ms ease;
-    }
-
-    .update-step-list {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 5px;
-      min-height: 18px;
-    }
-
-    .update-step {
-      max-width: 150px;
-      padding: 2px 6px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      overflow: hidden;
-      color: var(--muted);
-      background: #fff;
-      font-size: 11px;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .update-step.running {
-      border-color: #b8cff5;
-      color: var(--blue);
-      background: var(--blue-soft);
-    }
-
-    .update-step.completed {
-      border-color: #bde4c9;
-      color: var(--green);
-      background: var(--green-soft);
-    }
-
-    .update-step.failed {
-      border-color: #f0b7b7;
-      color: var(--red);
-      background: var(--red-soft);
-    }
-
-    .status-ok {
-      color: var(--green);
-      font-weight: 650;
-    }
-
-    .header-actions {
-      display: flex;
-      justify-content: flex-end;
-      align-items: center;
-      gap: 10px;
-      padding: 0 16px;
-      border-left: 1px solid var(--line);
-    }
-
-    .token-input {
-      width: 154px;
-      height: 32px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 0 9px;
-      color: var(--text);
-      background: #fff;
-    }
-
-    .main {
-      display: grid;
-      grid-template-columns: 244px minmax(580px, 1fr) 396px;
-      min-height: 0;
-    }
-
-    .filters {
-      background: var(--panel);
-      border-right: 1px solid var(--line);
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-    }
-
-    .filters-head,
-    .filter-scroll,
-    .filter-foot {
-      padding: 14px 16px;
-    }
-
-    .filters-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-weight: 720;
-    }
-
-    .filter-scroll {
-      overflow: auto;
-      padding-top: 2px;
-      flex: 1;
-    }
-
-    .filter-group {
-      margin-bottom: 15px;
-    }
-
-    .filter-group label {
-      display: block;
-      margin-bottom: 7px;
-      font-weight: 680;
-      color: #202a37;
-    }
-
-    .field,
-    .select,
-    .textarea {
-      width: 100%;
-      border: 1px solid var(--line);
-      background: #fff;
-      border-radius: 5px;
-      color: var(--text);
-      box-shadow: inset 0 1px 0 rgba(17, 24, 39, 0.02);
-    }
-
-    .field,
-    .select {
-      height: 34px;
-      padding: 0 10px;
-    }
-
-    .textarea {
-      min-height: 78px;
-      padding: 10px;
-      resize: vertical;
-    }
-
-    .check-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--muted);
-    }
-
-    .filter-foot {
-      border-top: 1px solid var(--line);
-      display: grid;
-      gap: 8px;
-      color: var(--muted);
-    }
-
-    .content {
-      min-width: 0;
-      min-height: 0;
-      display: grid;
-      grid-template-rows: 48px auto auto 1fr 48px;
-      background: #fff;
-    }
-
-    .tabs {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 0 14px;
-      border-bottom: 1px solid var(--line);
-      background: #fbfcfe;
-      overflow-x: auto;
-    }
-
-    .tab {
-      flex: 0 0 auto;
-      height: 48px;
-      padding: 0 12px;
-      border: 0;
-      border-bottom: 2px solid transparent;
-      background: transparent;
-      color: #252f3d;
-      font-weight: 620;
-    }
-
-    .tab.active {
-      border-bottom-color: var(--blue);
-      color: var(--blue);
-    }
-
-    .count {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 24px;
-      height: 22px;
-      margin-left: 6px;
-      padding: 0 7px;
-      border-radius: 999px;
-      background: #eef2f7;
-      color: #394354;
-      font-weight: 650;
-    }
-
-    .tab.active .count {
-      background: var(--blue-soft);
-      color: var(--blue);
-    }
-
-    .update-summary {
-      display: grid;
-      gap: 10px;
-      padding: 10px 14px;
-      border-bottom: 1px solid var(--line);
-      background: #fff;
-    }
-
-    .update-summary-head {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-      min-width: 0;
-    }
-
-    .update-summary-title {
-      display: grid;
-      gap: 2px;
-      min-width: 0;
-    }
-
-    .update-summary-title strong {
-      font-size: 13px;
-    }
-
-    .update-summary-title span {
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .update-summary-metrics,
-    .update-change-list {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .metric-pill {
-      padding: 3px 7px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      color: #394354;
-      background: #f6f8fb;
-      font-size: 12px;
-      font-weight: 650;
-      white-space: nowrap;
-    }
-
-    .update-change-item {
-      min-width: 190px;
-      max-width: 310px;
-      padding: 7px 8px;
-      border: 1px solid var(--line);
-      border-left: 3px solid var(--blue);
-      border-radius: 6px;
-      background: #fbfcfe;
-    }
-
-    .update-change-item.changed {
-      border-left-color: var(--orange);
-    }
-
-    .update-change-item.removed {
-      border-left-color: var(--red);
-    }
-
-    .update-change-name {
-      display: block;
-      overflow: hidden;
-      color: var(--text);
-      font-weight: 680;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .update-change-meta {
-      display: block;
-      overflow: hidden;
-      color: var(--muted);
-      font-size: 11px;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .table-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-      padding: 13px 14px;
-      border-bottom: 1px solid var(--line);
-      background: #fff;
-    }
-
-    .table-title {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 10px;
-      font-weight: 720;
-    }
-
-    .table-actions {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      gap: 8px;
-    }
-
-    .bulkbar {
-      margin: 10px 14px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: var(--panel-muted);
-      box-shadow: var(--shadow);
-    }
-
-    .bulk-actions {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 9px;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--line);
-    }
-
-    .bulk-note {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 14px;
-      padding: 8px 12px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .rankings-toolbar {
-      display: grid;
-      grid-template-columns: minmax(240px, 1fr) minmax(220px, 1fr) auto;
-      align-items: end;
-      gap: 10px;
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--line);
-      background: #fff;
-    }
-
-    .rankings-toolbar label {
-      display: grid;
-      gap: 5px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 650;
-    }
-
-    .segmented {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 3px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #f8fafc;
-    }
-
-    .segment {
-      height: 28px;
-      padding: 0 10px;
-      border: 0;
-      border-radius: 5px;
-      background: transparent;
-      color: #384455;
-      font-weight: 650;
-    }
-
-    .segment.active {
-      background: #fff;
-      color: var(--blue);
-      box-shadow: 0 1px 3px rgba(17, 24, 39, 0.12);
-    }
-
-    .ranking-summary {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      padding: 10px 14px;
-      border-bottom: 1px solid var(--line);
-      background: var(--panel-muted);
-    }
-
-    .score-bar {
-      display: grid;
-      grid-template-columns: minmax(34px, auto) 1fr;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .score-track {
-      height: 7px;
-      border-radius: 999px;
-      background: #e6eaf0;
-      overflow: hidden;
-    }
-
-    .score-fill {
-      height: 100%;
-      border-radius: 999px;
-      background: var(--blue);
-    }
-
-    .table-wrap {
-      overflow: auto;
-      min-height: 0;
-      border-top: 1px solid var(--line);
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 960px;
-      table-layout: fixed;
-    }
-
-    th,
-    td {
-      border-bottom: 1px solid #e9edf3;
-      border-right: 1px solid #eef1f5;
-      padding: 10px 8px;
-      text-align: left;
-      vertical-align: middle;
-      height: 52px;
-      overflow: hidden;
-    }
-
-    th {
-      position: sticky;
-      top: 0;
-      z-index: 2;
-      background: #f6f8fb;
-      color: #2f3947;
-      font-size: 12px;
-      font-weight: 720;
-      white-space: nowrap;
-    }
-
-    th.sortable {
-      cursor: pointer;
-    }
-
-    tr.selected td {
-      background: #f0f6ff;
-    }
-
-    tr:hover td {
-      background: #f8fbff;
-    }
-
-    .model-name {
-      font-weight: 720;
-      color: #121a27;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .subtle {
-      color: var(--muted);
-      font-size: 12px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .release-cell {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      min-width: 0;
-      line-height: 1.15;
-    }
-
-    .release-date {
-      color: #273244;
-      font-size: 12px;
-      font-weight: 680;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .release-basis {
-      color: var(--muted);
-      font-size: 11px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .linkish {
-      color: var(--blue);
-      text-decoration: none;
-      font-weight: 650;
-      background: transparent;
-      border: 0;
-      padding: 0;
-    }
-
-    .btn {
-      height: 32px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #fff;
-      color: #273244;
-      padding: 0 12px;
-      font-weight: 650;
-      box-shadow: 0 1px 0 rgba(17, 24, 39, 0.02);
-    }
-
-    .btn.primary {
-      background: var(--blue);
-      border-color: var(--blue);
-      color: #fff;
-    }
-
-    .btn.green {
-      color: var(--green);
-      border-color: #a9d8b6;
-      background: var(--green-soft);
-    }
-
-    .btn.orange {
-      color: var(--orange);
-      border-color: #ffc987;
-      background: var(--orange-soft);
-    }
-
-    .btn.red {
-      color: var(--red);
-      border-color: #f2b3b3;
-      background: var(--red-soft);
-    }
-
-    .btn.purple {
-      color: var(--purple);
-      border-color: #d7c8f5;
-      background: #f4efff;
-    }
-
-    .btn.small {
-      height: 28px;
-      padding: 0 9px;
-      font-size: 12px;
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      max-width: 100%;
-      min-height: 22px;
-      padding: 2px 7px;
-      border-radius: 4px;
-      border: 1px solid var(--line);
-      font-size: 12px;
-      font-weight: 650;
-      white-space: nowrap;
-    }
-
-    .badge.green {
-      color: var(--green);
-      background: var(--green-soft);
-      border-color: #b8dfc1;
-    }
-
-    .badge.orange {
-      color: var(--orange);
-      background: var(--orange-soft);
-      border-color: #ffc987;
-    }
-
-    .badge.red {
-      color: var(--red);
-      background: var(--red-soft);
-      border-color: #f2b3b3;
-    }
-
-    .badge.blue {
-      color: var(--blue);
-      background: var(--blue-soft);
-      border-color: #b9d4ff;
-    }
-
-    .badge.gray {
-      color: #455063;
-      background: #f3f5f8;
-    }
-
-    .context-chip {
-      display: inline-flex;
-      align-items: center;
-      min-height: 24px;
-      padding: 3px 8px;
-      border: 1px solid #b9d4ff;
-      border-radius: 4px;
-      background: var(--blue-soft);
-      color: var(--blue);
-      font-size: 12px;
-      font-weight: 650;
-    }
-
-    .pager {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 16px;
-      border-top: 1px solid var(--line);
-      color: var(--muted);
-      background: #fff;
-    }
-
-    .inspector {
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-      min-height: 0;
-      background: #fff;
-      border-left: 1px solid var(--line);
-    }
-
-    .inspector-head {
-      padding: 14px 18px;
-      border-bottom: 1px solid var(--line);
-    }
-
-    .inspector-head h2 {
-      margin: 0;
-      font-size: 17px;
-      line-height: 1.2;
-    }
-
-    .meta-row {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 10px;
-    }
-
-    .meta-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 9px 22px;
-      margin-top: 14px;
-      color: #293443;
-      font-size: 12px;
-    }
-
-    .meta-grid span {
-      display: block;
-      color: var(--muted);
-      margin-bottom: 2px;
-    }
-
-    .inspector-tabs {
-      display: flex;
-      gap: 16px;
-      padding: 0 18px;
-      height: 42px;
-      align-items: end;
-      border-bottom: 1px solid var(--line);
-    }
-
-    .inspector-tabs button {
-      height: 42px;
-      border: 0;
-      border-bottom: 2px solid transparent;
-      background: transparent;
-      color: var(--muted);
-      font-weight: 650;
-    }
-
-    .inspector-tabs button.active {
-      color: var(--blue);
-      border-bottom-color: var(--blue);
-    }
-
-    .inspector-body {
-      min-height: 0;
-      overflow: auto;
-      padding: 14px 12px 18px;
-    }
-
-    .model-approval-panel,
-    .inspector-panel,
-    .usecase-card,
-    .control-card,
-    .activity-row,
-    .family-row {
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
-      margin-bottom: 8px;
-    }
-
-    .model-approval-panel,
-    .inspector-panel {
-      padding: 10px;
-    }
-
-    .usecase-card {
-      padding: 10px;
-    }
-
-    .usecase-card.active {
-      border-color: #9fc4ff;
-      box-shadow: 0 0 0 1px #d9e8ff inset;
-    }
-
-    .usecase-card-head {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      align-items: start;
-    }
-
-    .usecase-card h3,
-    .control-card h3 {
-      margin: 0 0 4px;
-      font-size: 13px;
-    }
-
-    .control-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 8px;
-      margin-top: 12px;
-    }
-
-    .control-card {
-      padding: 10px;
-      min-height: 104px;
-    }
-
-    .control-card ul {
-      margin: 7px 0 0;
-      padding-left: 17px;
-      color: #263140;
-      font-size: 12px;
-    }
-
-    .list-stack {
-      display: grid;
-      gap: 8px;
-    }
-
-    .breakdown-row {
-      display: grid;
-      grid-template-columns: minmax(110px, 1fr) 62px 72px 56px;
-      gap: 8px;
-      align-items: center;
-      padding: 10px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
-      font-size: 12px;
-    }
-
-    .breakdown-row strong {
-      font-size: 13px;
-    }
-
-    .activity-row {
-      display: grid;
-      gap: 4px;
-      padding: 10px;
-      color: #263140;
-      font-size: 12px;
-    }
-
-    .activity-row strong {
-      font-size: 13px;
-    }
-
-    .decision-form {
-      display: grid;
-      gap: 10px;
-    }
-
-    .form-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-
-    .inspector-foot {
-      border-top: 1px solid var(--line);
-      padding: 12px;
-      display: grid;
-      gap: 8px;
-      background: #fbfcfe;
-    }
-
-    .bottom-hint {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      padding: 0 28px;
-      background: #fbfcfe;
-      border-top: 1px solid var(--line);
-      color: var(--muted);
-    }
-
-    .family-list {
-      overflow: auto;
-      padding: 14px;
-    }
-
-    .family-row {
-      display: grid;
-      grid-template-columns: minmax(220px, 1fr) 90px 110px 120px 220px;
-      align-items: center;
-      gap: 12px;
-      padding: 12px;
-    }
-
-    dialog {
-      border: 1px solid var(--line-strong);
-      border-radius: 8px;
-      box-shadow: 0 16px 40px rgba(17, 24, 39, 0.24);
-      width: 420px;
-      padding: 0;
-    }
-
-    dialog::backdrop {
-      background: rgba(17, 24, 39, 0.18);
-    }
-
-    .dialog-head,
-    .dialog-body,
-    .dialog-foot {
-      padding: 14px 16px;
-    }
-
-    .dialog-head {
-      border-bottom: 1px solid var(--line);
-      font-weight: 720;
-      font-size: 15px;
-    }
-
-    .dialog-body {
-      display: grid;
-      gap: 10px;
-    }
-
-    .dialog-foot {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-      border-top: 1px solid var(--line);
-      background: #fbfcfe;
-    }
-
-    .toast {
-      position: fixed;
-      right: 18px;
-      bottom: 58px;
-      max-width: 360px;
-      padding: 10px 12px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #111827;
-      color: #fff;
-      box-shadow: 0 10px 26px rgba(17, 24, 39, 0.24);
-      opacity: 0;
-      transform: translateY(8px);
-      pointer-events: none;
-      transition: opacity 160ms ease, transform 160ms ease;
-    }
-
-    .toast.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .empty {
-      padding: 42px;
-      color: var(--muted);
-      text-align: center;
-    }
-
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: var(--bg); color: var(--text); font-size: 14px; }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: wait; opacity: .58; }
+    .topbar { min-height: 64px; display: flex; align-items: center; gap: 18px; padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 11px; min-width: 235px; }
+    .brand-mark { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 7px; color: #fff; background: var(--navy); font-size: 12px; font-weight: 800; letter-spacing: .04em; }
+    .brand h1 { margin: 0; font-size: 16px; }
+    .brand p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+    .sync-meta { min-width: 0; flex: 1; display: flex; align-items: center; gap: 18px; color: var(--muted); font-size: 12px; }
+    .sync-meta span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .header-actions { display: flex; gap: 8px; }
+    .layout { min-height: calc(100vh - 64px); display: grid; grid-template-columns: 248px minmax(340px, 430px) minmax(480px, 1fr); }
+    .filters, .queue { border-right: 1px solid var(--line); background: var(--panel); }
+    .filters { padding: 20px 16px; }
+    .eyebrow { margin: 0 0 5px; color: var(--blue); font-size: 11px; font-weight: 760; letter-spacing: .09em; text-transform: uppercase; }
+    h2 { margin: 0; font-size: 19px; line-height: 1.25; }
+    h3 { margin: 0; font-size: 14px; }
+    .intro { margin: 7px 0 20px; color: var(--muted); line-height: 1.45; }
+    label.field-label { display: grid; gap: 6px; margin-bottom: 14px; color: var(--muted); font-size: 12px; font-weight: 650; }
+    .field, .select, .textarea { width: 100%; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--text); outline: none; }
+    .field, .select { height: 38px; padding: 0 10px; }
+    .textarea { min-height: 86px; padding: 10px; resize: vertical; line-height: 1.45; }
+    .field:focus, .select:focus, .textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(11,99,206,.12); }
+    .check { display: flex; align-items: center; gap: 8px; margin: 4px 0 16px; color: var(--text); }
+    .filter-note { margin-top: 20px; padding: 12px; border-radius: 8px; background: var(--panel-soft); color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .queue { min-width: 0; display: flex; flex-direction: column; }
+    .queue-head { padding: 18px 17px 13px; border-bottom: 1px solid var(--line); }
+    .queue-title { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    .queue-title span { color: var(--muted); font-size: 12px; }
+    .queue-list { overflow: auto; }
+    .model-row { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; padding: 15px 17px; border: 0; border-bottom: 1px solid var(--line); background: #fff; color: inherit; text-align: left; }
+    .model-row:hover { background: #f9fbfe; }
+    .model-row.active { position: relative; background: var(--blue-soft); }
+    .model-row.active::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--blue); }
+    .model-row > div { min-width: 0; }
+    .model-name { font-weight: 730; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .provider { margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .row-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+    .badge { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); font-size: 11px; font-weight: 680; }
+    .badge.approved, .badge.recommended { border-color: #b8dfc3; color: var(--green); background: var(--green-soft); }
+    .badge.not-approved, .badge.not-recommended { border-color: #edc0bc; color: var(--red); background: var(--red-soft); }
+    .badge.restricted, .badge.discouraged { border-color: #f0d0a9; color: var(--amber); background: var(--amber-soft); }
+    .detail { min-width: 0; padding: 24px; overflow: auto; }
+    .empty { height: 100%; min-height: 360px; display: grid; place-items: center; color: var(--muted); text-align: center; }
+    .detail-header { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+    .detail-header h2 { font-size: 25px; }
+    .detail-sub { margin-top: 6px; color: var(--muted); }
+    .detail-actions { display: flex; gap: 7px; align-items: flex-start; }
+    .section { margin-bottom: 18px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: 0 1px 2px rgba(20,32,51,.03); }
+    .section-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; margin-bottom: 14px; }
+    .section-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(105px, 1fr)); gap: 9px; }
+    .metric { min-width: 0; padding: 12px; border-radius: 8px; background: var(--panel-soft); }
+    .metric strong { display: block; margin-top: 7px; font-size: 18px; }
+    .metric span { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .suggestions { display: grid; gap: 9px; }
+    .suggestion { display: grid; grid-template-columns: minmax(150px, .8fr) 90px minmax(220px, 1.5fr); gap: 14px; align-items: start; padding: 13px; border: 1px solid var(--line); border-radius: 8px; }
+    .suggestion-title { font-weight: 720; }
+    .suggestion-score { color: var(--blue); font-weight: 760; }
+    .suggestion-score small { display: block; margin-top: 3px; color: var(--muted); font-weight: 500; }
+    .reason { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .controls { margin-top: 5px; color: var(--amber); }
+    .decision-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .decision-group > span { display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px; font-weight: 690; }
+    .choice-grid { display: flex; flex-wrap: wrap; gap: 7px; }
+    .choice { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--text); background: #fff; font-weight: 650; }
+    .choice:hover { border-color: #9fb7d6; }
+    .choice.active { border-color: var(--blue); color: var(--blue); background: var(--blue-soft); box-shadow: 0 0 0 1px var(--blue); }
+    .rationale { display: grid; gap: 6px; margin-top: 16px; color: var(--muted); font-size: 12px; font-weight: 650; }
+    .save-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 13px; }
+    .save-row span { color: var(--muted); font-size: 12px; }
+    .btn { min-height: 36px; padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--text); font-weight: 680; }
+    .btn:hover { background: var(--panel-soft); }
+    .btn.primary { border-color: var(--blue); background: var(--blue); color: #fff; }
+    .btn.primary:hover { background: #0756b5; }
+    .btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+    .details-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .detail-item span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 11px; }
+    .detail-item strong { font-size: 13px; font-weight: 650; }
+    .toast { position: fixed; right: 20px; bottom: 20px; z-index: 5; max-width: 360px; padding: 11px 14px; border-radius: 8px; background: #172033; color: #fff; box-shadow: var(--shadow); opacity: 0; transform: translateY(8px); pointer-events: none; transition: .18s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    dialog { width: min(460px, calc(100vw - 32px)); border: 0; border-radius: 12px; padding: 0; box-shadow: 0 20px 70px rgba(20,32,51,.28); }
+    dialog::backdrop { background: rgba(20,32,51,.36); }
+    .dialog-body { padding: 20px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    .error { color: var(--red); }
     @media (max-width: 1180px) {
-      .app {
-        grid-template-rows: auto auto auto;
-      }
-
-      .topbar {
-        grid-template-columns: minmax(220px, 1fr) minmax(280px, 2fr);
-      }
-
-      .brand {
-        min-height: 58px;
-      }
-
-      .sync-strip {
-        min-height: 58px;
-        justify-content: flex-start;
-        flex-wrap: wrap;
-        gap: 10px 14px;
-        padding: 10px 16px;
-        border-left: 1px solid var(--line);
-      }
-
-      .header-actions {
-        grid-column: 1 / -1;
-        min-height: 46px;
-        justify-content: flex-start;
-        flex-wrap: wrap;
-        padding: 8px 16px;
-        border-left: 0;
-        border-top: 1px solid var(--line);
-      }
-
-      .main {
-        grid-template-columns: 224px minmax(0, 1fr);
-        grid-template-areas:
-          "filters content"
-          "inspector inspector";
-      }
-
-      .filters {
-        grid-area: filters;
-        min-height: 640px;
-      }
-
-      .content {
-        grid-area: content;
-      }
-
-      .inspector {
-        grid-area: inspector;
-        min-height: 520px;
-        border-top: 1px solid var(--line);
-        border-left: 0;
-      }
-
-      .bottom-hint {
-        min-height: 46px;
-        height: auto;
-        flex-wrap: wrap;
-        padding: 8px 16px;
-      }
-
-      .family-row {
-        grid-template-columns: minmax(180px, 1fr) 82px 96px 100px;
-      }
-
-      .family-row span:last-child {
-        grid-column: 1 / -1;
-      }
+      .layout { grid-template-columns: 220px 360px minmax(440px, 1fr); }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .decision-grid { grid-template-columns: 1fr; }
+      .suggestion { grid-template-columns: 1fr 90px; }
+      .suggestion .reason { grid-column: 1 / -1; }
     }
-
-    @media (max-width: 820px) {
-      .topbar {
-        grid-template-columns: 1fr;
-      }
-
-      .brand {
-        border-right: 0;
-      }
-
-      .sync-strip {
-        border-left: 0;
-        border-top: 1px solid var(--line);
-      }
-
-      .main {
-        grid-template-columns: 1fr;
-        grid-template-areas:
-          "filters"
-          "content"
-          "inspector";
-      }
-
-      .filters {
-        min-height: 0;
-        border-right: 0;
-        border-bottom: 1px solid var(--line);
-      }
-
-      .filter-scroll {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 0 12px;
-        overflow: visible;
-        flex: none;
-      }
-
-      .filter-foot {
-        grid-template-columns: 1fr 1fr;
-      }
-
-      .filter-foot span {
-        grid-column: 1 / -1;
-      }
-
-      .content {
-        grid-template-rows: auto auto auto minmax(420px, 1fr) 48px;
-      }
-
-      .table-head {
-        align-items: flex-start;
-        flex-direction: column;
-      }
-
-      .table-actions {
-        justify-content: flex-start;
-        width: 100%;
-      }
-
-      .bulkbar {
-        margin: 8px 10px;
-      }
-
-      .meta-grid,
-      .form-grid,
-      .control-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .family-row {
-        grid-template-columns: 1fr;
-        align-items: start;
-      }
-
-      .bottom-hint {
-        align-items: flex-start;
-        flex-direction: column;
-      }
-
-      .bottom-hint .btn {
-        width: 100%;
-      }
-
-      dialog {
-        width: calc(100vw - 28px);
-        max-width: 420px;
-      }
+    @media (max-width: 850px) {
+      .topbar { align-items: flex-start; flex-wrap: wrap; }
+      .sync-meta { order: 3; flex-basis: 100%; }
+      .layout { display: block; }
+      .filters { border-bottom: 1px solid var(--line); }
+      .filters .filter-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 12px; }
+      .queue { max-height: 390px; border-bottom: 1px solid var(--line); }
+      .detail { padding: 17px; }
+      .details-grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
 <body>
-  <div class="app">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark">LLM</div>
-        <div>
-          <h1>Model Tool</h1>
-        </div>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">LLM</div>
+      <div><h1>Model Tool</h1><p>General model review</p></div>
+    </div>
+    <div class="sync-meta">
+      <span id="databaseUpdated">Database updated: —</span>
+      <span id="lastSynced">Last sync: —</span>
+    </div>
+    <div class="header-actions">
+      <button class="btn" id="runUpdates">Run updates</button>
+      <button class="btn" id="openSettings">Admin token</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="filters">
+      <p class="eyebrow">Review queue</p>
+      <h2>Find a model</h2>
+      <p class="intro">Filter the model list, inspect the evidence, then make one general decision.</p>
+      <div class="filter-fields">
+        <label class="field-label">Search<input class="field" id="search" type="search" placeholder="Model or provider"></label>
+        <label class="field-label">Provider<select class="select" id="providerFilter"><option value="">All providers</option></select></label>
+        <label class="field-label">General approval
+          <select class="select" id="approvalFilter">
+            <option value="">Any approval</option><option value="unreviewed">Unreviewed</option><option value="approved">Approved</option><option value="not_approved">Not approved</option>
+          </select>
+        </label>
+        <label class="field-label">General recommendation
+          <select class="select" id="recommendationFilter">
+            <option value="">Any recommendation</option><option value="unrated">Unrated</option><option value="recommended">Recommended</option><option value="restricted">Restricted</option><option value="discouraged">Discouraged</option><option value="not_recommended">Not recommended</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="needsDecision"> Needs a decision</label>
       </div>
-      <div class="sync-strip">
-        <span id="databaseUpdated">Database updated: Loading...</span>
-        <span id="lastSynced">Last sync: Loading...</span>
-        <button class="linkish" id="syncNow">Sync now</button>
-        <button class="btn small" id="runUpdates">Run updates</button>
-        <div class="update-progress" id="updateProgressPanel" hidden aria-live="polite">
-          <div class="update-progress-line">
-            <span id="updateProgressLabel">Update idle</span>
-            <span id="updateProgressCount"></span>
-          </div>
-          <div class="progress-track" aria-hidden="true">
-            <div class="progress-fill" id="updateProgressBar"></div>
-          </div>
-          <div class="update-step-list" id="updateProgressSteps"></div>
-        </div>
-        <span>Auto-save: <span class="status-ok">On</span></span>
-      </div>
-      <div class="header-actions">
-        <input id="adminToken" class="token-input" type="password" placeholder="Optional token">
-        <button class="btn small" id="saveToken">Save token</button>
-        <button class="btn small" id="addModelButton">Add model</button>
-      </div>
-    </header>
+      <button class="btn ghost" id="resetFilters">Reset filters</button>
+      <div class="filter-note"><strong>Suggested use cases are evidence, not approvals.</strong><br>They are calculated from the current metric proposal data and cannot be edited here.</div>
+    </aside>
 
-    <main class="main">
-      <aside class="filters">
-        <div class="filters-head">
-          <span>Filters</span>
-          <button class="linkish" id="resetFilters">Reset all</button>
-        </div>
-        <div class="filter-scroll">
-          <div class="filter-group">
-            <input id="search" class="field" placeholder="Search models...">
-          </div>
-          <div class="filter-group">
-            <label for="providerFilter">Provider</label>
-            <select id="providerFilter" class="select"></select>
-          </div>
-          <div class="filter-group">
-            <label for="countryFilter">Country</label>
-            <select id="countryFilter" class="select"></select>
-          </div>
-          <div class="filter-group">
-            <label for="hyperscalerFilter">Hyperscaler availability</label>
-            <select id="hyperscalerFilter" class="select"></select>
-          </div>
-          <div class="filter-group">
-            <label for="useCaseFilter">Use case</label>
-            <select id="useCaseFilter" class="select"></select>
-          </div>
-          <div class="filter-group">
-            <label for="generalApprovalFilter">General approval</label>
-            <select id="generalApprovalFilter" class="select">
-              <option value="">All general approvals</option>
-              <option value="approved">Approved</option>
-              <option value="not_approved">Not approved</option>
-              <option value="unreviewed">Unreviewed</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label for="manualRecommendationFilter">Manual recommendation</label>
-            <select id="manualRecommendationFilter" class="select">
-              <option value="">All manual ratings</option>
-              <option value="recommended">Recommended</option>
-              <option value="not_recommended">Not recommended</option>
-              <option value="discouraged">Discouraged</option>
-              <option value="restricted">Restricted</option>
-              <option value="unrated">Unrated</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label for="approvalFilter">Use-case approval</label>
-            <select id="approvalFilter" class="select">
-              <option value="">All approvals</option>
-              <option value="approved">Approved</option>
-              <option value="pending">Pending</option>
-              <option value="not_approved">Not approved</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label for="familyFilter">Family</label>
-            <select id="familyFilter" class="select"></select>
-          </div>
-          <div class="filter-group">
-            <label for="catalogFilter">Catalog status</label>
-            <select id="catalogFilter" class="select">
-              <option value="">All catalog statuses</option>
-              <option value="tracked">Tracked</option>
-              <option value="provisional">Provisional</option>
-              <option value="deprecated">Deprecated</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label for="roleFilter">Model role</label>
-            <select id="roleFilter" class="select">
-              <option value="">All roles</option>
-              <option value="generator">Generator</option>
-              <option value="embedding">Embedding</option>
-              <option value="reranker">Reranker</option>
-              <option value="multimodal_embedding">Multimodal embedding</option>
-              <option value="speech_to_text">Speech to text</option>
-              <option value="text_to_speech">Text to speech</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label for="capabilityFilter">Capability</label>
-            <select id="capabilityFilter" class="select"></select>
-          </div>
-          <div class="filter-group check-row">
-            <input id="smallOnly" type="checkbox">
-            <label for="smallOnly">Small model candidates only</label>
-          </div>
-        </div>
-        <div class="filter-foot">
-          <button class="btn" id="exportSnapshot">Export snapshot</button>
-          <button class="btn" id="importSnapshot">Import snapshot</button>
-          <input id="snapshotFile" type="file" accept="application/json" hidden>
-          <span id="showingCount">Showing 0 models</span>
-        </div>
-      </aside>
+    <section class="queue">
+      <div class="queue-head"><div class="queue-title"><h2>Models</h2><span id="queueCount">0 models</span></div></div>
+      <div class="queue-list" id="queueList"></div>
+    </section>
 
-      <section class="content">
-        <nav class="tabs" id="tabs"></nav>
-        <section class="update-summary" id="updateSummaryPanel" aria-live="polite" hidden></section>
-        <div>
-          <div class="table-head">
-            <div class="table-title">
-              <span id="modelCount">0 models</span>
-              <span id="selectedCount">0 selected</span>
-              <span id="activeUseCaseLabel" class="context-chip"></span>
-              <button class="btn small" id="selectAllFiltered">Select all filtered</button>
-              <button class="linkish" id="clearSelection">Clear selection</button>
-            </div>
-            <div class="table-actions" id="tableActions">
-              <select class="select" id="groupBy" style="width: 150px">
-                <option value="">Group by: None</option>
-                <option value="family">Group by: Family</option>
-                <option value="provider">Group by: Provider</option>
-              </select>
-              <select class="select" id="csvExportScope" style="width: 142px">
-                <option value="filtered">CSV: Filtered</option>
-                <option value="selected">CSV: Selected</option>
-                <option value="all">CSV: All</option>
-              </select>
-              <button class="btn small" id="exportCsvButton">Export CSV</button>
-              <button class="btn small" id="columnsButton">Columns</button>
-            </div>
-          </div>
-          <div class="bulkbar" id="bulkbar">
-            <div class="bulk-actions">
-              <strong id="bulkTarget">0 selected</strong>
-              <button class="btn green" data-action="approve_model">Approve model</button>
-              <button class="btn orange" data-action="reject_model">Reject model</button>
-              <button class="btn green" data-action="approve">Approve use case</button>
-              <button class="btn orange" data-action="not_approved">Not approved use case</button>
-              <button class="btn green" data-action="recommended">Recommended</button>
-              <button class="btn orange" data-action="not_recommended">Not recommended</button>
-              <button class="btn red" data-action="discouraged">Discouraged</button>
-              <button class="btn purple" data-action="restricted">Restricted</button>
-              <button class="btn purple" data-action="deprecated">Deprecate</button>
-              <button class="btn" data-action="clear">Clear rating</button>
-            </div>
-            <div class="bulk-note">
-              <span id="bulkScope">Actions apply to selected rows. If none are selected, they apply to the filtered list.</span>
-              <button class="linkish" id="selectFiltered">Select all filtered</button>
-            </div>
-          </div>
-        </div>
-        <div id="mainTable" class="table-wrap"></div>
-        <footer class="pager">
-          <button class="btn small" id="prevPage">Previous</button>
-          <span id="pageLabel">Page 1</span>
-          <button class="btn small" id="nextPage">Next</button>
-        </footer>
-      </section>
-
-      <aside class="inspector">
-        <div class="inspector-head" id="inspectorHead"></div>
-        <div>
-          <div class="inspector-tabs" id="inspectorTabs" role="tablist" aria-label="Model inspector">
-            <button class="active" data-inspector-tab="usecases" role="tab" aria-selected="true">Use cases</button>
-            <button data-inspector-tab="controls" role="tab" aria-selected="false">Controls</button>
-            <button data-inspector-tab="activity" role="tab" aria-selected="false">Activity</button>
-            <button data-inspector-tab="notes" role="tab" aria-selected="false">Notes</button>
-          </div>
-          <div class="inspector-body" id="inspectorBody"></div>
-        </div>
-        <div class="inspector-foot">
-          <button class="btn primary" id="saveDecision">Save decision</button>
-          <button class="btn" id="saveNext">Save and next</button>
-          <span class="subtle" id="saveStatus">Changes apply to this model and selected use case.</span>
-        </div>
-      </aside>
-    </main>
-
-    <footer class="bottom-hint">
-      <span><strong>Family view hint:</strong> Switch to Families to review model-family groups and apply decisions to all visible family members.</span>
-      <button class="btn" id="applyFiltered">Apply to filtered list</button>
-    </footer>
+    <main class="detail" id="detail"><div class="empty">Loading model evidence…</div></main>
   </div>
 
-  <dialog id="addModelDialog">
-    <form method="dialog" id="addModelForm">
-      <div class="dialog-head">Add model</div>
-      <div class="dialog-body">
-        <input class="field" name="name" placeholder="Model name" required>
-        <input class="field" name="provider" placeholder="Provider" required>
-        <input class="field" name="model_id" placeholder="Optional model id">
-        <select class="select" name="model_roles">
-          <option value="generator">Generator</option>
-          <option value="embedding">Embedding</option>
-          <option value="reranker">Reranker</option>
-          <option value="multimodal_embedding">Multimodal embedding</option>
-          <option value="speech_to_text">Speech to text</option>
-          <option value="text_to_speech">Text to speech</option>
-        </select>
-        <select class="select" name="catalog_status">
-          <option value="tracked">Tracked</option>
-          <option value="provisional">Provisional</option>
-          <option value="deprecated">Deprecated</option>
-        </select>
-        <textarea class="textarea" name="notes" placeholder="Notes"></textarea>
-      </div>
-      <div class="dialog-foot">
-        <button class="btn" value="cancel">Cancel</button>
-        <button class="btn primary" value="save">Save model</button>
-      </div>
+  <dialog id="settingsDialog">
+    <form method="dialog" class="dialog-body">
+      <p class="eyebrow">Write access</p><h2>Admin token</h2>
+      <p class="intro">The token is stored only for this browser tab.</p>
+      <label class="field-label">Token<input class="field" id="adminToken" type="password" autocomplete="off" placeholder="Optional token"></label>
+      <div class="dialog-actions"><button class="btn" value="cancel">Cancel</button><button class="btn primary" id="saveToken" value="default">Save token</button></div>
     </form>
   </dialog>
-
   <div class="toast" id="toast"></div>
 
   <script>
     const state = {
       catalog: null,
-      benchmarks: [],
-      tab: "all",
-      filters: {
-        search: "",
-        provider: "",
-        country: "",
-        hyperscaler: "",
-        useCase: "",
-        generalApproval: "",
-        manualRecommendation: "",
-        approval: "",
-        family: "",
-        catalogStatus: "",
-        role: "",
-        capability: "",
-        smallOnly: false
-      },
-      selected: new Set(),
       activeModelId: null,
-      activeUseCaseId: null,
-      inspectorTab: "usecases",
-      sort: { key: "release_date", direction: "desc" },
-      page: 1,
-      pageSize: 50,
-      update: {
-        logId: null,
-        pollTimer: null,
-        polling: false
-      },
-      rankings: {
-        mode: "use_case",
-        useCaseId: "",
-        benchmarkId: "",
-        cache: {},
-        loadingUseCaseId: "",
-        error: ""
-      }
+      filters: { search: "", provider: "", approval: "", recommendation: "", needsDecision: false },
+      draft: null,
+      saving: false,
+      updating: false,
+      showAllSuggestions: false
     };
 
-    const tabs = [
-      ["all", "All models"],
-      ["usecase", "Use-case review"],
-      ["rankings", "Rankings"],
-      ["families", "Families"],
-      ["needs", "Needs decision"],
-      ["deprecated", "Deprecated"]
-    ];
-
-    const els = {
-      adminToken: document.getElementById("adminToken"),
-      saveToken: document.getElementById("saveToken"),
-      search: document.getElementById("search"),
-      providerFilter: document.getElementById("providerFilter"),
-      countryFilter: document.getElementById("countryFilter"),
-      hyperscalerFilter: document.getElementById("hyperscalerFilter"),
-      useCaseFilter: document.getElementById("useCaseFilter"),
-      generalApprovalFilter: document.getElementById("generalApprovalFilter"),
-      manualRecommendationFilter: document.getElementById("manualRecommendationFilter"),
-      approvalFilter: document.getElementById("approvalFilter"),
-      familyFilter: document.getElementById("familyFilter"),
-      catalogFilter: document.getElementById("catalogFilter"),
-      roleFilter: document.getElementById("roleFilter"),
-      capabilityFilter: document.getElementById("capabilityFilter"),
-      smallOnly: document.getElementById("smallOnly"),
-      tabs: document.getElementById("tabs"),
-      mainTable: document.getElementById("mainTable"),
-      inspectorTabs: document.getElementById("inspectorTabs"),
-      inspectorHead: document.getElementById("inspectorHead"),
-      inspectorBody: document.getElementById("inspectorBody"),
-      tableActions: document.getElementById("tableActions"),
-      bulkbar: document.getElementById("bulkbar"),
-      modelCount: document.getElementById("modelCount"),
-      selectedCount: document.getElementById("selectedCount"),
-      activeUseCaseLabel: document.getElementById("activeUseCaseLabel"),
-      bulkTarget: document.getElementById("bulkTarget"),
-      bulkScope: document.getElementById("bulkScope"),
-      selectAllFiltered: document.getElementById("selectAllFiltered"),
-      showingCount: document.getElementById("showingCount"),
-      pageLabel: document.getElementById("pageLabel"),
-      databaseUpdated: document.getElementById("databaseUpdated"),
-      lastSynced: document.getElementById("lastSynced"),
-      runUpdates: document.getElementById("runUpdates"),
-      updateProgressPanel: document.getElementById("updateProgressPanel"),
-      updateProgressLabel: document.getElementById("updateProgressLabel"),
-      updateProgressCount: document.getElementById("updateProgressCount"),
-      updateProgressBar: document.getElementById("updateProgressBar"),
-      updateProgressSteps: document.getElementById("updateProgressSteps"),
-      updateSummaryPanel: document.getElementById("updateSummaryPanel"),
-      saveDecision: document.getElementById("saveDecision"),
-      saveNext: document.getElementById("saveNext"),
-      saveStatus: document.getElementById("saveStatus"),
-      toast: document.getElementById("toast"),
-      addModelDialog: document.getElementById("addModelDialog"),
-      addModelForm: document.getElementById("addModelForm"),
-      snapshotFile: document.getElementById("snapshotFile"),
-      csvExportScope: document.getElementById("csvExportScope"),
-      exportCsvButton: document.getElementById("exportCsvButton")
-    };
+    const els = Object.fromEntries([
+      "databaseUpdated", "lastSynced", "runUpdates", "openSettings", "search", "providerFilter",
+      "approvalFilter", "recommendationFilter", "needsDecision", "resetFilters", "queueCount",
+      "queueList", "detail", "settingsDialog", "adminToken", "saveToken", "toast"
+    ].map((id) => [id, document.getElementById(id)]));
 
     function adminHeaders() {
       const token = sessionStorage.getItem("llm_benchmarking_admin_token") || "";
       return token ? { "X-LLM-Benchmarking-Admin-Token": token } : {};
     }
 
-    async function request(path, options = {}) {
-      const headers = {
-        "Content-Type": "application/json",
-        ...adminHeaders(),
-        ...(options.headers || {})
-      };
-      const response = await fetch(path, { ...options, headers });
-      const payload = await response.json().catch(() => ({}));
+    async function request(url, options = {}) {
+      const response = await fetch(url, {
+        ...options,
+        headers: { "Content-Type": "application/json", ...adminHeaders(), ...(options.headers || {}) }
+      });
       if (!response.ok) {
-        throw new Error(payload.detail || `Request failed: ${response.status}`);
+        let message = `Request failed (${response.status})`;
+        try { message = (await response.json()).detail || message; } catch (_) {}
+        throw new Error(message);
       }
-      return payload;
-    }
-
-    async function loadCatalog() {
-      els.databaseUpdated.textContent = "Database updated: Loading...";
-      els.lastSynced.textContent = "Last sync: Loading...";
-      const [catalog, benchmarks] = await Promise.all([
-        request("/api/review/catalog", { method: "GET" }),
-        request("/api/benchmarks", { method: "GET" })
-      ]);
-      state.catalog = catalog;
-      state.benchmarks = benchmarks;
-      if (!state.activeUseCaseId) {
-        state.activeUseCaseId = (state.catalog.use_cases[0] || {}).id || "";
-      }
-      initialiseRankingDefaults();
-      populateFilters();
-      ensureActiveModel();
-      render();
-      els.databaseUpdated.textContent = `Database updated: ${formatCatalogTimestamp(state.catalog.database_updated_at, "Unavailable")}`;
-      const syncStatus = state.catalog.last_sync_status ? ` (${state.catalog.last_sync_status})` : "";
-      els.lastSynced.textContent = `Last sync: ${formatCatalogTimestamp(state.catalog.last_sync_at, "Never")}${syncStatus}`;
-    }
-
-    function formatCatalogTimestamp(value, emptyLabel) {
-      if (!value) return emptyLabel;
-      const parsed = new Date(value);
-      return Number.isNaN(parsed.getTime()) ? "Unavailable" : parsed.toLocaleString();
-    }
-
-    function initialiseRankingDefaults() {
-      const useCases = rankingUseCases();
-      if (!state.rankings.useCaseId || !useCases.some((item) => item.id === state.rankings.useCaseId)) {
-        state.rankings.useCaseId = (useCases.find((item) => item.id === state.activeUseCaseId) || useCases[0] || {}).id || "";
-      }
-      const benchmarkOptions = benchmarkLeaderboardOptions();
-      if (!state.rankings.benchmarkId || !benchmarkOptions.some((item) => item.id === state.rankings.benchmarkId)) {
-        state.rankings.benchmarkId = (benchmarkOptions.find((item) => item.id === "mteb_retrieval") || benchmarkOptions[0] || {}).id || "";
-      }
-    }
-
-    async function startUpdateRun() {
-      if (state.update.pollTimer) {
-        toast("Update already running");
-        return;
-      }
-
-      els.runUpdates.disabled = true;
-      els.runUpdates.textContent = "Starting...";
-      showUpdateStarting();
-
-      const started = await request("/api/update", { method: "POST", body: "{}" });
-      state.update.logId = started.log_id;
-      state.update.pollTimer = window.setInterval(() => {
-        pollUpdateStatus().catch(handleUpdatePollingError);
-      }, 2500);
-      await pollUpdateStatus();
-    }
-
-    function showUpdateStarting() {
-      els.updateProgressPanel.hidden = false;
-      els.updateProgressLabel.textContent = "Starting update...";
-      els.updateProgressCount.textContent = "";
-      els.updateProgressBar.style.width = "0%";
-      els.updateProgressSteps.innerHTML = "";
-      els.updateSummaryPanel.hidden = true;
-      els.updateSummaryPanel.innerHTML = "";
-    }
-
-    async function pollUpdateStatus() {
-      if (!state.update.logId || state.update.polling) return;
-      state.update.polling = true;
-      try {
-        const log = await request(`/api/update/status/${state.update.logId}`, { method: "GET" });
-        renderUpdateProgress(log);
-        renderUpdateChangeSummary(log);
-        if (log.status === "completed" || log.status === "failed") {
-          stopUpdatePolling();
-          if (log.status === "completed") {
-            toast(updateCompleteToast(log));
-            await loadCatalog();
-          } else {
-            toast("Update failed");
-          }
-        }
-      } finally {
-        state.update.polling = false;
-      }
-    }
-
-    function stopUpdatePolling() {
-      if (state.update.pollTimer) {
-        window.clearInterval(state.update.pollTimer);
-      }
-      state.update.pollTimer = null;
-      els.runUpdates.disabled = false;
-      els.runUpdates.textContent = "Run updates";
-    }
-
-    function handleUpdatePollingError(error) {
-      stopUpdatePolling();
-      els.updateProgressPanel.hidden = false;
-      els.updateProgressLabel.textContent = "Update status unavailable";
-      els.updateProgressCount.textContent = "";
-      els.updateProgressSteps.innerHTML = `<span class="update-step failed">${escapeHtml(error.message)}</span>`;
-      toast(error.message);
-    }
-
-    function renderUpdateProgress(log) {
-      const steps = Array.isArray(log.progress_steps) ? log.progress_steps : [];
-      const totalSteps = Number(log.total_steps || steps.length || 0);
-      const finishedSteps = Number(log.finished_steps || 0);
-      const percent = Math.max(0, Math.min(100, Number(log.progress_percent || 0)));
-      const activeStep = steps.find((step) => step.status === "running")
-        || steps.find((step) => step.status === "failed")
-        || [...steps].reverse().find((step) => step.status === "completed")
-        || null;
-      const stepLabel = activeStep ? activeStep.label : (log.current_step_label || "Update");
-      const statusLabel = updateStatusLabel(log.status, stepLabel);
-
-      els.updateProgressPanel.hidden = false;
-      els.updateProgressLabel.textContent = statusLabel;
-      els.updateProgressCount.textContent = totalSteps ? `${finishedSteps}/${totalSteps} steps` : "";
-      els.updateProgressBar.style.width = `${percent}%`;
-      els.runUpdates.disabled = log.status === "running";
-      els.runUpdates.textContent = log.status === "running" ? "Updating..." : "Run updates";
-
-      const visibleSteps = recentUpdateSteps(steps);
-      els.updateProgressSteps.innerHTML = visibleSteps.map((step) => {
-        const status = safeUpdateStatus(step.status);
-        const detail = step.records_found == null ? "" : ` (${step.records_found})`;
-        return `<span class="update-step ${status}" title="${escapeAttr(step.label || "")}">${escapeHtml(step.label || "Step")}${detail}</span>`;
-      }).join("");
-
-      if (log.status === "completed") {
-        els.updateProgressCount.textContent = `${log.scores_added || 0} added, ${log.scores_updated || 0} updated`;
-      }
-    }
-
-    function renderUpdateChangeSummary(log) {
-      const summary = log.change_summary || null;
-      if (!summary || log.status === "running") {
-        els.updateSummaryPanel.hidden = true;
-        els.updateSummaryPanel.innerHTML = "";
-        return;
-      }
-
-      const newCount = Number(summary.new_model_count || 0);
-      const changedCount = Number(summary.changed_model_count || 0);
-      const removedCount = Number(summary.removed_model_count || 0);
-      const scoreAdded = Number(log.scores_added || 0);
-      const scoreUpdated = Number(log.scores_updated || 0);
-      const sourceRecords = Number(summary.source_record_count || 0);
-      const sourceFailures = Number(summary.source_failure_count || 0);
-      const changeItems = [
-        ...updateChangeItems(summary.new_models, "new"),
-        ...updateChangeItems(summary.changed_models, "changed"),
-        ...updateChangeItems(summary.removed_models, "removed")
-      ].slice(0, 12);
-      const noCatalogChanges = !newCount && !changedCount && !removedCount;
-      const generatedAt = summary.generated_at ? new Date(summary.generated_at).toLocaleTimeString() : "";
-
-      els.updateSummaryPanel.hidden = false;
-      els.updateSummaryPanel.innerHTML = `
-        <div class="update-summary-head">
-          <div class="update-summary-title">
-            <strong>${log.status === "failed" ? "Update changes before failure" : "Latest update changes"}</strong>
-            <span>${generatedAt ? `Completed ${escapeHtml(generatedAt)}` : "Completed update run"}</span>
-          </div>
-          <div class="update-summary-metrics">
-            <span class="metric-pill">${newCount} new models</span>
-            <span class="metric-pill">${changedCount} model changes</span>
-            <span class="metric-pill">${removedCount} removed</span>
-            <span class="metric-pill">${scoreAdded} scores added</span>
-            <span class="metric-pill">${scoreUpdated} scores updated</span>
-            <span class="metric-pill">${sourceRecords} source records</span>
-            ${sourceFailures ? `<span class="metric-pill">${sourceFailures} source failures</span>` : ""}
-          </div>
-        </div>
-        ${summary.error ? `<div class="subtle">Change summary unavailable: ${escapeHtml(summary.error)}</div>` : ""}
-        ${noCatalogChanges && !summary.error ? '<div class="subtle">No new or changed models were detected in the active catalog.</div>' : ""}
-        ${changeItems.length ? `<div class="update-change-list">${changeItems.join("")}</div>` : ""}
-        ${renderUpdateTruncation(summary)}
-      `;
-    }
-
-    function updateChangeItems(models, kind) {
-      if (!Array.isArray(models)) return [];
-      return models.map((model) => {
-        const name = model.name || model.id || "Unknown model";
-        const provider = model.provider || "Unknown provider";
-        const roles = Array.isArray(model.model_roles) && model.model_roles.length
-          ? ` - ${model.model_roles.join(", ")}`
-          : "";
-        const fields = Array.isArray(model.changed_fields) && model.changed_fields.length
-          ? ` - ${model.changed_fields.slice(0, 4).join(", ")}`
-          : "";
-        const kindLabel = kind === "new" ? "New" : kind === "removed" ? "Removed" : "Changed";
-        return `
-          <div class="update-change-item ${kind === "changed" ? "changed" : kind === "removed" ? "removed" : ""}" title="${escapeAttr(name)}">
-            <span class="update-change-name">${escapeHtml(kindLabel)}: ${escapeHtml(name)}</span>
-            <span class="update-change-meta">${escapeHtml(provider)}${escapeHtml(roles)}${escapeHtml(fields)}</span>
-          </div>
-        `;
-      });
-    }
-
-    function renderUpdateTruncation(summary) {
-      const truncated = summary.truncated || {};
-      const count = Number(truncated.new_models || 0) + Number(truncated.changed_models || 0) + Number(truncated.removed_models || 0);
-      return count ? `<div class="subtle">Showing the first 12 changed rows in the UI; ${count} more are available in the update status API.</div>` : "";
-    }
-
-    function updateCompleteToast(log) {
-      const summary = log.change_summary || {};
-      return `Update complete: ${summary.new_model_count || 0} new models, ${summary.changed_model_count || 0} model changes`;
-    }
-
-    function updateStatusLabel(status, stepLabel) {
-      if (status === "completed") return "Update complete";
-      if (status === "failed") return `Update failed: ${stepLabel}`;
-      return `Updating: ${stepLabel}`;
-    }
-
-    function recentUpdateSteps(steps) {
-      const active = steps.filter((step) => step.status === "running" || step.status === "failed");
-      const completed = steps.filter((step) => step.status === "completed").slice(-2);
-      const pending = active.length || completed.length ? [] : steps.filter((step) => step.status === "pending").slice(0, 1);
-      return [...completed, ...active, ...pending].slice(-4);
-    }
-
-    function safeUpdateStatus(status) {
-      return ["pending", "running", "completed", "failed"].includes(status) ? status : "pending";
-    }
-
-    function populateFilters() {
-      fillSelect(els.providerFilter, "All providers", state.catalog.providers.map((item) => [item.name, item.name]));
-      fillSelect(
-        els.countryFilter,
-        "All countries",
-        ((state.catalog.facets || {}).countries || []).map((item) => [item.id, `${item.name} (${item.count})`])
-      );
-      fillSelect(
-        els.hyperscalerFilter,
-        "All hyperscaler routes",
-        ((state.catalog.facets || {}).hyperscalers || []).map((item) => [item.id, `${item.name} (${item.count})`])
-      );
-      fillSelect(els.useCaseFilter, "All use cases", state.catalog.use_cases.map((item) => [item.id, item.label]));
-      fillSelect(els.familyFilter, "All families", state.catalog.families.map((item) => [item.family_id, item.family_name]));
-      fillSelect(
-        els.capabilityFilter,
-        "All capabilities",
-        ((state.catalog.facets || {}).capabilities || []).map((item) => [item.id, `${item.name} (${item.count})`])
-      );
-      els.useCaseFilter.value = state.filters.useCase;
-      els.providerFilter.value = state.filters.provider;
-      els.countryFilter.value = state.filters.country;
-      els.hyperscalerFilter.value = state.filters.hyperscaler;
-      els.familyFilter.value = state.filters.family;
-      els.capabilityFilter.value = state.filters.capability;
-    }
-
-    function fillSelect(select, firstLabel, options) {
-      const current = select.value;
-      select.innerHTML = `<option value="">${escapeHtml(firstLabel)}</option>` + options
-        .map(([value, label]) => `<option value="${escapeAttr(value)}">${escapeHtml(label)}</option>`)
-        .join("");
-      select.value = current;
-    }
-
-    function generalApprovalStatus(model) {
-      if (model.general_approval_status) return model.general_approval_status;
-      if (model.general_approved_for_use) return "approved";
-      return model.general_approval_updated_at ? "not_approved" : "unreviewed";
-    }
-
-    function generalApprovalClass(model) {
-      const status = generalApprovalStatus(model);
-      if (status === "approved") return "green";
-      if (status === "not_approved") return "red";
-      return "orange";
-    }
-
-    function filteredModels() {
-      if (!state.catalog) return [];
-      let models = state.catalog.models.slice();
-      if (state.tab === "needs") models = models.filter(modelNeedsDecision);
-      if (state.tab === "deprecated") models = models.filter((model) => model.catalog_status === "deprecated");
-      if (state.tab === "usecase" && !state.filters.useCase && state.activeUseCaseId) {
-        state.filters.useCase = state.activeUseCaseId;
-        els.useCaseFilter.value = state.activeUseCaseId;
-      }
-
-      const q = state.filters.search.toLowerCase();
-      models = models.filter((model) => {
-        const approvals = model.use_case_approvals || {};
-        const useCaseId = state.filters.useCase;
-        const haystack = [
-          model.name,
-          model.id,
-          model.provider,
-          model.family_name,
-          model.family_id,
-          ...(model.capabilities || []),
-          ...countryLabelsFor(model),
-          ...hyperscalerValuesFor(model)
-        ].join(" ").toLowerCase();
-        if (q && !haystack.includes(q)) return false;
-        if (state.filters.provider && model.provider !== state.filters.provider) return false;
-        if (state.filters.country && !countryValuesFor(model).includes(state.filters.country)) return false;
-        if (state.filters.hyperscaler && !hyperscalerMatches(model, state.filters.hyperscaler)) return false;
-        if (state.filters.family && model.family_id !== state.filters.family) return false;
-        if (state.filters.catalogStatus && model.catalog_status !== state.filters.catalogStatus) return false;
-        if (state.filters.role && !(model.model_roles || []).includes(state.filters.role)) return false;
-        if (state.filters.capability && !(model.capabilities || []).includes(state.filters.capability)) return false;
-        if (state.filters.smallOnly && !model.small_model_candidate) return false;
-        if (useCaseId && !approvals[useCaseId] && state.filters.approval !== "pending") return false;
-        if (state.filters.generalApproval) {
-          if (generalApprovalStatus(model) !== state.filters.generalApproval) return false;
-        }
-        if (useCaseId) {
-          if (!approvalMatchesUseCaseFilters(approvals[useCaseId])) return false;
-        } else if (useCaseScopedFiltersActive()) {
-          if (state.filters.manualRecommendation === "unrated") {
-            if (hasSavedManualRecommendation(model)) return false;
-            if (state.filters.approval && !matchingUseCaseApproval(model, { ignoreManual: true })) return false;
-          } else if (!matchingUseCaseApproval(model)) {
-            return false;
-          }
-        }
-        return true;
-      });
-      models.sort(compareModels);
-      return models;
-    }
-
-    function compareModels(a, b) {
-      const key = state.sort.key;
-      const av = valueForSort(a, key);
-      const bv = valueForSort(b, key);
-      const result = String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" });
-      return state.sort.direction === "asc" ? result : -result;
-    }
-
-    function valueForSort(model, key) {
-      if (key === "manual") return statusFor(model).manual;
-      if (key === "approval") return statusFor(model).approval;
-      if (key === "general_approval") return generalApprovalStatus(model);
-      if (key === "release_date") return modelReleaseInfo(model).sortValue;
-      return model[key] || "";
-    }
-
-    function firstApproval(model) {
-      const approvals = model.use_case_approvals || {};
-      const selected = state.filters.useCase;
-      if (selected) return approvals[selected] || defaultUseCaseApproval(selected);
-      if (useCaseScopedFiltersActive()) {
-        const matching = matchingUseCaseApproval(model, {
-          ignoreManual: state.filters.manualRecommendation === "unrated" && !state.filters.useCase
-        });
-        if (matching) return matching;
-      }
-      const preferred = preferredUseCaseIdForModel(model, approvals);
-      if (preferred && approvals[preferred]) return approvals[preferred];
-      if (state.activeUseCaseId && approvals[state.activeUseCaseId]) return approvals[state.activeUseCaseId];
-      return Object.values(approvals)[0] || null;
-    }
-
-    function defaultUseCaseApproval(useCaseId) {
-      return {
-        use_case_id: useCaseId,
-        approved_for_use: false,
-        approval_notes: null,
-        approval_updated_at: null,
-        recommendation_status: "unrated",
-        recommendation_notes: null,
-        recommendation_updated_at: null,
-        proposed_recommendation_status: "unrated",
-        proposed_recommendation_blockers: [],
-        proposed_recommendation_warnings: [],
-        proposed_recommendation_reasons: [],
-        proposed_recommendation_required_controls: [],
-        inference_route_approvals: []
-      };
-    }
-
-    function useCaseApprovalValues(model) {
-      return Object.values(model.use_case_approvals || {}).filter((approval) => {
-        return approval && typeof approval === "object";
-      });
-    }
-
-    function useCaseScopedFiltersActive() {
-      return Boolean(state.filters.manualRecommendation || state.filters.approval);
-    }
-
-    function hasSavedManualRecommendation(model) {
-      return useCaseApprovalValues(model).some((approval) => {
-        return (approval.recommendation_status || "unrated") !== "unrated";
-      });
-    }
-
-    function matchingUseCaseApproval(model, options = {}) {
-      const match = matchingUseCaseEntry(model, options);
-      return match ? match.approval : null;
-    }
-
-    function matchingUseCaseIdForModel(model, options = {}) {
-      const match = matchingUseCaseEntry(model, options);
-      return match ? match.useCaseId : "";
-    }
-
-    function matchingUseCaseIdsForModel(model, options = {}) {
-      return matchingUseCaseEntries(model, options).map((entry) => entry.useCaseId);
-    }
-
-    function matchingUseCaseEntry(model, options = {}) {
-      return matchingUseCaseEntries(model, options)[0] || null;
-    }
-
-    function matchingUseCaseEntries(model, options = {}) {
-      const approvals = model.use_case_approvals || {};
-      const matches = [];
-      for (const [useCaseId, approval] of Object.entries(approvals)) {
-        if (!approval || typeof approval !== "object") continue;
-        if (approvalMatchesUseCaseFilters(approval, options)) {
-          matches.push({ useCaseId: approval.use_case_id || useCaseId, approval });
-        }
-      }
-      return matches;
-    }
-
-    function approvalMatchesUseCaseFilters(approval, options = {}) {
-      if (!approval || typeof approval !== "object") {
-        return !state.filters.manualRecommendation &&
-          state.filters.approval === "pending";
-      }
-      if (!options.ignoreManual && state.filters.manualRecommendation) {
-        const manualStatus = approval.recommendation_status || "unrated";
-        if (manualStatus !== state.filters.manualRecommendation) return false;
-      }
-      if (state.filters.approval) {
-        if (useCaseApprovalStatus(approval) !== state.filters.approval) return false;
-      }
-      return true;
-    }
-
-    function useCaseApprovalStatus(approval) {
-      if (!approval || typeof approval !== "object") return "pending";
-      if (approval.approved_for_use) return "approved";
-      return approval.approval_updated_at || approval.approval_notes ? "not_approved" : "pending";
-    }
-
-    function useCaseApprovalLabel(status) {
-      if (status === "approved") return "Approved";
-      if (status === "not_approved") return "Not approved";
-      return "Pending";
-    }
-
-    function useCaseApprovalClass(status) {
-      if (status === "approved") return "green";
-      if (status === "not_approved") return "red";
-      return "orange";
-    }
-
-    function countryEntriesFor(model) {
-      const entries = [];
-      const origins = Array.isArray(model.provider_origin_countries) ? model.provider_origin_countries : [];
-      origins.forEach((origin) => {
-        if (!origin || typeof origin !== "object") return;
-        const id = origin.code || origin.name || "";
-        const name = origin.name || origin.code || "";
-        if (id && name) entries.push({ id, name });
-      });
-      if (!entries.length && (model.provider_country_code || model.provider_country_name)) {
-        entries.push({
-          id: model.provider_country_code || model.provider_country_name,
-          name: model.provider_country_name || model.provider_country_code
-        });
-      }
-      return entries.filter((entry, index) => {
-        return entry.id && entries.findIndex((candidate) => candidate.id === entry.id) === index;
-      });
-    }
-
-    function countryValuesFor(model) {
-      return countryEntriesFor(model).map((entry) => entry.id);
-    }
-
-    function countryLabelsFor(model) {
-      return countryEntriesFor(model).flatMap((entry) => [entry.id, entry.name]);
-    }
-
-    function hyperscalerValuesFor(model) {
-      const summary = model.inference_summary && typeof model.inference_summary === "object" ? model.inference_summary : {};
-      const platformNames = Array.isArray(summary.platform_names) ? summary.platform_names : [];
-      return platformNames
-        .map((value) => String(value || "").trim())
-        .filter((value, index, values) => value && values.indexOf(value) === index);
-    }
-
-    function hyperscalerMatches(model, filterValue) {
-      const values = hyperscalerValuesFor(model);
-      if (filterValue === "__any__") return values.length > 0;
-      if (filterValue === "__none__") return values.length === 0;
-      return values.includes(filterValue);
-    }
-
-    function statusFor(model) {
-      const approval = firstApproval(model) || {};
-      const approvalStatus = useCaseApprovalStatus(approval);
-      return {
-        manual: approval.recommendation_status || "unrated",
-        approval: approvalStatus,
-        controls: (approval.proposed_recommendation_required_controls || []).length,
-        blockers: (approval.proposed_recommendation_blockers || []).length,
-        warnings: (approval.proposed_recommendation_warnings || []).length
-      };
-    }
-
-    function modelNeedsDecision(model) {
-      return Object.values(model.use_case_approvals || {}).some((approval) => {
-        return (approval.recommendation_status || "unrated") === "unrated" &&
-          (approval.proposed_recommendation_status || "unrated") !== "unrated";
-      });
-    }
-
-    function render() {
-      const models = filteredModels();
-      renderTabs(models);
-      if (state.tab === "rankings") {
-        const rows = rankingRows();
-        renderRankingCounts(rows);
-        renderRankingsView(rows);
-        ensureActiveRankingModel(rows);
-        renderInspector();
-        ensureRankingData().catch((error) => {
-          state.rankings.error = error.message;
-          render();
-        });
-        return;
-      }
-      renderCounts(models);
-      if (state.tab === "families") {
-        renderFamilies(models);
-      } else {
-        renderTable(models);
-      }
-      ensureActiveModel(models);
-      renderInspector();
-    }
-
-    function renderTabs(models) {
-      const counts = {
-        all: state.catalog.summary.model_count,
-        usecase: models.length,
-        rankings: rankingRows().length,
-        families: state.catalog.summary.family_count,
-        needs: state.catalog.summary.needs_decision_count,
-        deprecated: state.catalog.summary.deprecated_count
-      };
-      els.tabs.innerHTML = tabs.map(([id, label]) => {
-        return `<button class="tab ${state.tab === id ? "active" : ""}" data-tab="${id}">${label}<span class="count">${counts[id] || 0}</span></button>`;
-      }).join("");
-    }
-
-    function renderCounts(models) {
-      els.tableActions.hidden = false;
-      els.bulkbar.hidden = false;
-      els.selectAllFiltered.hidden = false;
-      document.getElementById("clearSelection").hidden = false;
-      const selectedCount = state.selected.size;
-      const targetCount = selectedCount || models.length;
-      els.modelCount.textContent = `${models.length} models`;
-      els.selectedCount.textContent = `${selectedCount} selected`;
-      els.bulkTarget.textContent = selectedCount ? `${selectedCount} selected` : `${models.length} filtered`;
-      els.bulkScope.textContent = selectedCount
-        ? "Actions apply to selected rows."
-        : "No rows are selected. Actions apply to the filtered list.";
-      els.selectAllFiltered.textContent = `Select all filtered (${models.length})`;
-      els.showingCount.textContent = `Showing ${models.length} of ${state.catalog.summary.model_count} models`;
-      const useCase = state.filters.useCase
-        ? state.catalog.use_cases.find((item) => item.id === state.filters.useCase)
-        : null;
-      els.activeUseCaseLabel.textContent = useCase ? `Use case: ${useCase.label}` : "Use case: All";
-      document.getElementById("applyFiltered").textContent = `Select all filtered (${models.length})`;
-    }
-
-    function renderRankingCounts(rows) {
-      els.tableActions.hidden = true;
-      els.bulkbar.hidden = true;
-      els.selectAllFiltered.hidden = true;
-      document.getElementById("clearSelection").hidden = true;
-      els.modelCount.textContent = `${rows.length} ranked`;
-      els.selectedCount.textContent = state.rankings.mode === "benchmark" ? "Benchmark leaderboard" : "Use-case ranking";
-      els.activeUseCaseLabel.textContent = rankingContextLabel();
-      els.showingCount.textContent = `Showing ${rows.length} ranked rows`;
-      els.pageLabel.textContent = rows.length ? `1-${Math.min(state.pageSize, rows.length)} of ${rows.length}` : "No ranked rows";
-      document.getElementById("applyFiltered").textContent = "Select all filtered";
-    }
-
-    function renderRankingsView(rows) {
-      const totalPages = Math.max(1, Math.ceil(rows.length / state.pageSize));
-      if (state.page > totalPages) state.page = totalPages;
-      const start = (state.page - 1) * state.pageSize;
-      const pageRows = rows.slice(start, start + state.pageSize);
-      els.pageLabel.textContent = rows.length
-        ? `${start + 1}-${Math.min(start + state.pageSize, rows.length)} of ${rows.length}`
-        : "No ranked rows";
-      els.mainTable.innerHTML = `
-        <div class="rankings-toolbar">
-          <div class="segmented" role="tablist" aria-label="Ranking mode">
-            <button class="segment ${state.rankings.mode === "use_case" ? "active" : ""}" data-ranking-mode="use_case">Use-case ranking</button>
-            <button class="segment ${state.rankings.mode === "benchmark" ? "active" : ""}" data-ranking-mode="benchmark">Benchmark leaderboard</button>
-          </div>
-          ${state.rankings.mode === "benchmark" ? renderBenchmarkSelect() : renderRankingUseCaseSelect()}
-          <button class="btn small" id="refreshRanking">Refresh ranking</button>
-        </div>
-        ${renderRankingSummary(rows)}
-        ${pageRows.length ? renderRankingTable(pageRows) : renderRankingEmpty()}`;
-    }
-
-    function renderRankingUseCaseSelect() {
-      return `<label>Use case
-        <select class="select" id="rankingUseCaseSelect">
-          ${rankingUseCases().map((useCase) => {
-            const roles = (useCase.model_roles || ["generator"]).join(", ");
-            return `<option value="${escapeAttr(useCase.id)}" ${useCase.id === state.rankings.useCaseId ? "selected" : ""}>${escapeHtml(useCase.label)} - ${escapeHtml(roles)}</option>`;
-          }).join("")}
-        </select>
-      </label>`;
-    }
-
-    function renderBenchmarkSelect() {
-      const counts = benchmarkScoreCounts();
-      return `<label>Benchmark
-        <select class="select" id="rankingBenchmarkSelect">
-          ${benchmarkLeaderboardOptions().map((benchmark) => {
-            const count = counts[benchmark.id] || 0;
-            return `<option value="${escapeAttr(benchmark.id)}" ${benchmark.id === state.rankings.benchmarkId ? "selected" : ""}>${escapeHtml(benchmark.short || benchmark.name || benchmark.id)} (${count})</option>`;
-          }).join("")}
-        </select>
-      </label>`;
-    }
-
-    function renderRankingSummary(rows) {
-      const useCase = activeRankingUseCase();
-      const benchmark = activeBenchmark();
-      const details = state.rankings.mode === "benchmark"
-        ? [
-            `Benchmark: ${benchmarkLabel(state.rankings.benchmarkId)}`,
-            `Direction: ${benchmarkHigherIsBetter(benchmark) ? "higher is better" : "lower is better"}`,
-            `Compatible roles: ${benchmarkCompatibleRoles(state.rankings.benchmarkId).join(", ")}`
-          ]
-        : [
-            `Use case: ${(useCase && useCase.label) || state.rankings.useCaseId || "-"}`,
-            `Roles: ${((useCase && useCase.model_roles) || ["generator"]).join(", ")}`,
-            `Required: ${((useCase && useCase.required_benchmarks) || []).join(", ") || "none"}`
-          ];
-      if (state.rankings.mode === "use_case" && state.rankings.loadingUseCaseId) details.push("Loading ranking...");
-      if (state.rankings.error) details.push(`Error: ${state.rankings.error}`);
-      details.push(`${rows.length} ranked rows after filters`);
-      return `<div class="ranking-summary">${details.map((item) => badge(item, state.rankings.error ? "red" : "gray")).join("")}</div>`;
-    }
-
-    function renderRankingTable(rows) {
-      return `
-        <table>
-          <colgroup>
-            <col style="width: 48px">
-            <col style="width: 172px">
-            <col style="width: 86px">
-            <col style="width: 74px">
-            <col style="width: 92px">
-            <col style="width: 82px">
-            <col style="width: 86px">
-            <col style="width: 210px">
-          </colgroup>
-          <thead>
-            <tr>
-              <th>Rank</th>
-              <th>Model</th>
-              <th>Provider</th>
-              <th>Roles</th>
-              <th>Score</th>
-              <th>${state.rankings.mode === "benchmark" ? "Metric" : "Coverage"}</th>
-              <th>Release</th>
-              <th>Evidence</th>
-            </tr>
-          </thead>
-          <tbody>${rows.map(renderRankingRow).join("")}</tbody>
-        </table>`;
-    }
-
-    function renderRankingRow(row) {
-      const model = row.localModel || row.model || {};
-      const releaseInfo = modelReleaseInfo(model);
-      const evidence = row.type === "benchmark"
-        ? `${benchmarkLabel(row.benchmark_id)} ${row.verified ? "verified" : "unverified"}`
-        : `${(row.breakdown || []).length} benchmarks${row.missing_benchmarks && row.missing_benchmarks.length ? `, ${row.missing_benchmarks.length} missing` : ""}`;
-      const scoreLabel = row.type === "benchmark" ? formatNumber(row.raw_value) : formatNumber(row.score);
-      const secondaryLabel = row.type === "benchmark" ? (row.metric || "-") : formatPercent(row.coverage);
-      return `<tr class="${state.activeModelId === model.id ? "selected" : ""}" data-model-id="${escapeAttr(model.id)}">
-        <td><strong>${escapeHtml(row.rank)}</strong></td>
-        <td><div class="model-name">${escapeHtml(model.name || row.model.name || "")}</div><div class="subtle">${escapeHtml(model.id || row.model.id || "")}</div></td>
-        <td>${escapeHtml(model.provider || row.model.provider || "")}</td>
-        <td><span class="subtle">${escapeHtml((model.model_roles || row.model.model_roles || []).join(", "))}</span></td>
-        <td>${scoreBar(scoreLabel, row.type === "benchmark" ? row.normalised : row.score)}</td>
-        <td><span class="subtle">${escapeHtml(secondaryLabel)}</span></td>
-        <td><div class="release-cell" title="${escapeAttr(releaseInfo.title)}"><span class="release-date">${escapeHtml(releaseInfo.label)}</span><span class="release-basis">${escapeHtml(releaseInfo.basisLabel)}</span></div></td>
-        <td><span class="subtle" title="${escapeAttr(evidence)}">${escapeHtml(evidence)}</span></td>
-      </tr>`;
-    }
-
-    function renderRankingEmpty() {
-      if (state.rankings.loadingUseCaseId) return `<div class="empty">Loading ranking evidence...</div>`;
-      return `<div class="empty">No ranked models match the current ranking and filters.</div>`;
-    }
-
-    function scoreBar(label, score) {
-      const width = Math.max(0, Math.min(100, Number(score || 0)));
-      return `<div class="score-bar"><strong>${escapeHtml(label)}</strong><span class="score-track"><span class="score-fill" style="width:${width}%"></span></span></div>`;
-    }
-
-    function rankingRows() {
-      return state.rankings.mode === "benchmark" ? benchmarkRankingRows() : useCaseRankingRows();
-    }
-
-    function useCaseRankingRows() {
-      const useCaseId = state.rankings.useCaseId;
-      const payload = useCaseId ? state.rankings.cache[useCaseId] : null;
-      if (!payload || !Array.isArray(payload.rankings)) return [];
-      const allowedIds = new Set(rankingFilteredModels().flatMap(rankingModelKeys));
-      return payload.rankings
-        .map((row) => {
-          const localModel = modelByRankingId((row.model || {}).id);
-          return { ...row, type: "use_case", localModel: localModel || row.model };
-        })
-        .filter((row) => {
-          const rankingId = (row.model || {}).id;
-          const localModel = row.localModel || {};
-          return localModel && (allowedIds.has(rankingId) || rankingModelKeys(localModel).some((id) => allowedIds.has(id)));
-        });
-    }
-
-    function benchmarkRankingRows() {
-      const benchmark = activeBenchmark();
-      if (!benchmark) return [];
-      const benchmarkId = benchmark.id;
-      const compatibleRoles = benchmarkCompatibleRoles(benchmarkId);
-      const higherIsBetter = benchmarkHigherIsBetter(benchmark);
-      const rows = rankingFilteredModels()
-        .filter((model) => modelMatchesAnyRole(model, compatibleRoles))
-        .map((model) => {
-          const score = (model.scores || {})[benchmarkId];
-          if (!score || score.value === null || score.value === undefined) return null;
-          return {
-            type: "benchmark",
-            rank: 0,
-            model,
-            localModel: model,
-            benchmark_id: benchmarkId,
-            raw_value: Number(score.value),
-            normalised: 0,
-            metric: benchmark.metric || "",
-            source_type: score.source_type || "primary",
-            verified: Boolean(score.verified),
-            notes: score.notes || "",
-            collected_at: score.collected_at || "",
-            source_url: score.source_url || ""
-          };
-        })
-        .filter(Boolean);
-      const values = rows.map((row) => row.raw_value);
-      const min = Math.min(...values);
-      const max = Math.max(...values);
-      rows.forEach((row) => {
-        row.normalised = max === min ? 75 : normaliseRawScore(row.raw_value, min, max, higherIsBetter);
-      });
-      rows.sort((a, b) => {
-        const diff = higherIsBetter ? b.raw_value - a.raw_value : a.raw_value - b.raw_value;
-        return diff || String(a.model.name).localeCompare(String(b.model.name), undefined, { sensitivity: "base" });
-      });
-      rows.forEach((row, index) => {
-        row.rank = index + 1;
-      });
-      return rows;
-    }
-
-    function rankingUseCases() {
-      return (state.catalog.use_cases || []).filter((useCase) => useCase.weights && Object.keys(useCase.weights).length);
-    }
-
-    function activeRankingUseCase() {
-      return rankingUseCases().find((useCase) => useCase.id === state.rankings.useCaseId) || null;
-    }
-
-    function activeBenchmark() {
-      return (state.benchmarks || []).find((benchmark) => benchmark.id === state.rankings.benchmarkId) || null;
-    }
-
-    function benchmarkById(benchmarkId) {
-      return (state.benchmarks || []).find((benchmark) => benchmark.id === benchmarkId) || null;
-    }
-
-    function benchmarkLabel(benchmarkId) {
-      const benchmark = benchmarkById(benchmarkId) || {};
-      return benchmark.short || benchmark.name || benchmarkId || "-";
-    }
-
-    function benchmarkScoreCounts() {
-      const counts = {};
-      (state.catalog.models || []).forEach((model) => {
-        Object.entries(model.scores || {}).forEach(([benchmarkId, score]) => {
-          if (score && score.value !== null && score.value !== undefined) counts[benchmarkId] = (counts[benchmarkId] || 0) + 1;
-        });
-      });
-      return counts;
-    }
-
-    function benchmarkLeaderboardOptions() {
-      const counts = benchmarkScoreCounts();
-      return (state.benchmarks || [])
-        .filter((benchmark) => counts[benchmark.id] > 0)
-        .sort((a, b) => String(a.category || "").localeCompare(String(b.category || "")) || String(a.short || a.name || a.id).localeCompare(String(b.short || b.name || b.id)));
-    }
-
-    function benchmarkCompatibleRoles(benchmarkId) {
-      if (benchmarkId === "mteb_reranking") return ["reranker"];
-      if (benchmarkId === "mteb_retrieval_reranking") return ["embedding", "reranker"];
-      if (benchmarkId === "mteb_retrieval" || benchmarkId === "rteb_finance") return ["embedding"];
-      if (benchmarkId && benchmarkId.startsWith("asr_")) return ["speech_to_text"];
-      if (benchmarkId && benchmarkId.startsWith("aa_tts_")) return ["text_to_speech"];
-      return ["generator"];
-    }
-
-    function rankingFilteredModels() {
-      if (!state.catalog) return [];
-      const q = state.filters.search.toLowerCase();
-      return state.catalog.models.filter((model) => {
-        const haystack = [
-          model.name,
-          model.id,
-          model.provider,
-          model.family_name,
-          model.family_id,
-          ...(model.capabilities || []),
-          ...countryLabelsFor(model),
-          ...hyperscalerValuesFor(model)
-        ].join(" ").toLowerCase();
-        if (q && !haystack.includes(q)) return false;
-        if (state.filters.provider && model.provider !== state.filters.provider) return false;
-        if (state.filters.country && !countryValuesFor(model).includes(state.filters.country)) return false;
-        if (state.filters.hyperscaler && !hyperscalerMatches(model, state.filters.hyperscaler)) return false;
-        if (state.filters.family && model.family_id !== state.filters.family) return false;
-        if (state.filters.catalogStatus && model.catalog_status !== state.filters.catalogStatus) return false;
-        if (state.filters.role && !(model.model_roles || []).includes(state.filters.role)) return false;
-        if (state.filters.capability && !(model.capabilities || []).includes(state.filters.capability)) return false;
-        if (state.filters.smallOnly && !model.small_model_candidate) return false;
-        if (state.filters.generalApproval && generalApprovalStatus(model) !== state.filters.generalApproval) return false;
-        return true;
-      });
-    }
-
-    function modelMatchesAnyRole(model, roles) {
-      if (!roles.length) return true;
-      return (model.model_roles || ["generator"]).some((role) => roles.includes(role));
-    }
-
-    function modelById(modelId) {
-      return (state.catalog.models || []).find((model) => model.id === modelId) || null;
-    }
-
-    function modelByRankingId(modelId) {
-      return (state.catalog.models || []).find((model) => rankingModelKeys(model).includes(modelId)) || null;
-    }
-
-    function rankingModelKeys(model) {
-      return [model.id, model.canonical_model_id, model.family_id]
-        .map((value) => String(value || "").trim())
-        .filter(Boolean);
-    }
-
-    function normaliseRawScore(rawValue, min, max, higherIsBetter) {
-      if (max === min) return 75;
-      const scaled = (rawValue - min) / (max - min) * 100;
-      const score = higherIsBetter ? scaled : 100 - scaled;
-      return Math.max(0, Math.min(100, score));
-    }
-
-    function benchmarkHigherIsBetter(benchmark) {
-      if (!benchmark) return true;
-      return !(benchmark.higher_is_better === false || benchmark.higher_is_better === 0);
-    }
-
-    async function ensureRankingData() {
-      if (state.rankings.mode !== "use_case") return;
-      const useCaseId = state.rankings.useCaseId;
-      if (!useCaseId || state.rankings.cache[useCaseId] || state.rankings.loadingUseCaseId === useCaseId) return;
-      state.rankings.error = "";
-      state.rankings.loadingUseCaseId = useCaseId;
-      renderRankingsView(rankingRows());
-      try {
-        state.rankings.cache[useCaseId] = await request(`/api/rankings?use_case=${encodeURIComponent(useCaseId)}`, { method: "GET" });
-      } finally {
-        state.rankings.loadingUseCaseId = "";
-      }
-      render();
-    }
-
-    function rankingContextLabel() {
-      if (state.rankings.mode === "benchmark") return `Benchmark: ${benchmarkLabel(state.rankings.benchmarkId)}`;
-      const useCase = activeRankingUseCase();
-      return `Ranking: ${(useCase && useCase.label) || state.rankings.useCaseId || "-"}`;
-    }
-
-    function ensureActiveRankingModel(rows) {
-      if (!rows.length) return;
-      if (!state.activeModelId || !rows.some((row) => (row.localModel || row.model || {}).id === state.activeModelId)) {
-        state.activeModelId = (rows[0].localModel || rows[0].model || {}).id || null;
-      }
-    }
-
-    function renderTable(models) {
-      const totalPages = Math.max(1, Math.ceil(models.length / state.pageSize));
-      if (state.page > totalPages) state.page = totalPages;
-      const start = (state.page - 1) * state.pageSize;
-      const pageModels = models.slice(start, start + state.pageSize);
-      els.pageLabel.textContent = `${start + 1}-${Math.min(start + state.pageSize, models.length)} of ${models.length}`;
-      if (!pageModels.length) {
-        els.mainTable.innerHTML = `<div class="empty">No models match the current view.</div>`;
-        return;
-      }
-      els.mainTable.innerHTML = `
-        <table>
-          <colgroup>
-            <col style="width: 34px">
-            <col style="width: 150px">
-            <col style="width: 74px">
-            <col style="width: 84px">
-            <col style="width: 64px">
-            <col style="width: 74px">
-            <col style="width: 68px">
-            <col style="width: 64px">
-            <col style="width: 74px">
-            <col style="width: 54px">
-            <col style="width: 86px">
-          </colgroup>
-          <thead>
-            <tr>
-              <th><input type="checkbox" id="selectPage" ${pageModels.every((model) => state.selected.has(model.id)) ? "checked" : ""}></th>
-              ${header("name", "Model")}
-              ${header("provider", "Provider")}
-              ${header("family_name", "Family")}
-              <th>Roles</th>
-              ${header("catalog_status", "Catalog")}
-              ${header("general_approval", "General")}
-              ${header("manual", "Manual")}
-              ${header("approval", "Use-case")}
-              <th>Controls</th>
-              ${header("release_date", "Release")}
-            </tr>
-          </thead>
-          <tbody>
-            ${pageModels.map(renderRow).join("")}
-          </tbody>
-        </table>`;
-      const selectPage = document.getElementById("selectPage");
-      if (selectPage) {
-        const selectedOnPage = pageModels.filter((model) => state.selected.has(model.id)).length;
-        selectPage.indeterminate = selectedOnPage > 0 && selectedOnPage < pageModels.length;
-      }
-    }
-
-    function header(key, label) {
-      const marker = state.sort.key === key ? (state.sort.direction === "asc" ? " ^" : " v") : "";
-      return `<th class="sortable" data-sort="${key}">${label}${marker}</th>`;
-    }
-
-    function renderRow(model) {
-      const status = statusFor(model);
-      const selected = state.selected.has(model.id);
-      const generalStatus = generalApprovalStatus(model);
-      const releaseInfo = modelReleaseInfo(model);
-      return `<tr class="${selected ? "selected" : ""}" data-model-id="${escapeAttr(model.id)}">
-        <td><input type="checkbox" class="row-select" data-model-id="${escapeAttr(model.id)}" ${selected ? "checked" : ""}></td>
-        <td><div class="model-name">${escapeHtml(model.name)}</div><div class="subtle">${escapeHtml(model.id)}</div></td>
-        <td>${escapeHtml(model.provider || "")}</td>
-        <td><button class="linkish family-link" data-family-id="${escapeAttr(model.family_id || "")}">${escapeHtml(model.family_name || model.family_id || "")}</button></td>
-        <td><span class="subtle">${escapeHtml((model.model_roles || []).join(", "))}</span></td>
-        <td>${compactCatalogBadge(model.catalog_status || "tracked", catalogClass(model.catalog_status))}</td>
-        <td>${badge(generalStatus, generalApprovalClass(model))}</td>
-        <td>${status.manual === "unrated" ? '<span class="subtle">-</span>' : compactBadge(status.manual, recommendationClass(status.manual))}</td>
-        <td>${badge(useCaseApprovalLabel(status.approval), useCaseApprovalClass(status.approval))}</td>
-        <td><span class="${status.controls ? "status-ok" : "subtle"}">${status.controls} / ${status.blockers + status.warnings + status.controls}</span></td>
-        <td><div class="release-cell" title="${escapeAttr(releaseInfo.title)}"><span class="release-date">${escapeHtml(releaseInfo.label)}</span><span class="release-basis">${escapeHtml(releaseInfo.basisLabel)}</span></div></td>
-      </tr>`;
-    }
-
-    function renderFamilies(models) {
-      const visibleIds = new Set(models.map((model) => model.id));
-      const families = state.catalog.families
-        .map((family) => ({ ...family, visible_model_ids: family.model_ids.filter((id) => visibleIds.has(id)) }))
-        .filter((family) => family.visible_model_ids.length);
-      els.pageLabel.textContent = `${families.length} visible families`;
-      els.mainTable.innerHTML = `<div class="family-list">${families.map((family) => `
-        <div class="family-row">
-          <div>
-            <div class="model-name">${escapeHtml(family.family_name)}</div>
-            <div class="subtle">${escapeHtml(family.family_id)}</div>
-          </div>
-          <span>${family.visible_model_ids.length} models</span>
-          <span>${family.needs_decision_count || 0} need decision</span>
-          <span>${family.deprecated_count || 0} deprecated</span>
-          <span>
-            <button class="btn small green family-action" data-family="${escapeAttr(family.family_id)}" data-action="approve_model">Approve models</button>
-            <button class="btn small orange family-action" data-family="${escapeAttr(family.family_id)}" data-action="reject_model">Reject models</button>
-            <button class="btn small green family-action" data-family="${escapeAttr(family.family_id)}" data-action="approve">Use-case ok</button>
-            <button class="btn small orange family-action" data-family="${escapeAttr(family.family_id)}" data-action="not_recommended">Not rec.</button>
-            <button class="btn small purple family-action" data-family="${escapeAttr(family.family_id)}" data-action="restricted">Restricted</button>
-          </span>
-        </div>`).join("") || '<div class="empty">No families match the current view.</div>'}</div>`;
-    }
-
-    function ensureActiveModel(models = filteredModels()) {
-      if (!models.length) {
-        state.activeModelId = null;
-        return;
-      }
-      if (!state.activeModelId || !models.some((model) => model.id === state.activeModelId)) {
-        state.activeModelId = models[0].id;
-      }
-    }
-
-    function activeModel() {
-      return (state.catalog.models || []).find((model) => model.id === state.activeModelId) || null;
-    }
-
-    function renderInspector() {
-      const model = activeModel();
-      els.inspectorTabs.hidden = state.tab === "rankings";
-      renderInspectorTabState();
-      if (!model) {
-        els.inspectorHead.innerHTML = `<h2>No model selected</h2><p class="subtle">Adjust filters to show models.</p>`;
-        els.inspectorBody.innerHTML = "";
-        setInspectorFooter(false, state.tab === "rankings" ? "Select a ranked model to inspect evidence." : "Select a model to review.");
-        return;
-      }
-      const approvals = model.use_case_approvals || {};
-      const activeUseCaseId = normalizeActiveUseCaseId(model, approvals);
-      const activeApproval = approvals[activeUseCaseId] || defaultUseCaseApproval(activeUseCaseId);
-      const activeUseCase = state.catalog.use_cases.find((item) => item.id === activeUseCaseId) || {};
-      const activeUseCaseLabel = activeUseCase.label || activeUseCaseId || "selected use case";
-      const generalStatus = generalApprovalStatus(model);
-      els.inspectorHead.innerHTML = `
-        <h2>${escapeHtml(model.name)}</h2>
-        <div class="subtle">${escapeHtml(model.id)}</div>
-        <div class="meta-row">
-          ${badge(model.provider || "Unknown", "gray")}
-          ${badge(`Family: ${model.family_name || model.family_id || "Unknown"}`, "blue")}
-          ${badge(`Catalog: ${model.catalog_status || "tracked"}`, catalogClass(model.catalog_status))}
-          ${badge(`General: ${labelStatus(generalStatus)}`, generalApprovalClass(model))}
-        </div>
-        <div class="meta-grid">
-          <div><span>Model type</span>${escapeHtml(model.type || "")}</div>
-          <div><span>Roles</span>${escapeHtml((model.model_roles || []).join(", "))}</div>
-          <div><span>Context window</span>${escapeHtml(model.context_window || model.context_window_tokens || "-")}</div>
-          <div><span>Data residency</span>${escapeHtml((model.inference_summary && (model.inference_summary.platform_names || []).join(", ")) || "-")}</div>
-        </div>`;
-      if (state.tab === "rankings") {
-        els.inspectorBody.innerHTML = renderRankingInspector(model);
-        setInspectorFooter(false, "Ranking evidence is read-only. Use review tabs for decisions.");
-        return;
-      }
-      if (state.inspectorTab === "controls") {
-        els.inspectorBody.innerHTML = renderControlsPanel(activeUseCaseId, activeApproval);
-        setInspectorFooter(false, `Viewing controls for ${activeUseCaseLabel}.`);
-      } else if (state.inspectorTab === "activity") {
-        els.inspectorBody.innerHTML = renderActivityPanel(model, activeUseCaseId, activeApproval);
-        setInspectorFooter(false, `Viewing activity for ${activeUseCaseLabel}.`);
-      } else if (state.inspectorTab === "notes") {
-        els.inspectorBody.innerHTML = renderNotesPanel(model, activeUseCaseId, activeApproval);
-        const targetUseCaseIds = decisionUseCaseIdsForModel(model, activeUseCaseId);
-        const targetLabel = targetUseCaseIds.length > 1
-          ? `${targetUseCaseIds.length} matching use cases`
-          : activeUseCaseLabel;
-        setInspectorFooter(true, `Changes apply to ${targetLabel}.`);
-      } else {
-        state.inspectorTab = "usecases";
-        renderInspectorTabState();
-        els.inspectorBody.innerHTML = renderUseCasesPanel(model, approvals, activeUseCaseId);
-        setInspectorFooter(false, `Select a use case, then switch to Notes to edit ${activeUseCaseLabel}.`);
-      }
-    }
-
-    function renderRankingInspector(model) {
-      const row = rankingRows().find((item) => ((item.localModel || item.model || {}).id === model.id));
-      if (!row) return `<div class="empty">This model is not ranked in the current ranking view.</div>`;
-      if (row.type === "benchmark") return renderBenchmarkRankingInspector(row);
-      return renderUseCaseRankingInspector(row);
-    }
-
-    function renderUseCaseRankingInspector(row) {
-      const useCase = activeRankingUseCase() || {};
-      return `
-        <div class="inspector-panel">
-          <h3>${escapeHtml(useCase.label || state.rankings.useCaseId || "Use-case ranking")}</h3>
-          <div class="meta-grid">
-            <div><span>Rank</span>${escapeHtml(row.rank)}</div>
-            <div><span>Weighted score</span>${escapeHtml(formatNumber(row.score))}</div>
-            <div><span>Coverage</span>${escapeHtml(formatPercent(row.coverage))}</div>
-            <div><span>Roles</span>${escapeHtml(((useCase.model_roles || ["generator"]).join(", ")))}</div>
-          </div>
-        </div>
-        <div class="inspector-panel">
-          <h3>Benchmark breakdown</h3>
-          <div class="list-stack">
-            ${(row.breakdown || []).map((item) => renderBreakdownRow(item)).join("") || '<div class="empty">No benchmark evidence for this model in the selected use case.</div>'}
-          </div>
-        </div>
-        <div class="inspector-panel">
-          <h3>Missing evidence</h3>
-          <div class="subtle">${escapeHtml((row.missing_benchmarks || []).map(benchmarkLabel).join(", ") || "None")}</div>
-        </div>`;
-    }
-
-    function renderBenchmarkRankingInspector(row) {
-      const benchmark = benchmarkById(row.benchmark_id) || {};
-      return `
-        <div class="inspector-panel">
-          <h3>${escapeHtml(benchmarkLabel(row.benchmark_id))}</h3>
-          <div class="meta-grid">
-            <div><span>Rank</span>${escapeHtml(row.rank)}</div>
-            <div><span>Raw score</span>${escapeHtml(formatNumber(row.raw_value))}</div>
-            <div><span>Metric</span>${escapeHtml(row.metric || benchmark.metric || "-")}</div>
-            <div><span>Direction</span>${escapeHtml(benchmarkHigherIsBetter(benchmark) ? "Higher is better" : "Lower is better")}</div>
-            <div><span>Source type</span>${escapeHtml(row.source_type || "-")}</div>
-            <div><span>Verified</span>${escapeHtml(row.verified ? "Yes" : "No")}</div>
-          </div>
-        </div>
-        <div class="inspector-panel">
-          <h3>Score notes</h3>
-          <p class="subtle">${escapeHtml(row.notes || benchmark.description || "No notes available.")}</p>
-          <div class="activity-row">
-            <strong>Collected</strong>
-            <span>${escapeHtml(formatDateTime(row.collected_at))}</span>
-            <span class="subtle">${escapeHtml(row.source_url || benchmark.url || "")}</span>
-          </div>
-        </div>`;
-    }
-
-    function renderBreakdownRow(item) {
-      return `<div class="breakdown-row">
-        <div><strong>${escapeHtml(benchmarkLabel(item.benchmark_id))}</strong><div class="subtle">${escapeHtml(item.metric || "")}</div></div>
-        <span>${escapeHtml(formatNumber(item.raw_value))}</span>
-        <span>${escapeHtml(formatNumber(item.normalised))}</span>
-        <span>${escapeHtml(formatPercent(item.weight))}</span>
-      </div>`;
-    }
-
-    function renderInspectorTabState() {
-      els.inspectorTabs.querySelectorAll("[data-inspector-tab]").forEach((button) => {
-        const active = button.dataset.inspectorTab === state.inspectorTab;
-        button.classList.toggle("active", active);
-        button.setAttribute("aria-selected", active ? "true" : "false");
-      });
-    }
-
-    function setInspectorFooter(canSave, statusText) {
-      els.saveDecision.disabled = !canSave;
-      els.saveNext.disabled = !canSave;
-      els.saveStatus.textContent = statusText;
-    }
-
-    function compatibleUseCaseIdsForModel(model) {
-      const modelRoles = model && Array.isArray(model.model_roles) && model.model_roles.length
-        ? model.model_roles
-        : ["generator"];
-      return (state.catalog.use_cases || [])
-        .filter((useCase) => {
-          const useCaseRoles = Array.isArray(useCase.model_roles) && useCase.model_roles.length
-            ? useCase.model_roles
-            : ["generator"];
-          return modelRoles.some((role) => useCaseRoles.includes(role));
-        })
-        .map((useCase) => useCase.id)
-        .filter(Boolean);
-    }
-
-    function preferredUseCaseIdForModel(model, approvals = {}) {
-      const useCaseIds = (state.catalog.use_cases || []).map((item) => item.id).filter(Boolean);
-      if (state.filters.useCase && useCaseIds.includes(state.filters.useCase)) {
-        return state.filters.useCase;
-      }
-      if (shouldTargetMatchingUseCaseFilters()) {
-        const matchingUseCaseId = matchingUseCaseIdForModel(model, {
-          ignoreManual: state.filters.manualRecommendation === "unrated"
-        });
-        if (matchingUseCaseId && useCaseIds.includes(matchingUseCaseId)) return matchingUseCaseId;
-      }
-      const compatibleIds = compatibleUseCaseIdsForModel(model);
-      if (state.activeUseCaseId && compatibleIds.includes(state.activeUseCaseId)) return state.activeUseCaseId;
-      const savedCompatibleId = Object.keys(approvals).find((id) => compatibleIds.includes(id));
-      if (savedCompatibleId) return savedCompatibleId;
-      if (compatibleIds.length) return compatibleIds[0];
-      if (state.activeUseCaseId && useCaseIds.includes(state.activeUseCaseId)) return state.activeUseCaseId;
-      return Object.keys(approvals).find((id) => useCaseIds.includes(id)) || useCaseIds[0] || "";
-    }
-
-    function normalizeActiveUseCaseId(model, approvals) {
-      state.activeUseCaseId = preferredUseCaseIdForModel(model, approvals);
-      return state.activeUseCaseId;
-    }
-
-    function renderUseCasesPanel(model, approvals, activeUseCaseId) {
-      return `
-        ${renderModelApprovalPanel(model)}
-        <div>
-          ${state.catalog.use_cases.map((useCase) => renderUseCaseCard(useCase, approvals[useCase.id] || {}, useCase.id === activeUseCaseId)).join("")}
-        </div>`;
-    }
-
-    function renderControlsPanel(activeUseCaseId, activeApproval) {
-      return `
-        ${renderUseCasePicker(activeUseCaseId)}
-        <div class="control-grid">
-          ${controlCard("Blockers", activeApproval.proposed_recommendation_blockers || [], "red", 99)}
-          ${controlCard("Warnings", activeApproval.proposed_recommendation_warnings || [], "orange", 99)}
-          ${controlCard("Required controls", activeApproval.proposed_recommendation_required_controls || [], "blue", 99)}
-          ${controlCard("Proposal reasons", activeApproval.proposed_recommendation_reasons || [], "gray", 99)}
-        </div>
-        ${renderInferenceRoutes(activeApproval)}`;
-    }
-
-    function renderActivityPanel(model, activeUseCaseId, activeApproval) {
-      const entries = [
-        {
-          title: "General model approval",
-          when: model.general_approval_updated_at,
-          detail: labelStatus(generalApprovalStatus(model))
-        },
-        {
-          title: "Use-case approval",
-          when: activeApproval.approval_updated_at,
-          detail: useCaseApprovalLabel(useCaseApprovalStatus(activeApproval))
-        },
-        {
-          title: "Manual recommendation",
-          when: activeApproval.recommendation_updated_at,
-          detail: labelStatus(activeApproval.recommendation_status || "unrated")
-        },
-        {
-          title: "Recommendation proposal",
-          when: activeApproval.proposed_recommendation_computed_at,
-          detail: labelStatus(activeApproval.proposed_recommendation_status || "unrated")
-        },
-        {
-          title: "Model metadata verified",
-          when: model.metadata_verified_at,
-          detail: model.metadata_source_name || "Catalog metadata"
-        }
-      ].filter((entry) => entry.when || entry.detail);
-      return `
-        ${renderUseCasePicker(activeUseCaseId)}
-        <div class="list-stack">
-          ${entries.map((entry) => `
-            <div class="activity-row">
-              <strong>${escapeHtml(entry.title)}</strong>
-              <span>${escapeHtml(entry.detail || "-")}</span>
-              <span class="subtle">${escapeHtml(formatDateTime(entry.when))}</span>
-            </div>`).join("") || '<div class="empty">No saved activity for this model yet.</div>'}
-        </div>`;
-    }
-
-    function renderNotesPanel(model, activeUseCaseId, activeApproval) {
-      return `
-        ${renderUseCasePicker(activeUseCaseId)}
-        ${renderModelApprovalPanel(model)}
-        <div class="inspector-panel decision-form">
-          <div class="form-grid">
-            <label>Manual rating
-              <select class="select" id="decisionRecommendation">
-                ${["unrated", "recommended", "not_recommended", "discouraged", "restricted"].map((status) => `<option value="${status}" ${status === (activeApproval.recommendation_status || "unrated") ? "selected" : ""}>${labelStatus(status)}</option>`).join("")}
-              </select>
-            </label>
-            <label>Approval
-              <select class="select" id="decisionApproval">
-                <option value="approved" ${activeApproval.approved_for_use ? "selected" : ""}>Approved</option>
-                <option value="not_approved" ${!activeApproval.approved_for_use ? "selected" : ""}>Not approved</option>
-              </select>
-            </label>
-          </div>
-          <label>Decision notes
-            <textarea class="textarea" id="decisionNotes" placeholder="Add notes to explain this decision...">${escapeHtml(activeApproval.recommendation_notes || activeApproval.approval_notes || "")}</textarea>
-          </label>
-        </div>`;
-    }
-
-    function renderModelApprovalPanel(model) {
-      const status = generalApprovalStatus(model);
-      return `
-        <div class="model-approval-panel">
-          <div class="form-grid">
-            <label>General model approval
-              <select class="select" id="modelApproval">
-                <option value="approved" ${status === "approved" ? "selected" : ""}>Approved</option>
-                <option value="not_approved" ${status === "not_approved" ? "selected" : ""}>Not approved</option>
-                <option value="unreviewed" ${status === "unreviewed" ? "selected" : ""}>Unreviewed</option>
-              </select>
-            </label>
-            <label>Last updated
-              <input class="field" value="${escapeAttr(formatDateTime(model.general_approval_updated_at))}" readonly>
-            </label>
-          </div>
-          <label>General approval notes
-            <textarea class="textarea" id="modelApprovalNotes" placeholder="Add model-level approval notes...">${escapeHtml(model.general_approval_notes || "")}</textarea>
-          </label>
-          <button class="btn small" id="saveModelApproval">Save model approval</button>
-        </div>`;
-    }
-
-    function renderUseCasePicker(activeUseCaseId) {
-      return `
-        <div class="inspector-panel">
-          <label>Use case
-            <select class="select" id="inspectorUseCaseSelect">
-              ${state.catalog.use_cases.map((useCase) => `<option value="${escapeAttr(useCase.id)}" ${useCase.id === activeUseCaseId ? "selected" : ""}>${escapeHtml(useCase.label)}</option>`).join("")}
-            </select>
-          </label>
-        </div>`;
-    }
-
-    function renderInferenceRoutes(activeApproval) {
-      const routes = activeApproval.inference_route_approvals || [];
-      if (!routes.length) return "";
-      return `<div class="inspector-panel">
-        <h3>Approved inference routes</h3>
-        <div class="list-stack">
-          ${routes.map((route) => `
-            <div class="activity-row">
-              <strong>${escapeHtml(route.location_label || route.platform_name || route.provider || "Inference route")}</strong>
-              <span>${escapeHtml(route.approved_for_use ? "Approved" : "Not approved")}</span>
-              <span class="subtle">${escapeHtml(route.approval_notes || formatDateTime(route.approval_updated_at))}</span>
-            </div>`).join("")}
-        </div>
-      </div>`;
-    }
-
-    function renderUseCaseCard(useCase, approval, active) {
-      const manualStatus = approval.recommendation_status || "unrated";
-      return `<button class="usecase-card ${active ? "active" : ""}" data-use-case="${escapeAttr(useCase.id)}" style="width:100%; text-align:left">
-        <div class="usecase-card-head">
-          <div>
-            <h3>${escapeHtml(useCase.label)}</h3>
-            <div class="subtle">${escapeHtml((useCase.model_roles || []).join(", "))}</div>
-          </div>
-          ${manualStatus === "unrated" ? "" : compactBadge(manualStatus, recommendationClass(manualStatus))}
-        </div>
-        <div class="meta-row">
-          <span class="subtle">${(approval.proposed_recommendation_blockers || []).length} blockers</span>
-          <span class="subtle">${(approval.proposed_recommendation_warnings || []).length} warnings</span>
-          <span class="linkish">${(approval.proposed_recommendation_required_controls || []).length} required controls</span>
-        </div>
-      </button>`;
-    }
-
-    function controlCard(title, items, tone, limit = 3) {
-      const display = items.length ? items.slice(0, limit) : ["No items"];
-      return `<div class="control-card">
-        <h3>${escapeHtml(title)} ${badge(String(items.length), tone)}</h3>
-        <ul>${display.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-      </div>`;
-    }
-
-    async function saveDecision(nextAfterSave = false) {
-      const model = activeModel();
-      if (!model) return;
-      const activeUseCaseId = normalizeActiveUseCaseId(model, model.use_case_approvals || {});
-      if (!activeUseCaseId) return;
-      const useCaseIds = decisionUseCaseIdsForModel(model, activeUseCaseId);
-      if (!useCaseIds.length) return;
-      const approvalSelect = document.getElementById("decisionApproval");
-      const recommendationSelect = document.getElementById("decisionRecommendation");
-      const notesInput = document.getElementById("decisionNotes");
-      if (!approvalSelect || !recommendationSelect || !notesInput) {
-        state.inspectorTab = "notes";
-        renderInspector();
-        return;
-      }
-      const approved = approvalSelect.value === "approved";
-      const recommendation = recommendationSelect.value;
-      const notes = notesInput.value;
-      await request("/api/review/decisions", {
-        method: "POST",
-        body: JSON.stringify({
-          model_ids: [model.id],
-          use_case_ids: useCaseIds,
-          approved_for_use: approved,
-          recommendation_status: recommendation,
-          approval_notes: notes,
-          recommendation_notes: notes
-        })
-      });
-      toast(useCaseIds.length > 1 ? `Decision saved for ${useCaseIds.length} use cases` : "Decision saved");
-      await loadCatalog();
-      if (nextAfterSave) selectNextModel();
-    }
-
-    function decisionUseCaseIdsForModel(model, activeUseCaseId) {
-      if (state.filters.useCase) return activeUseCaseId ? [activeUseCaseId] : [];
-      if (shouldTargetMatchingUseCaseFilters()) {
-        const matches = matchingUseCaseIdsForModel(model, matchingUseCaseFilterOptions());
-        if (matches.length) return matches;
-      }
-      return activeUseCaseId ? [activeUseCaseId] : [];
-    }
-
-    async function saveModelApproval() {
-      const model = activeModel();
-      if (!model) return;
-      const approvalStatus = document.getElementById("modelApproval").value;
-      const notes = document.getElementById("modelApprovalNotes").value;
-      await request("/api/review/model-approvals", {
-        method: "POST",
-        body: JSON.stringify({
-          model_ids: [model.id],
-          approval_status: approvalStatus,
-          approved_for_use: approvalStatus === "approved",
-          approval_notes: notes
-        })
-      });
-      toast("Model approval saved");
-      await loadCatalog();
-    }
-
-    async function applyModelApproval(action, explicitModelIds = null) {
-      const models = filteredModels();
-      const modelIds = explicitModelIds || (state.selected.size ? Array.from(state.selected) : models.map((model) => model.id));
-      if (!modelIds.length) return toast("No models to update");
-      const approved = action === "approve_model";
-      await request("/api/review/model-approvals", {
-        method: "POST",
-        body: JSON.stringify({
-          model_ids: modelIds,
-          approval_status: approved ? "approved" : "not_approved",
-          approved_for_use: approved
-        })
-      });
-      toast(`Saved ${approved ? "model approved" : "model not approved"} for ${modelIds.length} models`);
-      state.selected.clear();
-      await loadCatalog();
-    }
-
-    async function applyBulk(action, explicitModelIds = null) {
-      const models = filteredModels();
-      const modelIds = explicitModelIds || (state.selected.size ? Array.from(state.selected) : models.map((model) => model.id));
-      if (!modelIds.length) return toast("No models to update");
-      const payloadFields = bulkPayloadFields(action);
-      if (isUseCaseBulkAction(action)) {
-        const targets = bulkUseCaseTargetsForModels(modelIds);
-        if (!targets.length) return toast("No use case to update");
-        for (const target of targets) {
-          await request("/api/review/decisions", {
-            method: "POST",
-            body: JSON.stringify({
-              model_ids: target.modelIds,
-              use_case_ids: [target.useCaseId],
-              ...payloadFields
-            })
-          });
-        }
-      } else {
-        await request("/api/review/decisions", {
-          method: "POST",
-          body: JSON.stringify({ model_ids: modelIds, use_case_ids: [], ...payloadFields })
-        });
-      }
-      toast(`Saved ${bulkActionLabel(action)} for ${modelIds.length} models`);
-      state.selected.clear();
-      await loadCatalog();
-    }
-
-    function bulkPayloadFields(action) {
-      const payload = {};
-      if (action === "approve") payload.approved_for_use = true;
-      if (action === "not_approved") payload.approved_for_use = false;
-      if (action === "recommended") payload.recommendation_status = "recommended";
-      if (action === "not_recommended") payload.recommendation_status = "not_recommended";
-      if (action === "discouraged") payload.recommendation_status = "discouraged";
-      if (action === "restricted") payload.recommendation_status = "restricted";
-      if (action === "clear") payload.recommendation_status = "unrated";
-      if (action === "deprecated") payload.catalog_status = "deprecated";
-      return payload;
-    }
-
-    function isUseCaseBulkAction(action) {
-      return ["approve", "not_approved", "recommended", "not_recommended", "discouraged", "restricted", "clear"].includes(action);
-    }
-
-    function bulkUseCaseTargetsForModels(modelIds) {
-      if (!shouldTargetMatchingUseCaseFilters()) {
-        const useCaseId = bulkUseCaseIdForModels(modelIds);
-        return useCaseId ? [{ useCaseId, modelIds }] : [];
-      }
-      const groups = new Map();
-      modelIds.forEach((modelId) => {
-        const model = modelById(modelId);
-        if (!model) return;
-        const matchingUseCaseIds = matchingUseCaseIdsForModel(model, matchingUseCaseFilterOptions());
-        const useCaseIds = matchingUseCaseIds.length
-          ? matchingUseCaseIds
-          : [preferredUseCaseIdForModel(model, model.use_case_approvals || {})].filter(Boolean);
-        useCaseIds.forEach((useCaseId) => {
-          if (!groups.has(useCaseId)) groups.set(useCaseId, []);
-          groups.get(useCaseId).push(modelId);
-        });
-      });
-      return Array.from(groups, ([useCaseId, ids]) => ({ useCaseId, modelIds: ids }));
-    }
-
-    function shouldTargetMatchingUseCaseFilters() {
-      if (state.filters.useCase || !useCaseScopedFiltersActive()) return false;
-      return Boolean(
-        state.filters.approval ||
-        (state.filters.manualRecommendation && state.filters.manualRecommendation !== "unrated")
-      );
-    }
-
-    function matchingUseCaseFilterOptions() {
-      return {
-        ignoreManual: state.filters.manualRecommendation === "unrated"
-      };
-    }
-
-    function bulkUseCaseIdForModels(modelIds) {
-      const useCaseIds = (state.catalog.use_cases || []).map((item) => item.id).filter(Boolean);
-      if (state.filters.useCase && useCaseIds.includes(state.filters.useCase)) return state.filters.useCase;
-      const models = modelIds.map(modelById).filter(Boolean);
-      if (!models.length) return state.activeUseCaseId || useCaseIds[0] || "";
-      const compatibleSets = models.map((model) => new Set(compatibleUseCaseIdsForModel(model)));
-      const sharedCompatibleIds = useCaseIds.filter((id) => compatibleSets.every((set) => set.has(id)));
-      if (state.activeUseCaseId && sharedCompatibleIds.includes(state.activeUseCaseId)) return state.activeUseCaseId;
-      if (sharedCompatibleIds.length) return sharedCompatibleIds[0];
-      if (models.length === 1) {
-        return preferredUseCaseIdForModel(models[0], models[0].use_case_approvals || {});
-      }
-      return state.activeUseCaseId || useCaseIds[0] || "";
-    }
-
-    function isModelApprovalAction(action) {
-      return action === "approve_model" || action === "reject_model";
-    }
-
-    function bulkActionLabel(action) {
-      return {
-        approve_model: "model approved",
-        reject_model: "model not approved",
-        approve: "approved",
-        not_approved: "not approved",
-        recommended: "recommended",
-        not_recommended: "not recommended",
-        discouraged: "discouraged",
-        restricted: "restricted",
-        deprecated: "deprecated",
-        clear: "clear rating"
-      }[action] || action.replace(/_/g, " ");
-    }
-
-    async function addModel(form) {
-      const body = Object.fromEntries(new FormData(form).entries());
-      if (body.model_roles) body.model_roles = [body.model_roles];
-      if (!body.model_id) delete body.model_id;
-      await request("/api/review/models", { method: "POST", body: JSON.stringify(body) });
-      els.addModelDialog.close();
-      form.reset();
-      toast("Model added");
-      await loadCatalog();
-    }
-
-    async function exportSnapshot() {
-      const snapshot = await request("/api/review/snapshots/export", { method: "POST", body: "{}" });
-      const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `banking-review-snapshot-${new Date().toISOString().slice(0, 10)}.json`;
-      link.click();
-      URL.revokeObjectURL(url);
-      toast("Snapshot exported");
-    }
-
-    function exportCsv() {
-      const scope = els.csvExportScope.value || "filtered";
-      const models = modelsForCsvScope(scope);
-      if (!models.length) return toast(scope === "selected" ? "No selected rows to export" : "No rows to export");
-      const csv = buildModelCsv(models, scope);
-      downloadText(csv, `banking-model-review-${scope}-${new Date().toISOString().slice(0, 10)}.csv`, "text/csv;charset=utf-8");
-      toast(`Exported ${models.length} ${models.length === 1 ? "row" : "rows"}`);
-    }
-
-    function modelsForCsvScope(scope) {
-      if (!state.catalog) return [];
-      if (scope === "all") return state.catalog.models.slice().sort(compareModels);
-      if (scope === "selected") {
-        return state.catalog.models
-          .filter((model) => state.selected.has(model.id))
-          .sort(compareModels);
-      }
-      return filteredModels();
-    }
-
-    function buildModelCsv(models, scope) {
-      const exportedAt = new Date().toISOString();
-      const activeUseCase = useCaseForExport();
-      const columns = [
-        ["export_scope", () => scope],
-        ["exported_at", () => exportedAt],
-        ["review_use_case_id", (model) => approvalForExport(model).use_case_id || activeUseCase.id],
-        ["review_use_case_label", (model) => useCaseLabel(approvalForExport(model).use_case_id) || activeUseCase.label],
-        ["model_id", (model) => model.id],
-        ["model_name", (model) => model.name],
-        ["provider", (model) => model.provider],
-        ["family_id", (model) => model.family_id],
-        ["family_name", (model) => model.family_name],
-        ["catalog_status", (model) => model.catalog_status],
-        ["general_approval_status", (model) => generalApprovalStatus(model)],
-        ["general_approved_for_use", (model) => Boolean(model.general_approved_for_use)],
-        ["general_approval_updated_at", (model) => model.general_approval_updated_at],
-        ["general_approval_notes", (model) => model.general_approval_notes],
-        ["model_roles", (model) => joinList(model.model_roles)],
-        ["model_type_primary", (model) => model.model_type_primary],
-        ["model_type_tags", (model) => joinList(model.model_type_tags)],
-        ["small_model_candidate", (model) => Boolean(model.small_model_candidate)],
-        ["model_size_class", (model) => model.model_size_class],
-        ["parameter_count_b", (model) => model.parameter_count_b],
-        ["active_parameter_count_b", (model) => model.active_parameter_count_b],
-        ["context_window_tokens", (model) => model.context_window_tokens],
-        ["best_release_date", (model) => modelReleaseInfo(model).value],
-        ["best_release_date_basis", (model) => modelReleaseInfo(model).basis],
-        ["best_release_date_confidence", (model) => modelReleaseInfo(model).confidence],
-        ["release_date", (model) => model.release_date],
-        ["release_date_precision", (model) => model.release_date_precision],
-        ["release_date_confidence", (model) => model.release_date_confidence],
-        ["license_id", (model) => model.license_id],
-        ["license_name", (model) => model.license_name],
-        ["provenance_policy_class", (model) => model.provenance_policy_class],
-        ["manual_recommendation", (model) => approvalForExport(model).recommendation_status || "unrated"],
-        ["approved_for_use", (model) => Boolean(approvalForExport(model).approved_for_use)],
-        ["approval_updated_at", (model) => approvalForExport(model).approval_updated_at],
-        ["recommendation_updated_at", (model) => approvalForExport(model).recommendation_updated_at],
-        ["approval_notes", (model) => approvalForExport(model).approval_notes],
-        ["recommendation_notes", (model) => approvalForExport(model).recommendation_notes],
-        ["evidence_context_use_case_id", (model) => evidenceForExport(model).evidence_context_use_case_id],
-        ["evidence_context_use_case_label", (model) => evidenceForExport(model).evidence_context_use_case_label],
-        ["strongest_signal_kind", (model) => evidenceForExport(model).strongest_signal_kind],
-        ["strongest_signal_label", (model) => evidenceForExport(model).strongest_signal_label],
-        ["strongest_signal_value", (model) => evidenceForExport(model).strongest_signal_value],
-        ["strongest_signal_source_url", (model) => evidenceForExport(model).strongest_signal_source_url],
-        ["strongest_signal_notes", (model) => evidenceForExport(model).strongest_signal_notes],
-        ["ranking_rank", (model) => evidenceForExport(model).ranking_rank],
-        ["ranking_score", (model) => evidenceForExport(model).ranking_score],
-        ["ranking_coverage", (model) => evidenceForExport(model).ranking_coverage],
-        ["cost_signal", (model) => evidenceForExport(model).cost_signal],
-        ["speed_signal", (model) => evidenceForExport(model).speed_signal],
-        ["hyperscaler_signal", (model) => evidenceForExport(model).hyperscaler_signal],
-        ["inference_location_signal", (model) => evidenceForExport(model).inference_location_signal],
-        ["inference_destinations", (model) => joinList((model.inference_summary || {}).platform_names)],
-        ["model_card_url", (model) => model.model_card_url],
-        ["documentation_url", (model) => model.documentation_url],
-        ["repo_url", (model) => model.repo_url],
-        ["metadata_source_name", (model) => model.metadata_source_name],
-        ["metadata_verified_at", (model) => model.metadata_verified_at]
-      ];
-      const rows = [columns.map(([header]) => csvCell(header)).join(",")];
-      models.forEach((model) => {
-        rows.push(columns.map(([, valueFor]) => csvCell(valueFor(model))).join(","));
-      });
-      return rows.join("\n") + "\n";
-    }
-
-    function useCaseForExport() {
-      const id = state.filters.useCase || state.activeUseCaseId || "";
-      const useCase = (state.catalog.use_cases || []).find((item) => item.id === id) || {};
-      return state.filters.useCase
-        ? { id, label: useCase.label || "" }
-        : { id: "", label: "All matching use cases" };
-    }
-
-    function evidenceForExport(model) {
-      const useCaseId = state.filters.useCase;
-      const evidenceByUseCase = model.selection_evidence_by_use_case || {};
-      if (useCaseId && evidenceByUseCase[useCaseId]) return evidenceByUseCase[useCaseId];
-      return model;
-    }
-
-    function approvalForExport(model) {
-      if (state.filters.useCase) {
-        return ((model.use_case_approvals || {})[state.filters.useCase]) || {};
-      }
-      return firstApproval(model) || {};
-    }
-
-    function useCaseLabel(useCaseId) {
-      const useCase = (state.catalog.use_cases || []).find((item) => item.id === useCaseId) || {};
-      return useCase.label || useCaseId || "";
-    }
-
-    function joinList(value) {
-      return Array.isArray(value) ? value.filter((item) => item !== null && item !== undefined && item !== "").join("; ") : value;
-    }
-
-    function csvCell(value) {
-      const text = String(value ?? "");
-      return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-    }
-
-    function downloadText(text, filename, type) {
-      const blob = new Blob([text], { type });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      link.click();
-      URL.revokeObjectURL(url);
-    }
-
-    async function importSnapshot(file) {
-      const text = await file.text();
-      const snapshot = JSON.parse(text);
-      const result = await request("/api/review/snapshots/import", { method: "POST", body: JSON.stringify(snapshot) });
-      toast(`Imported ${result.decision_import_count} decisions`);
-      await loadCatalog();
-    }
-
-    function selectNextModel() {
-      const models = filteredModels();
-      const currentIndex = models.findIndex((model) => model.id === state.activeModelId);
-      if (currentIndex >= 0 && models[currentIndex + 1]) {
-        state.activeModelId = models[currentIndex + 1].id;
-      }
-      render();
-    }
-
-    function selectAllFiltered() {
-      const models = filteredModels();
-      state.selected = new Set(models.map((model) => model.id));
-      render();
-      toast(`Selected ${models.length} filtered ${models.length === 1 ? "row" : "rows"}`);
-    }
-
-    function badge(value, tone = "gray") {
-      return `<span class="badge ${tone}">${escapeHtml(labelStatus(value))}</span>`;
-    }
-
-    function compactBadge(value, tone = "gray") {
-      const compact = {
-        recommended: "Rec.",
-        not_recommended: "Not rec.",
-        discouraged: "Disc.",
-        restricted: "Restr.",
-        unrated: "Unrated",
-        mixed: "Mixed"
-      };
-      return `<span class="badge ${tone}">${escapeHtml(compact[value] || labelStatus(value))}</span>`;
-    }
-
-    function compactCatalogBadge(value, tone = "gray") {
-      const compact = {
-        tracked: "Tracked",
-        provisional: "Prov.",
-        deprecated: "Depr."
-      };
-      return `<span class="badge ${tone}">${escapeHtml(compact[value] || labelStatus(value))}</span>`;
-    }
-
-    function labelStatus(value) {
-      return String(value || "unrated")
-        .replace(/_/g, " ")
-        .replace(/\b\w/g, (match) => match.toUpperCase());
-    }
-
-    function recommendationClass(value) {
-      if (value === "recommended") return "green";
-      if (value === "not_recommended") return "orange";
-      if (value === "discouraged") return "red";
-      if (value === "restricted") return "purple";
-      if (value === "mixed") return "blue";
-      return "gray";
-    }
-
-    function catalogClass(value) {
-      if (value === "tracked") return "green";
-      if (value === "provisional") return "blue";
-      if (value === "deprecated") return "red";
-      return "gray";
-    }
-
-    function formatNumber(value) {
-      const number = Number(value);
-      if (!Number.isFinite(number)) return "-";
-      return number.toLocaleString(undefined, { maximumFractionDigits: 2 });
-    }
-
-    function formatPercent(value) {
-      const number = Number(value);
-      if (!Number.isFinite(number)) return "-";
-      return `${Math.round(number * 100)}%`;
-    }
-
-    function formatDateTime(value) {
-      if (!value) return "-";
-      const date = new Date(value);
-      return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
-    }
-
-    function modelReleaseInfo(model) {
-      const candidates = [
-        {
-          basis: "release_date",
-          basisLabel: "Release",
-          value: model.release_date,
-          precision: model.release_date_precision,
-          confidence: model.release_date_confidence || (model.release_date ? "medium" : ""),
-          sourceName: model.release_date_source_name,
-          sourceUrl: model.release_date_source_url,
-          proxy: false
-        },
-        {
-          basis: "huggingface_created_at",
-          basisLabel: "HF created",
-          value: model.huggingface_created_at,
-          precision: "day",
-          confidence: model.model_age_basis === "huggingface_created_at" ? model.model_age_confidence : "low",
-          sourceName: "huggingface",
-          sourceUrl: model.huggingface_repo_id ? `https://huggingface.co/${model.huggingface_repo_id}` : model.model_age_source_url,
-          proxy: true
-        },
-        {
-          basis: "openrouter_added_at",
-          basisLabel: "OR added",
-          value: model.openrouter_added_at,
-          precision: "day",
-          confidence: model.model_age_basis === "openrouter_added_at" ? model.model_age_confidence : "low",
-          sourceName: "openrouter",
-          sourceUrl: model.model_age_basis === "openrouter_added_at" ? model.model_age_source_url : "",
-          proxy: true
-        },
-        {
-          basis: "discovered_at",
-          basisLabel: "Discovered",
-          value: model.discovered_at,
-          precision: "day",
-          confidence: model.model_age_basis === "discovered_at" ? model.model_age_confidence : "low",
-          sourceName: model.model_age_basis === "discovered_at" ? model.model_age_source_name : model.metadata_source_name,
-          sourceUrl: model.model_age_basis === "discovered_at" ? model.model_age_source_url : model.metadata_source_url,
-          proxy: true
-        }
-      ];
-      const candidate = candidates.find((item) => String(item.value || "").trim());
-      if (!candidate) {
-        return {
-          value: "",
-          label: "-",
-          basis: "",
-          basisLabel: "",
-          confidence: "",
-          sortValue: "",
-          title: "No release date or proxy age evidence available"
-        };
-      }
-      const label = formatReleaseDate(candidate.value, candidate.precision);
-      const detail = [`${candidate.basisLabel}: ${label}`];
-      if (candidate.confidence) detail.push(`Confidence: ${candidate.confidence}`);
-      if (candidate.sourceName) detail.push(`Source: ${candidate.sourceName}`);
-      if (candidate.sourceUrl) detail.push(candidate.sourceUrl);
-      if (candidate.proxy) detail.push("Proxy date, not an official release date");
-      return {
-        value: label === "-" ? "" : label,
-        label,
-        basis: candidate.basis,
-        basisLabel: candidate.basisLabel,
-        confidence: candidate.confidence || "",
-        sortValue: releaseSortValue(candidate.value, candidate.precision),
-        title: detail.join(" | ")
-      };
-    }
-
-    function formatReleaseDate(value, precision) {
-      const text = String(value || "").trim();
-      if (!text) return "-";
-      if (precision === "year" && /^\d{4}/.test(text)) return text.slice(0, 4);
-      if (precision === "month" && /^\d{4}-\d{2}/.test(text)) return text.slice(0, 7);
-      if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
-      const date = new Date(text);
-      return Number.isNaN(date.getTime()) ? text : date.toISOString().slice(0, 10);
-    }
-
-    function releaseSortValue(value, precision) {
-      const text = String(value || "").trim();
-      if (!text) return "";
-      if (precision === "year" && /^\d{4}/.test(text)) return `${text.slice(0, 4)}-00-00`;
-      if (precision === "month" && /^\d{4}-\d{2}/.test(text)) return `${text.slice(0, 7)}-00`;
-      if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
-      const date = new Date(text);
-      return Number.isNaN(date.getTime()) ? text : date.toISOString().slice(0, 10);
-    }
-
-    function toast(message) {
-      els.toast.textContent = message;
-      els.toast.classList.add("show");
-      clearTimeout(toast.timer);
-      toast.timer = setTimeout(() => els.toast.classList.remove("show"), 2600);
+      return response.json();
     }
 
     function escapeHtml(value) {
-      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#039;"
-      }[char]));
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
+    }
+    function label(value) { return String(value || "").replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase()); }
+    function formatDate(value) { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString(); }
+    function approvalStatus(model) { return model.general_approval_status || (model.general_approved_for_use ? "approved" : (model.general_approval_updated_at ? "not_approved" : "unreviewed")); }
+    function recommendationStatus(model) { return model.general_recommendation_status || "unrated"; }
+    function badge(status) { return `<span class="badge ${escapeHtml(String(status).replaceAll("_", "-"))}">${escapeHtml(label(status))}</span>`; }
+
+    function filteredModels() {
+      if (!state.catalog) return [];
+      const search = state.filters.search.trim().toLowerCase();
+      return state.catalog.models.filter((model) => {
+        if (search && !`${model.name} ${model.provider} ${model.id}`.toLowerCase().includes(search)) return false;
+        if (state.filters.provider && model.provider !== state.filters.provider) return false;
+        if (state.filters.approval && approvalStatus(model) !== state.filters.approval) return false;
+        if (state.filters.recommendation && recommendationStatus(model) !== state.filters.recommendation) return false;
+        if (state.filters.needsDecision && approvalStatus(model) !== "unreviewed" && recommendationStatus(model) !== "unrated") return false;
+        return true;
+      }).sort((left, right) => {
+        const leftSuggestions = left.suggested_use_cases || [];
+        const rightSuggestions = right.suggested_use_cases || [];
+        const countDelta = rightSuggestions.length - leftSuggestions.length;
+        if (countDelta) return countDelta;
+        const scoreDelta = Number(rightSuggestions[0]?.fit_score || 0) - Number(leftSuggestions[0]?.fit_score || 0);
+        if (scoreDelta) return scoreDelta;
+        return String(left.name || "").localeCompare(String(right.name || ""));
+      });
     }
 
-    function escapeAttr(value) {
-      return escapeHtml(value);
+    function activeModel() { return state.catalog?.models.find((model) => model.id === state.activeModelId) || null; }
+    function setDraft(model) {
+      state.draft = {
+        approval: approvalStatus(model),
+        recommendation: recommendationStatus(model),
+        notes: model.general_recommendation_notes || model.general_approval_notes || ""
+      };
+    }
+    function selectModel(modelId) { state.activeModelId = modelId; state.showAllSuggestions = false; const model = activeModel(); if (model) setDraft(model); render(); }
+
+    function renderQueue() {
+      const models = filteredModels();
+      els.queueCount.textContent = `${models.length} model${models.length === 1 ? "" : "s"}`;
+      if (!models.length) { els.queueList.innerHTML = '<div class="empty">No models match these filters.</div>'; return; }
+      if (!models.some((model) => model.id === state.activeModelId)) {
+        state.activeModelId = models[0].id;
+        setDraft(models[0]);
+      }
+      els.queueList.innerHTML = models.map((model) => `
+        <button class="model-row ${model.id === state.activeModelId ? "active" : ""}" data-model-id="${escapeHtml(model.id)}">
+          <div><div class="model-name">${escapeHtml(model.name)}</div><div class="provider">${escapeHtml(model.provider)}</div></div>
+          <span class="badge">${(model.suggested_use_cases || []).length} fits</span>
+          <div class="row-meta">${badge(approvalStatus(model))}${badge(recommendationStatus(model))}</div>
+        </button>`).join("");
     }
 
-    function bindEvents() {
-      const filterBindings = [
-        [els.search, "search"],
-        [els.providerFilter, "provider"],
-        [els.countryFilter, "country"],
-        [els.hyperscalerFilter, "hyperscaler"],
-        [els.useCaseFilter, "useCase"],
-        [els.generalApprovalFilter, "generalApproval"],
-        [els.manualRecommendationFilter, "manualRecommendation"],
-        [els.approvalFilter, "approval"],
-        [els.familyFilter, "family"],
-        [els.catalogFilter, "catalogStatus"],
-        [els.roleFilter, "role"],
-        [els.capabilityFilter, "capability"]
-      ];
-      filterBindings.forEach(([element, key]) => {
-        element.addEventListener("input", () => {
-          state.filters[key] = element.value;
-          if (key === "useCase" && element.value) state.activeUseCaseId = element.value;
-          state.page = 1;
-          render();
-        });
-      });
-      els.smallOnly.addEventListener("change", () => {
-        state.filters.smallOnly = els.smallOnly.checked;
-        render();
-      });
-      document.getElementById("resetFilters").addEventListener("click", () => {
-        Object.assign(state.filters, {
-          search: "",
-          provider: "",
-          country: "",
-          hyperscaler: "",
-          useCase: "",
-          generalApproval: "",
-          manualRecommendation: "",
-          approval: "",
-          family: "",
-          catalogStatus: "",
-          role: "",
-          capability: "",
-          smallOnly: false
-        });
-        els.search.value = "";
-        els.countryFilter.value = "";
-        els.hyperscalerFilter.value = "";
-        els.generalApprovalFilter.value = "";
-        els.manualRecommendationFilter.value = "";
-        els.approvalFilter.value = "";
-        els.catalogFilter.value = "";
-        els.roleFilter.value = "";
-        els.capabilityFilter.value = "";
-        els.smallOnly.checked = false;
-        populateFilters();
-        render();
-      });
-      els.tabs.addEventListener("click", (event) => {
-        const button = event.target.closest("[data-tab]");
-        if (!button) return;
-        state.tab = button.dataset.tab;
-        state.page = 1;
-        render();
-      });
-      els.inspectorTabs.addEventListener("click", (event) => {
-        const button = event.target.closest("[data-inspector-tab]");
-        if (!button) return;
-        state.inspectorTab = button.dataset.inspectorTab;
-        renderInspector();
-      });
-      els.mainTable.addEventListener("click", (event) => {
-        const rankingMode = event.target.closest("[data-ranking-mode]");
-        if (rankingMode) {
-          state.rankings.mode = rankingMode.dataset.rankingMode;
-          state.rankings.error = "";
-          state.page = 1;
-          render();
-          return;
-        }
-        const refreshRanking = event.target.closest("#refreshRanking");
-        if (refreshRanking) {
-          if (state.rankings.mode === "use_case" && state.rankings.useCaseId) {
-            delete state.rankings.cache[state.rankings.useCaseId];
-          }
-          state.rankings.error = "";
-          render();
-          return;
-        }
-        const sort = event.target.closest("[data-sort]");
-        if (sort) {
-          const key = sort.dataset.sort;
-          if (state.sort.key === key) {
-            state.sort.direction = state.sort.direction === "asc" ? "desc" : "asc";
-          } else {
-            state.sort = { key, direction: "asc" };
-          }
-          return render();
-        }
-        const rowSelect = event.target.closest(".row-select");
-        if (rowSelect) {
-          const modelId = rowSelect.dataset.modelId;
-          rowSelect.checked ? state.selected.add(modelId) : state.selected.delete(modelId);
-          return render();
-        }
-        const selectPage = event.target.closest("#selectPage");
-        if (selectPage) {
-          const models = filteredModels().slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
-          models.forEach((model) => selectPage.checked ? state.selected.add(model.id) : state.selected.delete(model.id));
-          return render();
-        }
-        const familyAction = event.target.closest(".family-action");
-        if (familyAction) {
-          const family = state.catalog.families.find((item) => item.family_id === familyAction.dataset.family);
-          if (family) {
-            const visibleIds = new Set(filteredModels().map((model) => model.id));
-            const modelIds = (family.model_ids || []).filter((modelId) => visibleIds.has(modelId));
-            if (isModelApprovalAction(familyAction.dataset.action)) {
-              applyModelApproval(familyAction.dataset.action, modelIds).catch((error) => toast(error.message));
-            } else {
-              applyBulk(familyAction.dataset.action, modelIds).catch((error) => toast(error.message));
-            }
-          }
-          return;
-        }
-        const row = event.target.closest("tr[data-model-id]");
-        if (row) {
-          state.activeModelId = row.dataset.modelId;
-          render();
-        }
-      });
-      els.mainTable.addEventListener("change", (event) => {
-        const rankingUseCase = event.target.closest("#rankingUseCaseSelect");
-        if (rankingUseCase) {
-          state.rankings.useCaseId = rankingUseCase.value;
-          state.activeUseCaseId = rankingUseCase.value;
-          state.rankings.error = "";
-          state.page = 1;
-          render();
-          return;
-        }
-        const rankingBenchmark = event.target.closest("#rankingBenchmarkSelect");
-        if (rankingBenchmark) {
-          state.rankings.benchmarkId = rankingBenchmark.value;
-          state.rankings.error = "";
-          state.page = 1;
-          render();
-        }
-      });
-      els.inspectorBody.addEventListener("click", (event) => {
-        const saveModelButton = event.target.closest("#saveModelApproval");
-        if (saveModelButton) {
-          saveModelApproval().catch((error) => toast(error.message));
-          return;
-        }
-        const card = event.target.closest("[data-use-case]");
-        if (!card) return;
-        state.activeUseCaseId = card.dataset.useCase;
-        state.filters.useCase = state.activeUseCaseId;
-        els.useCaseFilter.value = state.activeUseCaseId;
-        state.page = 1;
-        render();
-      });
-      els.inspectorBody.addEventListener("change", (event) => {
-        const useCaseSelect = event.target.closest("#inspectorUseCaseSelect");
-        if (!useCaseSelect) return;
-        state.activeUseCaseId = useCaseSelect.value;
-        renderInspector();
-      });
-      document.querySelectorAll("[data-action]").forEach((button) => {
-        button.addEventListener("click", () => {
-          const action = button.dataset.action;
-          const task = isModelApprovalAction(action) ? applyModelApproval(action) : applyBulk(action);
-          task.catch((error) => toast(error.message));
-        });
-      });
-      document.getElementById("selectFiltered").addEventListener("click", selectAllFiltered);
-      els.selectAllFiltered.addEventListener("click", selectAllFiltered);
-      document.getElementById("clearSelection").addEventListener("click", () => {
-        state.selected.clear();
-        render();
-      });
-      document.getElementById("prevPage").addEventListener("click", () => {
-        state.page = Math.max(1, state.page - 1);
-        render();
-      });
-      document.getElementById("nextPage").addEventListener("click", () => {
-        state.page += 1;
-        render();
-      });
-      document.getElementById("syncNow").addEventListener("click", loadCatalog);
-      els.runUpdates.addEventListener("click", () => startUpdateRun().catch(handleUpdatePollingError));
-      els.saveDecision.addEventListener("click", () => saveDecision(false).catch((error) => toast(error.message)));
-      els.saveNext.addEventListener("click", () => saveDecision(true).catch((error) => toast(error.message)));
-      document.getElementById("applyFiltered").addEventListener("click", selectAllFiltered);
-      document.getElementById("addModelButton").addEventListener("click", () => els.addModelDialog.showModal());
-      els.addModelForm.addEventListener("submit", (event) => {
-        if (event.submitter && event.submitter.value === "save") {
-          event.preventDefault();
-          addModel(els.addModelForm).catch((error) => toast(error.message));
-        }
-      });
-      els.saveToken.addEventListener("click", () => {
-        sessionStorage.setItem("llm_benchmarking_admin_token", els.adminToken.value);
-        toast("Admin token saved for this tab");
-      });
-      document.getElementById("exportSnapshot").addEventListener("click", () => exportSnapshot().catch((error) => toast(error.message)));
-      els.exportCsvButton.addEventListener("click", exportCsv);
-      document.getElementById("importSnapshot").addEventListener("click", () => els.snapshotFile.click());
-      els.snapshotFile.addEventListener("change", () => {
-        const file = els.snapshotFile.files[0];
-        if (file) importSnapshot(file).catch((error) => toast(error.message));
-      });
-      document.getElementById("columnsButton").addEventListener("click", () => toast("Core review columns are fixed in this version"));
+    function topMetrics(model) {
+      const benchmarkLookup = Object.fromEntries((state.catalog?.benchmarks || []).map((item) => [item.id, item]));
+      return Object.entries(model.scores || {}).filter(([, score]) => score && score.value !== undefined).slice(0, 4).map(([id, score]) => ({
+        id, name: benchmarkLookup[id]?.short || benchmarkLookup[id]?.name || label(id), value: score.value, verified: score.verified
+      }));
     }
 
-    els.adminToken.value = sessionStorage.getItem("llm_benchmarking_admin_token") || "";
-    bindEvents();
-    loadCatalog().catch((error) => {
-      els.databaseUpdated.textContent = "Database updated: Unavailable";
-      els.lastSynced.textContent = "Last sync: Unavailable";
-      toast(error.message);
+    function formatMetric(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return String(value ?? "—");
+      return Number.isInteger(number) ? String(number) : number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+    }
+
+    function renderSuggestions(model) {
+      const suggestions = model.suggested_use_cases || [];
+      if (!suggestions.length) return '<div class="reason">No positive metric-derived use-case fits are available yet. Run the recommendation sync after refreshing metrics.</div>';
+      const visibleSuggestions = state.showAllSuggestions ? suggestions : suggestions.slice(0, 2);
+      return `<div class="suggestions">${visibleSuggestions.map((item) => `
+        <div class="suggestion">
+          <div><div class="suggestion-title">${escapeHtml(item.label)}</div><div class="provider">${escapeHtml(item.description || "")}</div></div>
+          <div class="suggestion-score">${Number(item.fit_score).toFixed(1)}<small>${item.confidence == null ? "Confidence —" : `${Math.round(Number(item.confidence) * 100)}% confidence`}</small></div>
+          <div class="reason">${escapeHtml((item.reasons || []).slice(0, 1).join(" ") || "Supported by the current weighted metrics.")}<div class="controls">${(item.warnings || []).length} warning${(item.warnings || []).length === 1 ? "" : "s"} · ${(item.required_controls || []).length} control${(item.required_controls || []).length === 1 ? "" : "s"}</div></div>
+        </div>`).join("")}${suggestions.length > 2 ? `<button class="btn ghost" id="toggleSuggestions">${state.showAllSuggestions ? "Show top 2" : `Show all ${suggestions.length}`}</button>` : ""}</div>`;
+    }
+
+    function choiceGroup(name, values, active) {
+      return `<div class="choice-grid">${values.map((value) => `<button class="choice ${value === active ? "active" : ""}" data-choice-group="${name}" data-choice-value="${value}">${escapeHtml(label(value))}</button>`).join("")}</div>`;
+    }
+
+    function renderDetail() {
+      const model = activeModel();
+      if (!model || !state.draft) { els.detail.innerHTML = '<div class="empty">Choose a model to review.</div>'; return; }
+      const metrics = topMetrics(model);
+      els.detail.innerHTML = `
+        <div class="detail-header">
+          <div><p class="eyebrow">General model review</p><h2>${escapeHtml(model.name)}</h2><div class="detail-sub">${escapeHtml(model.provider)} · ${escapeHtml(label(model.type || "model"))}</div></div>
+          <div class="detail-actions">${badge(approvalStatus(model))}${badge(recommendationStatus(model))}</div>
+        </div>
+        <section class="section">
+          <div class="section-head"><div><h3>Performance evidence</h3><p>The strongest currently available benchmark signals for this model.</p></div></div>
+          <div class="metrics">${metrics.length ? metrics.map((metric) => `<div class="metric"><span>${escapeHtml(metric.name)}</span><strong>${escapeHtml(formatMetric(metric.value))}</strong><span>${metric.verified ? "Verified" : "Unverified"}</span></div>`).join("") : '<div class="reason">No benchmark scores available.</div>'}</div>
+        </section>
+        <section class="section">
+          <div class="section-head"><div><h3>Your general decision</h3><p>Make one decision for the model. It applies across the catalog, not to individual use cases.</p></div></div>
+          <div class="decision-grid">
+            <div class="decision-group"><span>Approval</span>${choiceGroup("approval", ["approved", "not_approved", "unreviewed"], state.draft.approval)}</div>
+            <div class="decision-group"><span>Recommendation</span>${choiceGroup("recommendation", ["recommended", "restricted", "discouraged", "not_recommended", "unrated"], state.draft.recommendation)}</div>
+          </div>
+          <label class="rationale">Decision rationale<textarea class="textarea" id="decisionNotes" placeholder="Why is this the right general decision?">${escapeHtml(state.draft.notes)}</textarea></label>
+          <div class="save-row"><span>Last decision: ${escapeHtml(formatDate(model.general_recommendation_updated_at || model.general_approval_updated_at))}</span><div><button class="btn ghost" id="skipModel">Decide later</button> <button class="btn primary" id="saveDecision" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Save and next"}</button></div></div>
+        </section>
+        <section class="section">
+          <div class="section-head"><div><h3>Suggested use cases</h3><p>Read-only metric fits. These are not approvals or recommendations.</p></div><span class="badge">${(model.suggested_use_cases || []).length} suggested</span></div>
+          ${renderSuggestions(model)}
+        </section>
+        <section class="section">
+          <div class="section-head"><div><h3>Model facts</h3><p>Reference details that can affect a general decision.</p></div></div>
+          <div class="details-grid">
+            <div class="detail-item"><span>Release</span><strong>${escapeHtml(model.release_date || "—")}</strong></div>
+            <div class="detail-item"><span>Context window</span><strong>${escapeHtml(model.context_window || model.context_window_tokens || "—")}</strong></div>
+            <div class="detail-item"><span>License</span><strong>${escapeHtml(model.license_name || model.license_id || "—")}</strong></div>
+            <div class="detail-item"><span>Model roles</span><strong>${escapeHtml((model.model_roles || []).map(label).join(", ") || "—")}</strong></div>
+            <div class="detail-item"><span>Inference platforms</span><strong>${escapeHtml((model.inference_summary?.platform_names || []).join(", ") || "—")}</strong></div>
+            <div class="detail-item"><span>Catalog status</span><strong>${escapeHtml(label(model.catalog_status || "tracked"))}</strong></div>
+          </div>
+        </section>`;
+    }
+
+    function render() { renderQueue(); renderDetail(); }
+    function selectNext() {
+      const models = filteredModels();
+      const index = models.findIndex((model) => model.id === state.activeModelId);
+      if (!models.length) return;
+      selectModel(models[(index + 1) % models.length].id);
+    }
+
+    async function saveDecision() {
+      const model = activeModel();
+      if (!model || state.saving) return;
+      const notes = document.getElementById("decisionNotes")?.value || "";
+      state.saving = true; renderDetail();
+      try {
+        await request("/api/review/model-decisions", { method: "POST", body: JSON.stringify({
+          model_ids: [model.id], approval_status: state.draft.approval, approval_notes: notes,
+          recommendation_status: state.draft.recommendation, recommendation_notes: notes
+        }) });
+        toast("General decision saved");
+        await loadCatalog(model.id);
+        selectNext();
+      } catch (error) { toast(error.message, true); }
+      finally { state.saving = false; render(); }
+    }
+
+    async function runUpdates() {
+      if (state.updating) return;
+      state.updating = true; els.runUpdates.disabled = true; els.runUpdates.textContent = "Starting…";
+      try {
+        const started = await request("/api/update", { method: "POST", body: "{}" });
+        els.runUpdates.textContent = "Updating…";
+        let terminal = false;
+        while (!terminal) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const status = await request(`/api/update/status/${started.log_id}`);
+          terminal = ["completed", "failed"].includes(status.status);
+          if (terminal && status.status === "failed") throw new Error(status.errors || "Update failed");
+        }
+        await loadCatalog(); toast("Metrics updated");
+      } catch (error) { toast(error.message, true); }
+      finally { state.updating = false; els.runUpdates.disabled = false; els.runUpdates.textContent = "Run updates"; }
+    }
+
+    async function loadCatalog(preferredModelId = null) {
+      const catalog = await request("/api/review/catalog");
+      state.catalog = catalog;
+      els.databaseUpdated.textContent = `Database updated: ${formatDate(catalog.database_updated_at)}`;
+      els.lastSynced.textContent = `Last sync: ${formatDate(catalog.last_sync_at)}`;
+      const providers = [...new Set(catalog.models.map((model) => model.provider))].sort();
+      els.providerFilter.innerHTML = '<option value="">All providers</option>' + providers.map((provider) => `<option value="${escapeHtml(provider)}">${escapeHtml(provider)}</option>`).join("");
+      els.providerFilter.value = state.filters.provider;
+      const selected = preferredModelId || state.activeModelId;
+      state.activeModelId = catalog.models.some((model) => model.id === selected) ? selected : null;
+      if (!state.activeModelId) state.activeModelId = filteredModels()[0]?.id || null;
+      const model = activeModel(); if (model) setDraft(model);
+      render();
+    }
+
+    let toastTimer;
+    function toast(message, isError = false) {
+      clearTimeout(toastTimer); els.toast.textContent = message; els.toast.classList.toggle("error", isError); els.toast.classList.add("show");
+      toastTimer = setTimeout(() => els.toast.classList.remove("show"), 2800);
+    }
+
+    [
+      [els.search, "search", "input"], [els.providerFilter, "provider", "change"],
+      [els.approvalFilter, "approval", "change"], [els.recommendationFilter, "recommendation", "change"]
+    ].forEach(([element, key, event]) => element.addEventListener(event, () => { state.filters[key] = element.value; render(); }));
+    els.needsDecision.addEventListener("change", () => { state.filters.needsDecision = els.needsDecision.checked; render(); });
+    els.resetFilters.addEventListener("click", () => {
+      state.filters = { search: "", provider: "", approval: "", recommendation: "", needsDecision: false };
+      [els.search, els.providerFilter, els.approvalFilter, els.recommendationFilter].forEach((element) => { element.value = ""; });
+      els.needsDecision.checked = false; render();
     });
+    els.queueList.addEventListener("click", (event) => { const row = event.target.closest("[data-model-id]"); if (row) selectModel(row.dataset.modelId); });
+    els.detail.addEventListener("click", (event) => {
+      const choice = event.target.closest("[data-choice-group]");
+      if (choice) { state.draft[choice.dataset.choiceGroup] = choice.dataset.choiceValue; renderDetail(); return; }
+      if (event.target.closest("#toggleSuggestions")) { state.showAllSuggestions = !state.showAllSuggestions; renderDetail(); return; }
+      if (event.target.closest("#saveDecision")) saveDecision();
+      if (event.target.closest("#skipModel")) selectNext();
+    });
+    els.detail.addEventListener("input", (event) => { if (event.target.id === "decisionNotes" && state.draft) state.draft.notes = event.target.value; });
+    els.openSettings.addEventListener("click", () => { els.adminToken.value = sessionStorage.getItem("llm_benchmarking_admin_token") || ""; els.settingsDialog.showModal(); });
+    els.saveToken.addEventListener("click", () => { sessionStorage.setItem("llm_benchmarking_admin_token", els.adminToken.value); toast("Admin token saved for this tab"); });
+    els.runUpdates.addEventListener("click", runUpdates);
+
+    loadCatalog().catch((error) => { els.detail.innerHTML = `<div class="empty error">${escapeHtml(error.message)}</div>`; });
   </script>
 </body>
 </html>

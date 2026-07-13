@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-068: P1 Replace use-case decisions with general model decisions
+  - Source: Human request 2026-07-14 after trying the use-case approval and recommendation workflow.
+  - Problem: per-use-case approval, recommendation, restriction, filters, and actions obscured the model evidence needed for a straightforward general decision.
+  - Scope: add durable general recommendation fields and a combined model-decision API; expose positive metric proposal results as read-only suggested use cases; replace the review UI with a single guided general-decision flow; retain legacy use-case rows/routes only for audit and compatibility; update snapshots, exports, docs, migration coverage, and browser-visible behavior.
+  - Acceptance: the current review UI writes no use-case decisions; one approval and one recommendation are saved per model; suggested use cases show score/confidence/reasons/controls without approval or recommendation fields; legacy rows are not silently rolled up or deleted.
+  - Validation: migration/API/snapshot/export tests, full backend suite, docs/version checks, inline script parse, and local browser QA.
+  - Completed: 2026-07-14. Human decisions are general model decisions and use cases are read-only metric-derived suggestions.
+
 - [x] LBM-067: P2 Rename the review workbench to LLM Model Tool
   - Source: Human request 2026-07-13 to replace the banking-specific header and subtitle with a simpler product name.
   - Scope: rename the visible browser title, brand badge, heading, current operator documentation, and deployment/runtime labels while preserving banking-specific policy, CLI, and export identifiers.

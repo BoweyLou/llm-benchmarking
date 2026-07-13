@@ -13,6 +13,7 @@ CatalogOutputFormat = Literal["json", "jsonl", "csv", "raw-csv"]
 
 CSV_SIDECAR_SUFFIXES = {
     "scores": "scores",
+    "suggested_use_cases": "suggested-use-cases",
     "use_case_approvals": "use-case-approvals",
     "inference_destinations": "inference-destinations",
     "provider_origin_countries": "provider-origin-countries",
@@ -112,6 +113,9 @@ MODEL_CSV_BASE_FIELDS = [
     "general_approved_for_use",
     "general_approval_notes",
     "general_approval_updated_at",
+    "general_recommendation_status",
+    "general_recommendation_notes",
+    "general_recommendation_updated_at",
     "approved_for_use",
     "approval_use_case_count",
     "approval_notes",
@@ -138,6 +142,8 @@ MODEL_CSV_SUMMARY_FIELDS = [
     "score_count",
     "verified_score_count",
     "benchmark_ids_with_scores",
+    "suggested_use_case_count",
+    "suggested_use_case_ids",
     "use_case_approval_count",
     "approved_use_case_ids",
     "recommended_use_case_ids",
@@ -158,6 +164,7 @@ NESTED_MODEL_FIELDS = {
     "capabilities",
     "provenance_gap_fields",
     "use_case_approvals",
+    "suggested_use_cases",
     "inference_destinations",
     "inference_summary",
     "scores",
@@ -209,6 +216,22 @@ SOURCE_LISTING_CSV_FIELDS = [
     "first_seen_at",
     "last_seen_at",
     "metadata",
+]
+
+SUGGESTED_USE_CASE_CSV_FIELDS = [
+    "model_id",
+    "model_name",
+    "provider",
+    "use_case_id",
+    "label",
+    "description",
+    "fit_score",
+    "confidence",
+    "reasons",
+    "warnings",
+    "required_controls",
+    "policy_version",
+    "computed_at",
 ]
 
 USE_CASE_APPROVAL_CSV_FIELDS = [
@@ -329,6 +352,10 @@ def render_model_metadata_csv_bundle(models: list[dict[str, Any]]) -> dict[str, 
     """Return normalized sidecar CSV files for nested model metadata."""
     return {
         CSV_SIDECAR_SUFFIXES["scores"]: _render_csv_rows(SCORE_CSV_FIELDS, _score_rows(models)),
+        CSV_SIDECAR_SUFFIXES["suggested_use_cases"]: _render_csv_rows(
+            SUGGESTED_USE_CASE_CSV_FIELDS,
+            _suggested_use_case_rows(models),
+        ),
         CSV_SIDECAR_SUFFIXES["use_case_approvals"]: _render_csv_rows(
             USE_CASE_APPROVAL_CSV_FIELDS,
             _use_case_approval_rows(models),
@@ -411,6 +438,7 @@ def _model_summary_columns(model: dict[str, Any]) -> dict[str, Any]:
     inference_summary = model.get("inference_summary") if isinstance(model.get("inference_summary"), dict) else {}
     scores = model.get("scores") if isinstance(model.get("scores"), dict) else {}
     use_case_approvals = model.get("use_case_approvals") if isinstance(model.get("use_case_approvals"), dict) else {}
+    suggested_use_cases = _as_list(model.get("suggested_use_cases"))
     source_freshness = _as_list(model.get("source_freshness"))
 
     populated_scores = {
@@ -448,6 +476,12 @@ def _model_summary_columns(model: dict[str, Any]) -> dict[str, Any]:
         "score_count": len(populated_scores),
         "verified_score_count": sum(1 for score in populated_scores.values() if bool(score.get("verified"))),
         "benchmark_ids_with_scores": _join_values(sorted(populated_scores)),
+        "suggested_use_case_count": len(suggested_use_cases),
+        "suggested_use_case_ids": _join_values(
+            [suggestion.get("use_case_id")
+            for suggestion in suggested_use_cases
+            if isinstance(suggestion, dict)]
+        ),
         "use_case_approval_count": len(use_case_approvals),
         "approved_use_case_ids": _approval_ids(use_case_approvals, "approved_for_use", True),
         "recommended_use_case_ids": _approval_ids(use_case_approvals, "recommendation_status", "recommended"),
@@ -484,6 +518,26 @@ def _score_rows(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 score.get("source_metadata") or {}, sort_keys=True
             )
             rows.append(score_row)
+    return rows
+
+
+def _suggested_use_case_rows(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for model in models:
+        for suggestion in _as_list(model.get("suggested_use_cases")):
+            if not isinstance(suggestion, dict):
+                continue
+            rows.append(
+                {
+                    "model_id": model.get("id"),
+                    "model_name": model.get("name"),
+                    "provider": model.get("provider"),
+                    **suggestion,
+                    "reasons": _join_values(suggestion.get("reasons")),
+                    "warnings": _join_values(suggestion.get("warnings")),
+                    "required_controls": _join_values(suggestion.get("required_controls")),
+                }
+            )
     return rows
 
 

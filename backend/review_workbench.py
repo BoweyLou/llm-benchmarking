@@ -31,7 +31,7 @@ from .database import (
 )
 from .model_evidence import enrich_models_with_selection_evidence
 
-SNAPSHOT_SCHEMA_VERSION = 1
+SNAPSHOT_SCHEMA_VERSION = 2
 
 
 def build_review_catalog() -> dict[str, Any]:
@@ -156,34 +156,77 @@ def apply_model_approvals(
     approval_status: str | None = None,
     approval_notes: str | None = None,
 ) -> dict[str, Any]:
-    """Save model-level general approval without touching use-case decisions."""
+    """Compatibility wrapper for callers that only update general approval."""
+    normalized_status = _normalize_general_approval_status(approval_status, approved_for_use=approved_for_use)
+    return apply_model_decisions(
+        model_ids=model_ids,
+        approval_status=normalized_status,
+        approval_notes=approval_notes,
+    )
+
+
+def apply_model_decisions(
+    *,
+    model_ids: Iterable[str],
+    approval_status: str | None = None,
+    approval_notes: str | None = None,
+    recommendation_status: str | None = None,
+    recommendation_notes: str | None = None,
+) -> dict[str, Any]:
+    """Save general model decisions without creating use-case decision rows."""
     normalized_model_ids = _unique_clean(model_ids)
     if not normalized_model_ids:
         raise ValueError("At least one model id is required.")
     _ensure_models_exist(normalized_model_ids)
 
-    normalized_status = _normalize_general_approval_status(approval_status, approved_for_use=approved_for_use)
-    cleaned_notes = _clean_text(approval_notes)
-    approved_value = 1 if normalized_status == "approved" else 0
-    updated_at = None if normalized_status == "unreviewed" else utc_now_iso()
+    if approval_status is None and recommendation_status is None:
+        raise ValueError("At least one general decision is required.")
+
+    values: dict[str, Any] = {}
+    saved_at = utc_now_iso()
+    normalized_approval_status: str | None = None
+    normalized_recommendation_status: str | None = None
+    if approval_status is not None:
+        normalized_approval_status = _normalize_general_approval_status(
+            approval_status,
+            approved_for_use=str(approval_status).strip().lower() == "approved",
+        )
+        values.update(
+            general_approved_for_use=1 if normalized_approval_status == "approved" else 0,
+            general_approval_notes=None
+            if normalized_approval_status == "unreviewed"
+            else _clean_text(approval_notes),
+            general_approval_updated_at=None
+            if normalized_approval_status == "unreviewed"
+            else saved_at,
+        )
+    if recommendation_status is not None:
+        normalized_recommendation_status = _validate_recommendation_status(recommendation_status)
+        values.update(
+            general_recommendation_status=normalized_recommendation_status,
+            general_recommendation_notes=None
+            if normalized_recommendation_status == "unrated"
+            else _clean_text(recommendation_notes),
+            general_recommendation_updated_at=None
+            if normalized_recommendation_status == "unrated"
+            else saved_at,
+        )
+
     with update_engine.ENGINE.begin() as conn:
         result = conn.execute(
             update(models_table)
             .where(models_table.c.active == 1)
             .where(models_table.c.id.in_(normalized_model_ids))
-            .values(
-                general_approved_for_use=approved_value,
-                general_approval_notes=None if normalized_status == "unreviewed" else cleaned_notes,
-                general_approval_updated_at=updated_at,
-            )
+            .values(**values)
         )
 
     return {
         "model_ids": normalized_model_ids,
         "updated_count": int(result.rowcount or 0),
-        "approved_for_use": normalized_status == "approved",
-        "approval_status": normalized_status,
-        "saved_at": updated_at,
+        "approved_for_use": normalized_approval_status == "approved" if normalized_approval_status else None,
+        "approval_status": normalized_approval_status,
+        "recommendation_status": normalized_recommendation_status,
+        "saved_at": saved_at,
     }
 
 
@@ -239,6 +282,9 @@ def export_review_snapshot() -> dict[str, Any]:
                 models_table.c.general_approved_for_use,
                 models_table.c.general_approval_notes,
                 models_table.c.general_approval_updated_at,
+                models_table.c.general_recommendation_status,
+                models_table.c.general_recommendation_notes,
+                models_table.c.general_recommendation_updated_at,
             )
             .where(models_table.c.active == 1)
             .where(
@@ -246,6 +292,9 @@ def export_review_snapshot() -> dict[str, Any]:
                     models_table.c.general_approved_for_use != 0,
                     models_table.c.general_approval_notes.is_not(None),
                     models_table.c.general_approval_updated_at.is_not(None),
+                    models_table.c.general_recommendation_status != "unrated",
+                    models_table.c.general_recommendation_notes.is_not(None),
+                    models_table.c.general_recommendation_updated_at.is_not(None),
                 )
             )
             .order_by(models_table.c.provider.asc(), models_table.c.name.asc()),
@@ -284,7 +333,7 @@ def export_review_snapshot() -> dict[str, Any]:
 def import_review_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Import a review snapshot into the current SQLite database."""
     update_engine.bootstrap()
-    if int(snapshot.get("schema_version") or 0) != SNAPSHOT_SCHEMA_VERSION:
+    if int(snapshot.get("schema_version") or 0) not in {1, SNAPSHOT_SCHEMA_VERSION}:
         raise ValueError(f"Unsupported review snapshot schema version: {snapshot.get('schema_version')}")
 
     created_manual_models = 0
@@ -364,9 +413,13 @@ def _build_facets(
     role_counts: dict[str, int] = {}
     capability_counts: dict[str, int] = {}
     general_approval_counts = {"approved": 0, "not_approved": 0, "unreviewed": 0}
+    general_recommendation_counts = {status: 0 for status in VALID_RECOMMENDATION_STATUSES}
     approval_counts = {"approved": 0, "not_approved": 0}
     for model in models:
         general_approval_counts[_general_approval_status(model)] += 1
+        general_recommendation_counts[
+            _validate_recommendation_status(str(model.get("general_recommendation_status") or "unrated"))
+        ] += 1
         for country in _model_country_entries(model):
             country_id = country["id"]
             country_counts[country_id] = country_counts.get(country_id, 0) + 1
@@ -423,6 +476,7 @@ def _build_facets(
         "model_roles": _counts_to_list(role_counts),
         "capabilities": _counts_to_list(capability_counts),
         "general_approvals": _counts_to_list(general_approval_counts),
+        "general_recommendations": _counts_to_list(general_recommendation_counts),
         "approvals": _counts_to_list(approval_counts),
     }
 
@@ -469,17 +523,10 @@ def _model_hyperscaler_entries(model: dict[str, Any]) -> list[str]:
 
 
 def _model_needs_decision(model: dict[str, Any]) -> bool:
-    approvals = model.get("use_case_approvals")
-    if not isinstance(approvals, dict):
-        return False
-    for approval in approvals.values():
-        if not isinstance(approval, dict):
-            continue
-        manual_status = str(approval.get("recommendation_status") or "unrated")
-        proposed_status = str(approval.get("proposed_recommendation_status") or "unrated")
-        if manual_status == "unrated" and proposed_status != "unrated":
-            return True
-    return False
+    return (
+        _general_approval_status(model) == "unreviewed"
+        or str(model.get("general_recommendation_status") or "unrated") == "unrated"
+    )
 
 
 def _set_catalog_status(model_ids: list[str], catalog_status: str, notes: str | None = None) -> int:
@@ -547,6 +594,13 @@ def _import_model_approvals(rows: Iterable[Any]) -> int:
                     general_approval_updated_at=None
                     if approval_status == "unreviewed"
                     else (_clean_text(row.get("general_approval_updated_at")) or utc_now_iso()),
+                    general_recommendation_status=_validate_recommendation_status(
+                        _clean_text(row.get("general_recommendation_status")) or "unrated"
+                    ),
+                    general_recommendation_notes=_clean_text(row.get("general_recommendation_notes")),
+                    general_recommendation_updated_at=_clean_text(
+                        row.get("general_recommendation_updated_at")
+                    ),
                 )
             )
             updated += int(result.rowcount or 0)

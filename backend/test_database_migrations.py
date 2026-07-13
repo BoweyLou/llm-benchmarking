@@ -37,6 +37,9 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("general_approved_for_use", model_columns)
         self.assertIn("general_approval_notes", model_columns)
         self.assertIn("general_approval_updated_at", model_columns)
+        self.assertIn("general_recommendation_status", model_columns)
+        self.assertIn("general_recommendation_notes", model_columns)
+        self.assertIn("general_recommendation_updated_at", model_columns)
         self.assertIn("change_summary_json", update_log_columns)
         self.assertIsNotNone(latest_scores_view)
 
@@ -76,6 +79,9 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("general_approved_for_use", model_columns)
         self.assertIn("general_approval_notes", model_columns)
         self.assertIn("general_approval_updated_at", model_columns)
+        self.assertIn("general_recommendation_status", model_columns)
+        self.assertIn("general_recommendation_notes", model_columns)
+        self.assertIn("general_recommendation_updated_at", model_columns)
         self.assertIn("resolution_status", raw_record_columns)
         self.assertIn("recommendation_status", approval_columns)
         self.assertIn("model_use_case_recommendation_proposals", table_names)
@@ -105,6 +111,7 @@ class DatabaseMigrationTests(unittest.TestCase):
         )
         self.assertIn("20260708_001_update_change_summary", migration_ids)
         self.assertIn("20260713_001_score_evidence", migration_ids)
+        self.assertIn("20260714_001_general_model_recommendations", migration_ids)
 
     def test_speech_to_text_role_migration_backfills_transcription_capabilities(self) -> None:
         engine = init_db(get_engine("sqlite:///:memory:"))
