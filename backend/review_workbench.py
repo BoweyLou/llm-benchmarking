@@ -331,7 +331,6 @@ def _build_facets(
     no_hyperscaler_model_count = 0
     role_counts: dict[str, int] = {}
     capability_counts: dict[str, int] = {}
-    recommendation_counts: dict[str, int] = {}
     general_approval_counts = {"approved": 0, "not_approved": 0, "unreviewed": 0}
     approval_counts = {"approved": 0, "not_approved": 0}
     for model in models:
@@ -359,8 +358,6 @@ def _build_facets(
         for approval in approvals.values():
             if not isinstance(approval, dict):
                 continue
-            status = str(approval.get("effective_recommendation_status") or "unrated")
-            recommendation_counts[status] = recommendation_counts.get(status, 0) + 1
             if approval.get("approved_for_use"):
                 approval_counts["approved"] += 1
             else:
@@ -394,7 +391,6 @@ def _build_facets(
         "model_roles": _counts_to_list(role_counts),
         "capabilities": _counts_to_list(capability_counts),
         "general_approvals": _counts_to_list(general_approval_counts),
-        "recommendations": _counts_to_list(recommendation_counts),
         "approvals": _counts_to_list(approval_counts),
     }
 

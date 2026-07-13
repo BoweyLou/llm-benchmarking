@@ -112,6 +112,62 @@ class RecommendationEngineTests(unittest.TestCase):
         self.assertEqual(approval["effective_recommendation_status"], "recommended")
         self.assertTrue(approval["proposed_recommendation_blockers"])
 
+    def test_duplicate_merge_preserves_recommendation_proposal_references(self) -> None:
+        self._insert_bank_model("bank-canonical")
+        self._insert_bank_model("bank-duplicate")
+        with self.engine.begin() as conn:
+            conn.execute(
+                recommendation_proposals_table.insert(),
+                [
+                    {
+                        "profile_id": "australian_bank",
+                        "model_id": "bank-canonical",
+                        "use_case_id": "customer_support",
+                        "proposed_status": "recommended",
+                        "policy_version": "test",
+                        "computed_at": "2026-07-01T00:00:00Z",
+                    },
+                    {
+                        "profile_id": "australian_bank",
+                        "model_id": "bank-duplicate",
+                        "use_case_id": "customer_support",
+                        "proposed_status": "restricted",
+                        "policy_version": "test",
+                        "computed_at": "2026-07-01T00:00:00Z",
+                    },
+                    {
+                        "profile_id": "australian_bank",
+                        "model_id": "bank-duplicate",
+                        "use_case_id": "general_reasoning",
+                        "proposed_status": "not_recommended",
+                        "policy_version": "test",
+                        "computed_at": "2026-07-01T00:00:00Z",
+                    },
+                ],
+            )
+            merged = update_engine._merge_model_into_target(conn, "bank-duplicate", "bank-canonical")
+
+        self.assertTrue(merged)
+        with self.engine.begin() as conn:
+            duplicate_model = conn.execute(
+                models_table.select().where(models_table.c.id == "bank-duplicate")
+            ).mappings().one_or_none()
+            rows = conn.execute(
+                recommendation_proposals_table.select().where(
+                    recommendation_proposals_table.c.model_id.in_(["bank-canonical", "bank-duplicate"])
+                )
+            ).mappings().all()
+
+        self.assertIsNone(duplicate_model)
+        proposal_statuses = {
+            (row["model_id"], row["use_case_id"]): row["proposed_status"]
+            for row in rows
+        }
+        self.assertNotIn(("bank-duplicate", "customer_support"), proposal_statuses)
+        self.assertNotIn(("bank-duplicate", "general_reasoning"), proposal_statuses)
+        self.assertEqual(proposal_statuses[("bank-canonical", "customer_support")], "recommended")
+        self.assertEqual(proposal_statuses[("bank-canonical", "general_reasoning")], "not_recommended")
+
     def test_sync_recommends_when_sensitive_controls_are_present(self) -> None:
         self._insert_bank_model(
             "bank-ready",

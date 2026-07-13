@@ -4716,6 +4716,28 @@ def _merge_duplicate_use_case_approvals(conn, duplicate_id: str, canonical_id: s
     )
 
 
+def _merge_duplicate_recommendation_proposals(conn, duplicate_id: str, canonical_id: str) -> None:
+    duplicate_rows = fetch_all(
+        conn,
+        select(model_use_case_recommendation_proposals_table).where(
+            model_use_case_recommendation_proposals_table.c.model_id == duplicate_id
+        ),
+    )
+    if not duplicate_rows:
+        return
+
+    stmt = sqlite_insert(model_use_case_recommendation_proposals_table).values(
+        [{**row, "model_id": canonical_id} for row in duplicate_rows]
+    )
+    stmt = stmt.on_conflict_do_nothing(index_elements=["profile_id", "model_id", "use_case_id"])
+    conn.execute(stmt)
+    conn.execute(
+        delete(model_use_case_recommendation_proposals_table).where(
+            model_use_case_recommendation_proposals_table.c.model_id == duplicate_id
+        )
+    )
+
+
 def _merge_duplicate_inference_destinations(conn, duplicate_id: str, canonical_id: str) -> None:
     duplicate_rows = fetch_all(
         conn,
@@ -4786,6 +4808,7 @@ def _merge_model_into_target(conn, duplicate_id: str, canonical_id: str) -> bool
         .values(model_id=normalized_canonical_id)
     )
     _merge_duplicate_use_case_approvals(conn, normalized_duplicate_id, normalized_canonical_id)
+    _merge_duplicate_recommendation_proposals(conn, normalized_duplicate_id, normalized_canonical_id)
     _merge_duplicate_inference_destinations(conn, normalized_duplicate_id, normalized_canonical_id)
     _merge_duplicate_inference_route_approvals(conn, normalized_duplicate_id, normalized_canonical_id)
     _merge_duplicate_market_snapshots(conn, normalized_duplicate_id, normalized_canonical_id)

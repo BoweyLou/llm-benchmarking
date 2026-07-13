@@ -103,7 +103,6 @@ Each use-case approval can then carry:
 - `recommendation_status`: manual human rating.
 - `auto_recommendation_status`: existing automatic hard blockers from license/provenance overlays.
 - `proposed_recommendation_status`: generated profile proposal.
-- `effective_recommendation_status`: manual rating when present, otherwise automatic hard blocker, otherwise proposal.
 - proposal blockers, warnings, reasons, required controls, score, confidence, policy version, and computed timestamp.
 
 Use manual `restricted` when a model is suitable only for a defined group, for
@@ -114,8 +113,8 @@ team members. Store the audience or access condition in recommendation notes.
 
 For interactive banking review, run the FastAPI app locally and open
 `/review`. The workbench shows the model catalog with provider, provider-origin
-country, use-case, general-approval, effective-recommendation,
-manual-recommendation, use-case approval, family, catalog-status, model-role,
+country, use-case, general-approval, manual-recommendation, use-case approval,
+family, catalog-status, model-role,
 small-model, and hyperscaler-availability filters; a sortable model table; family and needs-decision
 views; and a detail inspector for model approval plus per-use-case approval
 notes, manual ratings, generated blockers, warnings, and required controls.
@@ -170,14 +169,10 @@ Saved decisions write to SQLite:
 
 Use-case recommendations are reviewed through the active use case. Switch to
 `Use-case review`, choose a use case in the left filter or right inspector, then
-read the table columns as:
-
-- `Proposed`: generated banking-profile recommendation.
-- `Manual`: the reviewer override saved in SQLite.
-- `Effective`: the value used by review/export surfaces. Manual wins when set,
-  otherwise hard blockers win, otherwise the generated proposal is used.
-- `Approval`: the separate approved/not-approved decision for that model and use
-  case.
+use the model table for reviewer-saved `Manual` ratings and separate `Use-case`
+approval status. Generated banking-profile proposals stay in the per-use-case
+inspector controls and the use-case approval export rather than being summarized
+as model-level recommendation columns.
 
 General model approval is reviewed separately in the top panel of the right
 inspector. Use `Approve model` or `Reject model` for model-level decisions, or
@@ -202,9 +197,8 @@ details. Ranking evidence is read-only; use the review tabs for approval and
 recommendation decisions.
 Use `Restricted` for limited-audience access decisions and record who may use
 the model in the recommendation notes.
-Use `Effective recommendation` to filter the final status shown in exports and
-use `Manual recommendation` to filter only reviewer-saved overrides, including
-rows where the manual rating has been cleared to `Unrated`.
+Use `Manual recommendation` to filter only reviewer-saved ratings, including rows
+where the manual rating has been cleared to `Unrated`.
 When `Use case` is left blank, `Manual recommendation = Unrated` finds models
 with no saved manual recommendation in any use case. Combine it with
 `General approval = Approved` for first-cut triage of approved models that still

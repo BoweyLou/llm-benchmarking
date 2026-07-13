@@ -1202,17 +1202,6 @@
             </select>
           </div>
           <div class="filter-group">
-            <label for="recommendationFilter">Effective recommendation</label>
-            <select id="recommendationFilter" class="select">
-              <option value="">All effective recommendations</option>
-              <option value="recommended">Recommended</option>
-              <option value="not_recommended">Not recommended</option>
-              <option value="discouraged">Discouraged</option>
-              <option value="restricted">Restricted</option>
-              <option value="unrated">Unrated</option>
-            </select>
-          </div>
-          <div class="filter-group">
             <label for="manualRecommendationFilter">Manual recommendation</label>
             <select id="manualRecommendationFilter" class="select">
               <option value="">All manual ratings</option>
@@ -1395,7 +1384,6 @@
         hyperscaler: "",
         useCase: "",
         generalApproval: "",
-        recommendation: "",
         manualRecommendation: "",
         approval: "",
         family: "",
@@ -1444,7 +1432,6 @@
       hyperscalerFilter: document.getElementById("hyperscalerFilter"),
       useCaseFilter: document.getElementById("useCaseFilter"),
       generalApprovalFilter: document.getElementById("generalApprovalFilter"),
-      recommendationFilter: document.getElementById("recommendationFilter"),
       manualRecommendationFilter: document.getElementById("manualRecommendationFilter"),
       approvalFilter: document.getElementById("approvalFilter"),
       familyFilter: document.getElementById("familyFilter"),
@@ -1735,7 +1722,7 @@
         } else if (useCaseScopedFiltersActive()) {
           if (state.filters.manualRecommendation === "unrated") {
             if (hasSavedManualRecommendation(model)) return false;
-            if ((state.filters.recommendation || state.filters.approval) && !matchingUseCaseApproval(model, { ignoreManual: true })) return false;
+            if (state.filters.approval && !matchingUseCaseApproval(model, { ignoreManual: true })) return false;
           } else if (!matchingUseCaseApproval(model)) {
             return false;
           }
@@ -1755,10 +1742,8 @@
     }
 
     function valueForSort(model, key) {
-      if (key === "effective") return statusFor(model).effective;
       if (key === "manual") return statusFor(model).manual;
-      if (key === "proposed") return statusFor(model).proposed;
-      if (key === "approval") return statusFor(model).approved ? "approved" : "not";
+      if (key === "approval") return statusFor(model).approval;
       if (key === "general_approval") return generalApprovalStatus(model);
       if (key === "release_date") return modelReleaseInfo(model).sortValue;
       return model[key] || "";
@@ -1787,7 +1772,7 @@
     }
 
     function useCaseScopedFiltersActive() {
-      return Boolean(state.filters.recommendation || state.filters.manualRecommendation || state.filters.approval);
+      return Boolean(state.filters.manualRecommendation || state.filters.approval);
     }
 
     function hasSavedManualRecommendation(model) {
@@ -1797,24 +1782,43 @@
     }
 
     function matchingUseCaseApproval(model, options = {}) {
-      return useCaseApprovalValues(model).find((approval) => {
-        return approvalMatchesUseCaseFilters(approval, options);
-      }) || null;
+      const match = matchingUseCaseEntry(model, options);
+      return match ? match.approval : null;
+    }
+
+    function matchingUseCaseIdForModel(model, options = {}) {
+      const match = matchingUseCaseEntry(model, options);
+      return match ? match.useCaseId : "";
+    }
+
+    function matchingUseCaseIdsForModel(model, options = {}) {
+      return matchingUseCaseEntries(model, options).map((entry) => entry.useCaseId);
+    }
+
+    function matchingUseCaseEntry(model, options = {}) {
+      return matchingUseCaseEntries(model, options)[0] || null;
+    }
+
+    function matchingUseCaseEntries(model, options = {}) {
+      const approvals = model.use_case_approvals || {};
+      const matches = [];
+      for (const [useCaseId, approval] of Object.entries(approvals)) {
+        if (!approval || typeof approval !== "object") continue;
+        if (approvalMatchesUseCaseFilters(approval, options)) {
+          matches.push({ useCaseId: approval.use_case_id || useCaseId, approval });
+        }
+      }
+      return matches;
     }
 
     function approvalMatchesUseCaseFilters(approval, options = {}) {
       if (!approval || typeof approval !== "object") return false;
-      if (state.filters.recommendation) {
-        const status = approval.effective_recommendation_status || "unrated";
-        if (status !== state.filters.recommendation) return false;
-      }
       if (!options.ignoreManual && state.filters.manualRecommendation) {
         const manualStatus = approval.recommendation_status || "unrated";
         if (manualStatus !== state.filters.manualRecommendation) return false;
       }
       if (state.filters.approval) {
-        const approved = approval.approved_for_use ? "approved" : "not_approved";
-        if (approved !== state.filters.approval) return false;
+        if (useCaseApprovalStatus(approval) !== state.filters.approval) return false;
       }
       return true;
     }
@@ -1864,15 +1868,27 @@
 
     function statusFor(model) {
       const approval = firstApproval(model) || {};
+      const approvalStatus = useCaseApprovalStatus(approval);
       return {
-        proposed: approval.proposed_recommendation_status || "unrated",
         manual: approval.recommendation_status || "unrated",
-        effective: approval.effective_recommendation_status || "unrated",
-        approved: Boolean(approval.approved_for_use),
+        approval: approvalStatus,
         controls: (approval.proposed_recommendation_required_controls || []).length,
         blockers: (approval.proposed_recommendation_blockers || []).length,
         warnings: (approval.proposed_recommendation_warnings || []).length
       };
+    }
+
+    function useCaseApprovalStatus(approval) {
+      if (!approval || typeof approval !== "object") return "pending";
+      if (approval.approved_for_use) return "approved";
+      if (approval.approval_updated_at || approval.approval_notes) return "not_approved";
+      return "pending";
+    }
+
+    function useCaseApprovalClass(status) {
+      if (status === "approved") return "green";
+      if (status === "not_approved") return "red";
+      return "orange";
     }
 
     function modelNeedsDecision(model) {
@@ -2298,9 +2314,7 @@
             <col style="width: 64px">
             <col style="width: 74px">
             <col style="width: 68px">
-            <col style="width: 84px">
             <col style="width: 64px">
-            <col style="width: 76px">
             <col style="width: 74px">
             <col style="width: 54px">
             <col style="width: 86px">
@@ -2314,9 +2328,7 @@
               <th>Roles</th>
               ${header("catalog_status", "Catalog")}
               ${header("general_approval", "General")}
-              ${header("proposed", "Proposed")}
               ${header("manual", "Manual")}
-              ${header("effective", "Effective")}
               ${header("approval", "Use-case")}
               <th>Controls</th>
               ${header("release_date", "Release")}
@@ -2351,10 +2363,8 @@
         <td><span class="subtle">${escapeHtml((model.model_roles || []).join(", "))}</span></td>
         <td>${compactCatalogBadge(model.catalog_status || "tracked", catalogClass(model.catalog_status))}</td>
         <td>${badge(generalStatus, generalApprovalClass(model))}</td>
-        <td>${compactBadge(status.proposed, recommendationClass(status.proposed))}</td>
         <td>${status.manual === "unrated" ? '<span class="subtle">-</span>' : compactBadge(status.manual, recommendationClass(status.manual))}</td>
-        <td>${compactBadge(status.effective, recommendationClass(status.effective))}</td>
-        <td>${badge(status.approved ? "Approved" : "Pending", status.approved ? "green" : "orange")}</td>
+        <td>${badge(labelStatus(status.approval), useCaseApprovalClass(status.approval))}</td>
         <td><span class="${status.controls ? "status-ok" : "subtle"}">${status.controls} / ${status.blockers + status.warnings + status.controls}</span></td>
         <td><div class="release-cell" title="${escapeAttr(releaseInfo.title)}"><span class="release-date">${escapeHtml(releaseInfo.label)}</span><span class="release-basis">${escapeHtml(releaseInfo.basisLabel)}</span></div></td>
       </tr>`;
@@ -2443,7 +2453,11 @@
         setInspectorFooter(false, `Viewing activity for ${activeUseCaseLabel}.`);
       } else if (state.inspectorTab === "notes") {
         els.inspectorBody.innerHTML = renderNotesPanel(model, activeUseCaseId, activeApproval);
-        setInspectorFooter(true, `Changes apply to ${activeUseCaseLabel}.`);
+        const targetUseCaseIds = decisionUseCaseIdsForModel(model, activeUseCaseId);
+        const targetLabel = targetUseCaseIds.length > 1
+          ? `${targetUseCaseIds.length} matching use cases`
+          : activeUseCaseLabel;
+        setInspectorFooter(true, `Changes apply to ${targetLabel}.`);
       } else {
         state.inspectorTab = "usecases";
         renderInspectorTabState();
@@ -2551,6 +2565,12 @@
       if (state.filters.useCase && useCaseIds.includes(state.filters.useCase)) {
         return state.filters.useCase;
       }
+      if (shouldTargetMatchingUseCaseFilters()) {
+        const matchingUseCaseId = matchingUseCaseIdForModel(model, {
+          ignoreManual: state.filters.manualRecommendation === "unrated"
+        });
+        if (matchingUseCaseId && useCaseIds.includes(matchingUseCaseId)) return matchingUseCaseId;
+      }
       const compatibleIds = compatibleUseCaseIdsForModel(model);
       if (state.activeUseCaseId && compatibleIds.includes(state.activeUseCaseId)) return state.activeUseCaseId;
       const savedCompatibleId = Object.keys(approvals).find((id) => compatibleIds.includes(id));
@@ -2595,7 +2615,7 @@
         {
           title: "Use-case approval",
           when: activeApproval.approval_updated_at,
-          detail: activeApproval.approved_for_use ? "Approved" : "Not approved"
+          detail: labelStatus(useCaseApprovalStatus(activeApproval))
         },
         {
           title: "Manual recommendation",
@@ -2700,14 +2720,14 @@
     }
 
     function renderUseCaseCard(useCase, approval, active) {
-      const status = approval.effective_recommendation_status || "unrated";
+      const manualStatus = approval.recommendation_status || "unrated";
       return `<button class="usecase-card ${active ? "active" : ""}" data-use-case="${escapeAttr(useCase.id)}" style="width:100%; text-align:left">
         <div class="usecase-card-head">
           <div>
             <h3>${escapeHtml(useCase.label)}</h3>
             <div class="subtle">${escapeHtml((useCase.model_roles || []).join(", "))}</div>
           </div>
-          ${badge(status, recommendationClass(status))}
+          ${manualStatus === "unrated" ? "" : compactBadge(manualStatus, recommendationClass(manualStatus))}
         </div>
         <div class="meta-row">
           <span class="subtle">${(approval.proposed_recommendation_blockers || []).length} blockers</span>
@@ -2730,6 +2750,8 @@
       if (!model) return;
       const activeUseCaseId = normalizeActiveUseCaseId(model, model.use_case_approvals || {});
       if (!activeUseCaseId) return;
+      const useCaseIds = decisionUseCaseIdsForModel(model, activeUseCaseId);
+      if (!useCaseIds.length) return;
       const approvalSelect = document.getElementById("decisionApproval");
       const recommendationSelect = document.getElementById("decisionRecommendation");
       const notesInput = document.getElementById("decisionNotes");
@@ -2745,16 +2767,25 @@
         method: "POST",
         body: JSON.stringify({
           model_ids: [model.id],
-          use_case_ids: [activeUseCaseId],
+          use_case_ids: useCaseIds,
           approved_for_use: approved,
           recommendation_status: recommendation,
           approval_notes: notes,
           recommendation_notes: notes
         })
       });
-      toast("Decision saved");
+      toast(useCaseIds.length > 1 ? `Decision saved for ${useCaseIds.length} use cases` : "Decision saved");
       await loadCatalog();
       if (nextAfterSave) selectNextModel();
+    }
+
+    function decisionUseCaseIdsForModel(model, activeUseCaseId) {
+      if (state.filters.useCase) return activeUseCaseId ? [activeUseCaseId] : [];
+      if (shouldTargetMatchingUseCaseFilters()) {
+        const matches = matchingUseCaseIdsForModel(model, matchingUseCaseFilterOptions());
+        if (matches.length) return matches;
+      }
+      return activeUseCaseId ? [activeUseCaseId] : [];
     }
 
     async function saveModelApproval() {
@@ -2797,8 +2828,33 @@
       const models = filteredModels();
       const modelIds = explicitModelIds || (state.selected.size ? Array.from(state.selected) : models.map((model) => model.id));
       if (!modelIds.length) return toast("No models to update");
-      const useCaseId = bulkUseCaseIdForModels(modelIds);
-      const payload = { model_ids: modelIds, use_case_ids: useCaseId ? [useCaseId] : [] };
+      const payloadFields = bulkPayloadFields(action);
+      if (isUseCaseBulkAction(action)) {
+        const targets = bulkUseCaseTargetsForModels(modelIds);
+        if (!targets.length) return toast("No use case to update");
+        for (const target of targets) {
+          await request("/api/review/decisions", {
+            method: "POST",
+            body: JSON.stringify({
+              model_ids: target.modelIds,
+              use_case_ids: [target.useCaseId],
+              ...payloadFields
+            })
+          });
+        }
+      } else {
+        await request("/api/review/decisions", {
+          method: "POST",
+          body: JSON.stringify({ model_ids: modelIds, use_case_ids: [], ...payloadFields })
+        });
+      }
+      toast(`Saved ${bulkActionLabel(action)} for ${modelIds.length} models`);
+      state.selected.clear();
+      await loadCatalog();
+    }
+
+    function bulkPayloadFields(action) {
+      const payload = {};
       if (action === "approve") payload.approved_for_use = true;
       if (action === "not_approved") payload.approved_for_use = false;
       if (action === "recommended") payload.recommendation_status = "recommended";
@@ -2807,10 +2863,46 @@
       if (action === "restricted") payload.recommendation_status = "restricted";
       if (action === "clear") payload.recommendation_status = "unrated";
       if (action === "deprecated") payload.catalog_status = "deprecated";
-      await request("/api/review/decisions", { method: "POST", body: JSON.stringify(payload) });
-      toast(`Saved ${bulkActionLabel(action)} for ${modelIds.length} models`);
-      state.selected.clear();
-      await loadCatalog();
+      return payload;
+    }
+
+    function isUseCaseBulkAction(action) {
+      return ["approve", "not_approved", "recommended", "not_recommended", "discouraged", "restricted", "clear"].includes(action);
+    }
+
+    function bulkUseCaseTargetsForModels(modelIds) {
+      if (!shouldTargetMatchingUseCaseFilters()) {
+        const useCaseId = bulkUseCaseIdForModels(modelIds);
+        return useCaseId ? [{ useCaseId, modelIds }] : [];
+      }
+      const groups = new Map();
+      modelIds.forEach((modelId) => {
+        const model = modelById(modelId);
+        if (!model) return;
+        const matchingUseCaseIds = matchingUseCaseIdsForModel(model, matchingUseCaseFilterOptions());
+        const useCaseIds = matchingUseCaseIds.length
+          ? matchingUseCaseIds
+          : [preferredUseCaseIdForModel(model, model.use_case_approvals || {})].filter(Boolean);
+        useCaseIds.forEach((useCaseId) => {
+          if (!groups.has(useCaseId)) groups.set(useCaseId, []);
+          groups.get(useCaseId).push(modelId);
+        });
+      });
+      return Array.from(groups, ([useCaseId, ids]) => ({ useCaseId, modelIds: ids }));
+    }
+
+    function shouldTargetMatchingUseCaseFilters() {
+      if (state.filters.useCase || !useCaseScopedFiltersActive()) return false;
+      return Boolean(
+        state.filters.approval ||
+        (state.filters.manualRecommendation && state.filters.manualRecommendation !== "unrated")
+      );
+    }
+
+    function matchingUseCaseFilterOptions() {
+      return {
+        ignoreManual: state.filters.manualRecommendation === "unrated"
+      };
     }
 
     function bulkUseCaseIdForModels(modelIds) {
@@ -2926,20 +3018,11 @@
         ["license_name", (model) => model.license_name],
         ["provenance_policy_class", (model) => model.provenance_policy_class],
         ["manual_recommendation", (model) => approvalForExport(model).recommendation_status || "unrated"],
-        ["proposed_recommendation", (model) => approvalForExport(model).proposed_recommendation_status || "unrated"],
-        ["effective_recommendation", (model) => approvalForExport(model).effective_recommendation_status || "unrated"],
         ["approved_for_use", (model) => Boolean(approvalForExport(model).approved_for_use)],
         ["approval_updated_at", (model) => approvalForExport(model).approval_updated_at],
         ["recommendation_updated_at", (model) => approvalForExport(model).recommendation_updated_at],
         ["approval_notes", (model) => approvalForExport(model).approval_notes],
         ["recommendation_notes", (model) => approvalForExport(model).recommendation_notes],
-        ["proposal_score", (model) => approvalForExport(model).proposed_recommendation_score],
-        ["proposal_confidence", (model) => approvalForExport(model).proposed_recommendation_confidence],
-        ["proposal_policy_version", (model) => approvalForExport(model).proposed_recommendation_policy_version],
-        ["proposal_computed_at", (model) => approvalForExport(model).proposed_recommendation_computed_at],
-        ["proposal_blockers", (model) => joinList(approvalForExport(model).proposed_recommendation_blockers)],
-        ["proposal_warnings", (model) => joinList(approvalForExport(model).proposed_recommendation_warnings)],
-        ["required_controls", (model) => joinList(approvalForExport(model).proposed_recommendation_required_controls)],
         ["evidence_context_use_case_id", (model) => evidenceForExport(model).evidence_context_use_case_id],
         ["evidence_context_use_case_label", (model) => evidenceForExport(model).evidence_context_use_case_label],
         ["strongest_signal_kind", (model) => evidenceForExport(model).strongest_signal_kind],
@@ -3224,7 +3307,6 @@
         [els.hyperscalerFilter, "hyperscaler"],
         [els.useCaseFilter, "useCase"],
         [els.generalApprovalFilter, "generalApproval"],
-        [els.recommendationFilter, "recommendation"],
         [els.manualRecommendationFilter, "manualRecommendation"],
         [els.approvalFilter, "approval"],
         [els.familyFilter, "family"],
@@ -3252,7 +3334,6 @@
           hyperscaler: "",
           useCase: "",
           generalApproval: "",
-          recommendation: "",
           manualRecommendation: "",
           approval: "",
           family: "",
@@ -3265,7 +3346,6 @@
         els.countryFilter.value = "";
         els.hyperscalerFilter.value = "";
         els.generalApprovalFilter.value = "";
-        els.recommendationFilter.value = "";
         els.manualRecommendationFilter.value = "";
         els.approvalFilter.value = "";
         els.catalogFilter.value = "";

@@ -116,9 +116,10 @@ class CatalogExportTests(unittest.TestCase):
         self.assertEqual(rows[0]["inference_region_names"], "us-east-1")
         self.assertEqual(rows[0]["approved_use_case_ids"], "customer_support")
         self.assertEqual(rows[0]["restricted_use_case_ids"], "coding")
-        self.assertEqual(rows[0]["proposed_not_recommended_use_case_ids"], "customer_support")
-        self.assertEqual(rows[0]["effective_recommended_use_case_ids"], "customer_support")
-        self.assertEqual(rows[0]["effective_restricted_use_case_ids"], "coding")
+        self.assertNotIn("proposed_recommended_use_case_ids", rows[0])
+        self.assertNotIn("proposed_not_recommended_use_case_ids", rows[0])
+        self.assertNotIn("effective_recommended_use_case_ids", rows[0])
+        self.assertNotIn("effective_restricted_use_case_ids", rows[0])
 
     def test_render_raw_csv_preserves_nested_payloads(self) -> None:
         models = [
@@ -185,6 +186,7 @@ class CatalogExportTests(unittest.TestCase):
         approval_rows = list(csv.DictReader(io.StringIO(bundle["use-case-approvals"])))
         self.assertEqual(approval_rows[0]["use_case_id"], "customer_support")
         self.assertEqual(approval_rows[0]["proposed_recommendation_required_controls"], "PIA")
+        self.assertNotIn("effective_recommendation_status", approval_rows[0])
 
         destination_rows = list(csv.DictReader(io.StringIO(bundle["inference-destinations"])))
         self.assertEqual(destination_rows[0]["destination_id"], "aws-bedrock")
