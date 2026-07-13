@@ -2099,6 +2099,41 @@ class SourceSpotCheckTests(unittest.TestCase):
             self.assertLess(20, minimum_resolved)
             self.assertGreaterEqual(377, minimum_resolved)
 
+    def test_audit_allows_optional_provider_catalog_skip_but_blocks_failure(self) -> None:
+            skipped_log_id = update_engine._create_update_log("test")
+            skipped_run_id = update_engine._start_metadata_source_run(
+                skipped_log_id,
+                source_name="provider_api_model_discovery",
+                benchmark_id="model_discovery:anthropic",
+            )
+            update_engine._finish_source_run(
+                skipped_run_id,
+                status="skipped",
+                records_found=0,
+                error_message="Missing optional ANTHROPIC_API_KEY",
+            )
+            skipped_audit = audit_engine.run_audit(self.engine, skipped_log_id)
+            skipped_checks = {finding["check_name"] for finding in skipped_audit["findings"]}
+            self.assertNotIn("source_run_failed", skipped_checks)
+            self.assertNotIn("zero_row_source", skipped_checks)
+
+            failed_log_id = update_engine._create_update_log("test")
+            failed_run_id = update_engine._start_metadata_source_run(
+                failed_log_id,
+                source_name="provider_api_model_discovery",
+                benchmark_id="model_discovery:google-gemini",
+            )
+            update_engine._finish_source_run(
+                failed_run_id,
+                status="failed",
+                records_found=0,
+                error_message="Provider request failed",
+            )
+            failed_audit = audit_engine.run_audit(self.engine, failed_log_id)
+            failed_checks = {finding["check_name"] for finding in failed_audit["findings"]}
+            self.assertIn("source_run_failed", failed_checks)
+            self.assertIn("zero_row_source", failed_checks)
+
     def test_runtime_audit_ignores_legacy_primary_swebench_history_when_latest_is_secondary(self) -> None:
             adapter = SwebenchAdapter()
             with self.engine.begin() as conn:

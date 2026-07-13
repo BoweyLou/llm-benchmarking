@@ -75,6 +75,13 @@ def run_audit(engine, update_log_id: int) -> dict[str, Any]:
             records_found = int(source_run.get("records_found") or 0)
             status = str(source_run.get("status") or "failed")
 
+            optional_provider_skip = (
+                source_name == "provider_api_model_discovery"
+                and status == "skipped"
+            )
+            if optional_provider_skip:
+                continue
+
             if status != "completed":
                 findings.append(
                     _finding(

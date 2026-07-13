@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from backend import model_discovery, update_engine
+from backend import model_discovery, provider_catalogs, update_engine
 
 
 class ModelDiscoveryTests(unittest.TestCase):
@@ -153,6 +153,100 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertIn("trusted-access", mythos["capabilities"])
         self.assertEqual(cyber["catalog_model_id"], "openai/gpt-5.5-cyber")
         self.assertIn("trusted-access-for-cyber", cyber["capabilities"])
+
+    def test_baseline_includes_openai_gpt_5_6_catalog_models(self) -> None:
+        catalog_models = {
+            model["id"]: model
+            for entry in model_discovery.catalog_discovery_entries()
+            for model in model_discovery.catalog_discovery_models(entry)
+        }
+
+        expected = {
+            "gpt-5-6-sol": ("openai/gpt-5.6-sol", 5.0, 30.0),
+            "gpt-5-6-terra": ("openai/gpt-5.6-terra", 2.5, 15.0),
+            "gpt-5-6-luna": ("openai/gpt-5.6-luna", 1.0, 6.0),
+        }
+        for model_id, (catalog_id, input_price, output_price) in expected.items():
+            with self.subTest(model_id=model_id):
+                model = catalog_models[model_id]
+                self.assertEqual(model["catalog_model_id"], catalog_id)
+                self.assertEqual(model["release_date"], "2026-07-09")
+                self.assertEqual(model["documentation_url"], "https://help.openai.com/en/articles/20001354")
+                self.assertEqual(model["price_input_per_mtok"], input_price)
+                self.assertEqual(model["price_output_per_mtok"], output_price)
+
+    def test_provider_api_catalogs_cover_main_authenticated_providers(self) -> None:
+        catalog_ids = {catalog.id for catalog in provider_catalogs.provider_api_catalogs()}
+
+        self.assertGreaterEqual(
+            catalog_ids,
+            {"openai", "anthropic", "google-gemini", "mistral", "cohere", "xai"},
+        )
+
+    def test_provider_api_parser_preserves_richer_metadata(self) -> None:
+        google_models = provider_catalogs.parse_provider_api_catalog_models(
+            "google-gemini",
+            {
+                "models": [
+                    {
+                        "name": "models/gemini-3.5-flash",
+                        "displayName": "Gemini 3.5 Flash",
+                        "description": "Fast Gemini text and multimodal model.",
+                        "inputTokenLimit": 1048576,
+                        "outputTokenLimit": 65536,
+                        "supportedGenerationMethods": ["generateContent", "embedContent"],
+                    }
+                ]
+            },
+        )
+        xai_models = provider_catalogs.parse_provider_api_catalog_models(
+            "xai",
+            {
+                "models": [
+                    {
+                        "id": "grok-4.5",
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["text"],
+                        "prompt_text_token_price": 12500,
+                        "completion_text_token_price": 25000,
+                    }
+                ]
+            },
+        )
+        cohere_models = provider_catalogs.parse_provider_api_catalog_models(
+            "cohere",
+            {
+                "models": [
+                    {
+                        "name": "embed-v4.0",
+                        "endpoints": ["embed"],
+                        "features": ["embeddings"],
+                        "context_length": 131072,
+                        "tokenizer_url": "https://cohere.com/tokenizer/embed-v4.json",
+                    }
+                ]
+            },
+        )
+
+        gemini = google_models[0]
+        self.assertEqual(gemini["catalog_status"], "provisional")
+        self.assertEqual(gemini["id"], "gemini-3.5-flash")
+        self.assertEqual(gemini["catalog_model_id"], "google/gemini-3.5-flash")
+        self.assertEqual(gemini["context_window_tokens"], 1048576)
+        self.assertEqual(gemini["max_output_tokens"], 65536)
+        self.assertEqual(set(gemini["model_roles"]), {"embedding", "generator"})
+        self.assertIn("generate-content", gemini["capabilities"])
+
+        grok = xai_models[0]
+        self.assertEqual(grok["price_input_per_mtok"], 1.25)
+        self.assertEqual(grok["price_output_per_mtok"], 2.5)
+        self.assertIn("image", grok["capabilities"])
+
+        embed = cohere_models[0]
+        self.assertEqual(embed["catalog_status"], "provisional")
+        self.assertEqual(embed["model_roles"], ["embedding"])
+        self.assertEqual(embed["context_window_tokens"], 131072)
+        self.assertEqual(embed["repo_url"], "https://cohere.com/tokenizer/embed-v4.json")
 
 
 if __name__ == "__main__":

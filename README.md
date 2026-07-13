@@ -401,7 +401,8 @@ Metadata and catalog enrichments:
   Recent OpenRouter models from the last 60 days are imported as provisional rows when no exact OpenRouter ID or canonical slug is already represented.
 - Configured provider catalog rows for OpenAI, Google, ElevenLabs, Cartesia,
   Deepgram, Amazon Polly, Azure Speech, PlayHT, Resemble, and selected
-  open-weight text-to-speech models, plus restricted-access frontier/cyber
+  open-weight text-to-speech models, plus official frontier rows such as
+  OpenAI GPT-5.6 Sol, Terra, and Luna and restricted-access frontier/cyber
   rows such as Claude Mythos 5 and GPT-5.5-Cyber when official provider
   documentation exists.
 - Hugging Face repository creation and modification timestamps from curated model discovery
@@ -449,6 +450,7 @@ python -m backend update --benchmarks aa_cost aa_speed --refresh-model-discovery
 python -m backend model-discovery-sync --source configured
 python -m backend model-discovery-sync --source huggingface --family nvidia-embedding
 python -m backend model-discovery-sync --source catalog --family ibm-watsonx-retrieval
+python -m backend model-discovery-sync --source provider-api --family openai
 python -m backend list-models
 python -m backend list-models --format jsonl --output output/model-metadata.jsonl
 python -m backend list-models --format csv --output output/model-metadata.csv
@@ -472,7 +474,7 @@ python -m backend model-curation-export
 Notes:
 
 - Full `update` runs configured model discovery before model-card refresh. `update --benchmarks ...` skips that discovery phase unless `--refresh-model-discovery` is passed.
-- `model-discovery-sync` runs only the curated metadata discovery lane. `--source configured` runs both static provider catalog rows and provider-owned Hugging Face discovery; use `--source huggingface` or `--source catalog` to narrow the run. The repo-backed baseline covers small generator families such as Google Gemma, Microsoft Phi, Meta Llama 3.2 small models, Qwen small models, Mistral/Ministral small models, and IBM Granite generators, plus NVIDIA retrieval, IBM watsonx Slate, and IBM Granite retrieval entries. It intentionally excludes community quantizations/fine-tunes unless a trusted mirror is configured.
+- `model-discovery-sync` runs only the curated metadata discovery lane. `--source configured` runs static provider catalog rows, provider-owned Hugging Face discovery, and authenticated provider API catalogs when their keys are present; use `--source huggingface`, `--source catalog`, or `--source provider-api` to narrow the run. Provider API discovery currently supports OpenAI (`OPENAI_API_KEY`), Anthropic (`ANTHROPIC_API_KEY`), Google Gemini (`GEMINI_API_KEY` or `GOOGLE_API_KEY`), Mistral (`MISTRAL_API_KEY`), Cohere (`COHERE_API_KEY`), and xAI (`XAI_API_KEY`). Missing provider keys are recorded as skipped source runs rather than hard failures. Dynamically discovered rows are provisional unless the provider marks them deprecated; matching curated tracked rows remain tracked. The repo-backed baseline covers small generator families such as Google Gemma, Microsoft Phi, Meta Llama 3.2 small models, Qwen small models, Mistral/Ministral small models, and IBM Granite generators, plus NVIDIA retrieval, IBM watsonx Slate, and IBM Granite retrieval entries. It intentionally excludes community quantizations/fine-tunes unless a trusted mirror is configured.
 - OpenRouter model refresh requests all output modalities so non-text-capable catalog rows are not hidden by the provider default.
 - `inference-sync` supports destination subsets.
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.

@@ -326,6 +326,18 @@ class CatalogExportTests(unittest.TestCase):
         refresh_model_discovery_metadata.assert_called_once_with(source="huggingface", family="gemma")
         self.assertIn('"records_found": 2', stdout.getvalue())
 
+    def test_cli_model_discovery_sync_accepts_provider_api_source(self) -> None:
+        stdout = io.StringIO()
+        with patch(
+            "backend.cli.refresh_model_discovery_metadata",
+            return_value={"log_id": 8, "source": "provider-api", "records_found": 1},
+        ) as refresh_model_discovery_metadata, redirect_stdout(stdout):
+            exit_code = cli.main(["model-discovery-sync", "--source", "provider-api", "--family", "openai"])
+
+        self.assertEqual(exit_code, 0)
+        refresh_model_discovery_metadata.assert_called_once_with(source="provider-api", family="openai")
+        self.assertIn('"source": "provider-api"', stdout.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

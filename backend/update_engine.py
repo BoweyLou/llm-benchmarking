@@ -37,7 +37,7 @@ from .database import (
     use_case_benchmark_weights as use_case_benchmark_weights_table,
     utc_now_iso,
 )
-from . import model_card_refresh, model_discovery, openrouter_metadata, ranking_views, update_orchestration
+from . import model_card_refresh, model_discovery, openrouter_metadata, provider_catalogs, ranking_views, update_orchestration
 from .audit_engine import get_audit_run, get_audit_summary, run_audit
 from .inference_catalog import (
     attach_inference_catalog,
@@ -93,6 +93,7 @@ OPENROUTER_MARKET_SOURCE_NAME = "openrouter"
 OPENROUTER_NEW_RELEASE_LOOKBACK_DAYS = 60
 HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME = "huggingface_model_discovery"
 CATALOG_MODEL_DISCOVERY_SOURCE_NAME = "catalog_model_discovery"
+PROVIDER_API_MODEL_DISCOVERY_SOURCE_NAME = "provider_api_model_discovery"
 HUGGINGFACE_MODEL_API_URL_TEMPLATE = "https://huggingface.co/api/models/{repo_id}"
 HUGGINGFACE_RAW_README_URL_TEMPLATE = "https://huggingface.co/{repo_id}/raw/main/README.md"
 MODEL_CARD_REFRESH_STALE_DAYS = 30
@@ -185,6 +186,7 @@ SOURCE_STEP_LABEL_OVERRIDES = {
     "terminal_bench": "Terminal-Bench",
     "vectara_hallucination": "Vectara Hallucination",
     HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME: "Hugging Face model discovery",
+    PROVIDER_API_MODEL_DISCOVERY_SOURCE_NAME: "Provider API model discovery",
 }
 UPDATE_POST_PHASES = [
     {"key": "phase:identity-refresh-initial", "label": "Refresh model identity metadata", "kind": "phase"},
@@ -321,7 +323,9 @@ def refresh_model_license_metadata(*, refresh_model_cards: bool = False, force_m
 def refresh_model_discovery_metadata(*, source: str = "configured", family: str | None = None) -> dict[str, Any]:
     bootstrap()
     normalized_source = str(source or "").strip().lower()
-    if normalized_source not in {"configured", "huggingface", "catalog"}:
+    if normalized_source == "provider_api":
+        normalized_source = "provider-api"
+    if normalized_source not in {"configured", "huggingface", "catalog", "provider-api"}:
         raise ValueError(f"Unsupported model discovery source: {source}")
 
     step_plan = [
@@ -3338,6 +3342,8 @@ def _refresh_configured_model_discovery(
         summaries["catalog"] = _refresh_catalog_model_discovery(log_id=log_id, family=family)
     if normalized_source in {"configured", "huggingface"}:
         summaries["huggingface"] = _refresh_huggingface_model_discovery(log_id=log_id, family=family)
+    if normalized_source in {"configured", "provider-api"}:
+        summaries["provider_api"] = _refresh_provider_api_model_discovery(log_id=log_id, family=family)
 
     totals = {
         "entries": sum(int(summary.get("entries") or 0) for summary in summaries.values()),
@@ -3345,12 +3351,171 @@ def _refresh_configured_model_discovery(
         "models_created": sum(int(summary.get("models_created") or 0) for summary in summaries.values()),
         "models_updated": sum(int(summary.get("models_updated") or 0) for summary in summaries.values()),
         "models_unchanged": sum(int(summary.get("models_unchanged") or 0) for summary in summaries.values()),
+        "sources_skipped": sum(int(summary.get("sources_skipped") or 0) for summary in summaries.values()),
+        "sources_failed": sum(int(summary.get("sources_failed") or 0) for summary in summaries.values()),
     }
     return {
         "family": _clean_text(family),
         "sources": summaries,
         **totals,
     }
+
+
+def _refresh_provider_api_model_discovery(
+    *,
+    log_id: int,
+    family: str | None = None,
+) -> dict[str, Any]:
+    catalogs = provider_catalogs.provider_api_catalogs(family=family)
+    summary: dict[str, Any] = {
+        "family": _clean_text(family),
+        "entries": len(catalogs),
+        "records_found": 0,
+        "models_created": 0,
+        "models_updated": 0,
+        "models_unchanged": 0,
+        "sources_skipped": 0,
+        "sources_failed": 0,
+        "providers": {},
+        "errors": [],
+    }
+    if not catalogs:
+        return summary
+
+    verified_at = utc_now_iso()
+    with httpx.Client(headers=HTTP_HEADERS, follow_redirects=True, timeout=30.0) as client:
+        for catalog in catalogs:
+            catalog_id = _clean_text(_provider_catalog_value(catalog, "id")) or "provider-api"
+            provider = canonical_provider_name(_clean_text(_provider_catalog_value(catalog, "provider")) or "Unknown")
+            catalog_family = _clean_text(_provider_catalog_value(catalog, "family")) or catalog_id
+            benchmark_id = _model_discovery_benchmark_id(catalog_family)
+            source_run_id = _start_metadata_source_run(
+                log_id,
+                source_name=PROVIDER_API_MODEL_DISCOVERY_SOURCE_NAME,
+                benchmark_id=benchmark_id,
+            )
+            provider_summary: dict[str, Any] = {
+                "provider": provider,
+                "records_found": 0,
+                "models_created": 0,
+                "models_updated": 0,
+                "models_unchanged": 0,
+                "status": "running",
+            }
+            try:
+                items = provider_catalogs.fetch_provider_api_catalog_models(client, catalog)
+                entry_roles = _normalise_model_roles(
+                    _provider_catalog_value(catalog, "model_roles"),
+                    default=(MODEL_ROLE_GENERATOR,),
+                )
+                entry = {
+                    "family": catalog_family,
+                    "provider": provider,
+                    "model_roles": entry_roles,
+                    "model_type": _clean_text(_provider_catalog_value(catalog, "model_type")) or "proprietary",
+                }
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    item = dict(item)
+                    if _clean_text(item.get("catalog_status")) != "deprecated":
+                        item["catalog_status"] = CATALOG_STATUS_PROVISIONAL
+                    name = _clean_text(item.get("name"))
+                    if not name:
+                        continue
+                    item_provider = canonical_provider_name(_clean_text(item.get("provider")) or provider)
+                    item_source_url = (
+                        _clean_text(item.get("source_url"))
+                        or _clean_text(item.get("documentation_url"))
+                        or _clean_text(_provider_catalog_value(catalog, "source_url"))
+                        or _clean_text(_provider_catalog_value(catalog, "documentation_url"))
+                        or ""
+                    )
+                    model_id, outcome = _ensure_discovered_catalog_model(
+                        item=item,
+                        entry=entry,
+                        provider=item_provider,
+                        source_url=item_source_url,
+                        verified_at=verified_at,
+                        discovered_update_log_id=log_id,
+                        entry_roles=entry_roles,
+                    )
+                    model_roles = _normalise_model_roles(item.get("model_roles"), default=entry_roles)
+                    raw_record = RawSourceRecord(
+                        source_id=PROVIDER_API_MODEL_DISCOVERY_SOURCE_NAME,
+                        benchmark_id=benchmark_id,
+                        raw_model_name=name,
+                        raw_value=_clean_text(item.get("catalog_model_id")) or _clean_text(item.get("id")) or name,
+                        source_url=item_source_url,
+                        collected_at=verified_at,
+                        raw_model_key=_clean_text(item.get("catalog_model_id")) or _clean_text(item.get("id")),
+                        payload=item,
+                        metadata={
+                            "source": "provider_api",
+                            "family": catalog_family,
+                            "provider": item_provider,
+                            "provider_catalog": catalog_id,
+                            "model_roles": model_roles,
+                        },
+                    )
+                    _insert_raw_source_record(
+                        source_run_id,
+                        raw_record,
+                        normalized_model_id=model_id,
+                        source_type="primary",
+                        verified=True,
+                        resolution_status="resolved",
+                    )
+                    provider_summary["records_found"] += 1
+                    summary["records_found"] += 1
+                    if outcome == "created":
+                        provider_summary["models_created"] += 1
+                        summary["models_created"] += 1
+                    elif outcome == "updated":
+                        provider_summary["models_updated"] += 1
+                        summary["models_updated"] += 1
+                    else:
+                        provider_summary["models_unchanged"] += 1
+                        summary["models_unchanged"] += 1
+            except provider_catalogs.ProviderCatalogNotConfigured as exc:
+                provider_summary["status"] = "skipped"
+                provider_summary["error"] = str(exc)
+                summary["sources_skipped"] += 1
+                _finish_source_run(source_run_id, status="skipped", records_found=0, error_message=str(exc))
+            except Exception as exc:
+                safe_error = provider_catalogs.safe_provider_catalog_error(exc, catalog)
+                provider_summary["status"] = "failed"
+                provider_summary["error"] = safe_error
+                summary["sources_failed"] += 1
+                summary["errors"].append(
+                    {
+                        "provider": provider,
+                        "provider_catalog": catalog_id,
+                        "error_message": safe_error,
+                    }
+                )
+                _finish_source_run(
+                    source_run_id,
+                    status="failed",
+                    records_found=int(provider_summary["records_found"]),
+                    error_message=safe_error,
+                )
+            else:
+                provider_summary["status"] = "completed"
+                _finish_source_run(
+                    source_run_id,
+                    status="completed",
+                    records_found=int(provider_summary["records_found"]),
+                    error_message=None,
+                )
+            summary["providers"][catalog_id] = provider_summary
+    return summary
+
+
+def _provider_catalog_value(catalog: Any, key: str) -> Any:
+    if isinstance(catalog, dict):
+        return catalog.get(key)
+    return getattr(catalog, key, None)
 
 
 def _refresh_catalog_model_discovery(

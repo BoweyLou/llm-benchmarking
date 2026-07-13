@@ -594,6 +594,164 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(len(source_runs), 1)
         self.assertEqual(len(raw_records), 1)
 
+    def test_provider_api_model_discovery_adds_rich_provider_catalog_rows(self) -> None:
+        catalog = {
+            "id": "openai",
+            "family": "openai-api",
+            "provider": "OpenAI",
+            "model_type": "proprietary",
+            "model_roles": ["generator"],
+            "source_url": "https://api.openai.com/v1/models",
+            "documentation_url": "https://platform.openai.com/docs/api-reference/models/list",
+        }
+        items = [
+            {
+                "id": "gpt-5-6-sol",
+                "name": "GPT-5.6 Sol",
+                "provider": "OpenAI",
+                "catalog_model_id": "openai/gpt-5.6-sol",
+                "model_roles": ["generator"],
+                "context_window_tokens": 256000,
+                "max_output_tokens": 32768,
+                "price_input_per_mtok": 5.0,
+                "price_output_per_mtok": 30.0,
+                "capabilities": ["reasoning", "tool-use", "provider-api:openai"],
+                "metadata_source_name": "provider_api_model_discovery",
+                "documentation_url": "https://platform.openai.com/docs/models",
+                "source_url": "https://api.openai.com/v1/models",
+            }
+        ]
+
+        with patch.object(update_engine.provider_catalogs, "provider_api_catalogs", return_value=[catalog]), patch.object(
+            update_engine.provider_catalogs,
+            "fetch_provider_api_catalog_models",
+            return_value=items,
+        ):
+            summary = update_engine.refresh_model_discovery_metadata(source="provider-api", family="openai")
+
+        self.assertEqual(summary["records_found"], 1)
+        self.assertEqual(summary["models_created"], 1)
+        self.assertEqual(summary["sources_skipped"], 0)
+        model = next(model for model in update_engine.list_models() if model["id"] == "gpt-5-6-sol")
+        self.assertEqual(model["provider"], "OpenAI")
+        self.assertEqual(model["metadata_source_name"], "provider_api_model_discovery")
+        self.assertEqual(model["context_window_tokens"], 256000)
+        self.assertEqual(model["max_output_tokens"], 32768)
+        self.assertEqual(model["price_input_per_mtok"], 5.0)
+        self.assertEqual(model["price_output_per_mtok"], 30.0)
+        self.assertEqual(model["catalog_status"], "provisional")
+        self.assertIn("provider-api:openai", model["capabilities"])
+
+        with get_connection(self.engine) as conn:
+            score_rows = fetch_all(conn, select(scores_table))
+            source_runs = fetch_all(
+                conn,
+                select(source_runs_table).where(source_runs_table.c.source_name == "provider_api_model_discovery"),
+            )
+            raw_records = fetch_all(
+                conn,
+                select(raw_source_records_table).where(raw_source_records_table.c.source_run_id == source_runs[0]["id"]),
+            )
+        self.assertEqual(score_rows, [])
+        self.assertEqual(len(source_runs), 1)
+        self.assertEqual(source_runs[0]["status"], "completed")
+        self.assertEqual(len(raw_records), 1)
+
+    def test_provider_api_model_discovery_skips_missing_credentials(self) -> None:
+        catalog = {
+            "id": "anthropic",
+            "family": "anthropic-api",
+            "provider": "Anthropic",
+            "model_type": "proprietary",
+            "model_roles": ["generator"],
+        }
+
+        with patch.object(update_engine.provider_catalogs, "provider_api_catalogs", return_value=[catalog]), patch.object(
+            update_engine.provider_catalogs,
+            "fetch_provider_api_catalog_models",
+            side_effect=update_engine.provider_catalogs.ProviderCatalogNotConfigured("Missing ANTHROPIC_API_KEY"),
+        ):
+            summary = update_engine.refresh_model_discovery_metadata(source="provider-api", family="anthropic")
+
+        self.assertEqual(summary["records_found"], 0)
+        self.assertEqual(summary["sources_skipped"], 1)
+        with get_connection(self.engine) as conn:
+            source_runs = fetch_all(
+                conn,
+                select(source_runs_table).where(source_runs_table.c.source_name == "provider_api_model_discovery"),
+            )
+        self.assertEqual(len(source_runs), 1)
+        self.assertEqual(source_runs[0]["status"], "skipped")
+
+    def test_provider_api_failure_redacts_google_query_key(self) -> None:
+        secret = "google-super-secret"
+        catalog = {
+            "id": "google-gemini",
+            "family": "google-gemini",
+            "provider": "Google",
+            "model_type": "proprietary",
+            "model_roles": ["generator"],
+        }
+        request = httpx.Request(
+            "GET",
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={secret}&pageSize=1000",
+        )
+        response = httpx.Response(500, request=request)
+        error = httpx.HTTPStatusError("provider failed", request=request, response=response)
+
+        with patch.object(update_engine.provider_catalogs, "provider_api_catalogs", return_value=[catalog]), patch.object(
+            update_engine.provider_catalogs,
+            "fetch_provider_api_catalog_models",
+            side_effect=error,
+        ):
+            summary = update_engine.refresh_model_discovery_metadata(
+                source="provider-api", family="google-gemini"
+            )
+
+        with get_connection(self.engine) as conn:
+            source_run = fetch_all(
+                conn,
+                select(source_runs_table).where(
+                    source_runs_table.c.source_name == "provider_api_model_discovery"
+                ),
+            )[0]
+        self.assertEqual(summary["sources_failed"], 1)
+        self.assertNotIn(secret, json.dumps(summary))
+        self.assertNotIn(secret, str(source_run["error_message"]))
+
+    def test_provider_api_gpt_5_6_identity_does_not_duplicate_curated_tracked_row(self) -> None:
+        self.add_model("gpt-5-6-sol", "GPT-5.6 Sol", provider="OpenAI")
+        catalog = {
+            "id": "openai",
+            "family": "openai-api",
+            "provider": "OpenAI",
+            "model_type": "proprietary",
+            "model_roles": ["generator"],
+        }
+        items = [{
+            "id": "gpt-5.6-sol",
+            "name": "GPT-5.6 Sol",
+            "provider": "OpenAI",
+            "catalog_model_id": "openai/gpt-5.6-sol",
+            "catalog_status": "provisional",
+            "model_roles": ["generator"],
+            "metadata_source_name": "provider_api_model_discovery",
+            "source_url": "https://api.openai.com/v1/models",
+        }]
+
+        with patch.object(update_engine.provider_catalogs, "provider_api_catalogs", return_value=[catalog]), patch.object(
+            update_engine.provider_catalogs,
+            "fetch_provider_api_catalog_models",
+            return_value=items,
+        ):
+            summary = update_engine.refresh_model_discovery_metadata(source="provider-api", family="openai")
+
+        matching = [model for model in update_engine.list_models() if model["name"] == "GPT-5.6 Sol"]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]["id"], "gpt-5-6-sol")
+        self.assertEqual(matching[0]["catalog_status"], "tracked")
+        self.assertEqual(summary["models_created"], 0)
+
     def test_internal_view_weight_boosts_scored_models_without_blocking_missing_models(self) -> None:
         self.add_model("internal-a", "Internal A")
         self.add_model("internal-b", "Internal B")
