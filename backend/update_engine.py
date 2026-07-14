@@ -37,7 +37,7 @@ from .database import (
     use_case_benchmark_weights as use_case_benchmark_weights_table,
     utc_now_iso,
 )
-from . import model_card_refresh, model_discovery, openrouter_metadata, provider_catalogs, ranking_views, update_orchestration
+from . import model_card_refresh, model_discovery, openrouter_metadata, pricing, provider_catalogs, ranking_views, update_orchestration
 from .audit_engine import get_audit_run, get_audit_summary, run_audit
 from .inference_catalog import (
     attach_inference_catalog,
@@ -223,6 +223,7 @@ UPDATE_POST_PHASES = [
     {"key": "phase:provider-origin-baseline", "label": "Apply provider origin baseline", "kind": "phase"},
     {"key": "phase:openrouter-models", "label": "Refresh OpenRouter model metadata", "kind": "phase"},
     {"key": "phase:model-discovery", "label": "Refresh model discovery metadata", "kind": "phase"},
+    {"key": "phase:provider-pricing", "label": "Refresh provider-specific pricing", "kind": "phase"},
     {"key": "phase:model-card-metadata", "label": "Refresh model card metadata", "kind": "phase"},
     {"key": "phase:openrouter-market", "label": "Refresh OpenRouter market signals", "kind": "phase"},
     {"key": "phase:audit", "label": "Run post-update audit", "kind": "phase"},
@@ -1144,6 +1145,7 @@ def list_models(*, include_recommendation_proposals: bool = True) -> list[dict[s
         )
         inference_approvals_by_model_id = _load_model_use_case_inference_approvals(conn, model_ids)
         inference_rows_by_model = load_synced_inference_catalog(conn, model_ids)
+        pricing_rows_by_model = pricing.load_pricing_offers(conn, model_ids)
         authoritative_destination_ids = load_authoritative_destination_ids(conn)
         source_freshness_by_model_id = _load_source_freshness_by_model_id(
             conn,
@@ -1189,6 +1191,7 @@ def list_models(*, include_recommendation_proposals: bool = True) -> list[dict[s
             synced_destinations=inference_rows_by_model.get(model["id"]),
             authoritative_destinations=authoritative_destination_ids,
         )
+        model = pricing.attach_pricing(model, pricing_rows_by_model.get(model["id"], []))
         _attach_inference_route_destination_metadata(model)
         model["scores"] = {
             benchmark_id: _serialize_score(latest_scores[(model["id"], benchmark_id)])
@@ -3336,6 +3339,26 @@ def _run_update_job(
                             "benchmark_id": "",
                             "source_id": HUGGINGFACE_MODEL_DISCOVERY_SOURCE_NAME,
                             "error_message": str(exc),
+                        }
+                    )
+
+            advance_phase("phase:provider-pricing")
+            pricing_summary = pricing.sync_pricing(
+                provider_ids=(
+                    "openai", "anthropic", "google", "mistral", "cohere", "xai",
+                    "aws-bedrock", "azure-ai-foundry", "google-vertex-ai",
+                ),
+                engine=ENGINE,
+            )
+            for provider_id, result in pricing_summary.get("providers", {}).items():
+                if result.get("status") == "failed":
+                    errors.append(
+                        {
+                            "benchmark_id": "",
+                            "source_id": f"pricing_{provider_id}",
+                            "error_message": str(result.get("reason") or "Pricing refresh failed"),
+                            "severity": "warning",
+                            "nonfatal": True,
                         }
                     )
 
@@ -5492,6 +5515,7 @@ def _merge_model_into_target(conn, duplicate_id: str, canonical_id: str) -> bool
     _merge_duplicate_use_case_approvals(conn, normalized_duplicate_id, normalized_canonical_id)
     _merge_duplicate_recommendation_proposals(conn, normalized_duplicate_id, normalized_canonical_id)
     _merge_duplicate_inference_destinations(conn, normalized_duplicate_id, normalized_canonical_id)
+    pricing.merge_model_pricing(conn, normalized_duplicate_id, normalized_canonical_id)
     _merge_duplicate_inference_route_approvals(conn, normalized_duplicate_id, normalized_canonical_id)
     _merge_duplicate_market_snapshots(conn, normalized_duplicate_id, normalized_canonical_id)
     conn.execute(
@@ -5887,6 +5911,12 @@ def _refresh_openrouter_model_metadata() -> None:
             verified_at=verified_at,
             allow_existing_canonical_model_ids=True,
         )
+    # Persist the complete router price shape separately from the deprecated
+    # model-level input/output compatibility values.
+    try:
+        pricing.sync_openrouter_items(items, engine=ENGINE)
+    except pricing.PricingRefreshRejected as exc:
+        pricing.record_failed_pricing_run("pricing_openrouter", str(exc), engine=ENGINE)
 
 
 def _refresh_openrouter_market_signals() -> None:

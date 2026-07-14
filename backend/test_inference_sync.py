@@ -16,12 +16,14 @@ from backend.database import (
     inference_sync_status as inference_sync_status_table,
     init_db,
     model_inference_destinations as model_inference_destinations_table,
+    source_runs as source_runs_table,
 )
 from backend.inference_sync import (
     MissingConfiguration,
     RetryableSyncSkip,
     SyncOutcome,
     _price_per_mtok,
+    _google_pricing_rates,
     _sync_azure_foundry,
     _sync_azure_foundry_public_pricing,
     _sync_google_vertex_ai,
@@ -62,6 +64,15 @@ class InferenceSyncTests(unittest.TestCase):
                     "sources_json": "[]",
                     "catalog_model_id": "anthropic.claude-opus-4-6",
                     "synced_at": "2026-04-07T00:00:00Z",
+                    "_pricing_entries": [
+                        {
+                            "catalog_model_id": "anthropic.claude-opus-4-6",
+                            "region": "us-east-1",
+                            "price_kind": "input",
+                            "price_per_mtok": 3.0,
+                            "unit": "1M tokens",
+                        }
+                    ],
                 }
             ],
             detail={"mode": "pricing-only", "model_count": 1},
@@ -92,6 +103,37 @@ class InferenceSyncTests(unittest.TestCase):
         self.assertIsNotNone(status)
         self.assertEqual(status["last_status"], "completed")
         self.assertIsNotNone(status["last_completed_at"])
+
+    def test_empty_cloud_pricing_is_a_visible_failed_source_run(self) -> None:
+        outcome = SyncOutcome(
+            destination_id="aws-bedrock",
+            records=[
+                {
+                    "model_id": "claude-opus-4-6", "destination_id": "aws-bedrock",
+                    "name": "AWS Bedrock", "hyperscaler": "AWS",
+                    "availability_scope": "Account scoped", "availability_note": "Available.",
+                    "location_scope": "Regions", "regions_json": "[]", "region_count": 0,
+                    "deployment_modes_json": "[]", "pricing_label": None, "pricing_note": None,
+                    "sources_json": "[]", "catalog_model_id": "anthropic.claude-opus-4-6",
+                    "synced_at": "2026-04-07T00:00:00Z", "_pricing_entries": [],
+                }
+            ],
+            detail={"mode": "account-catalog", "model_count": 1},
+        )
+        with patch("backend.inference_sync._sync_destination", return_value=outcome):
+            summary = sync_inference_catalog(destination_ids=["aws-bedrock"], engine=self.engine)
+        destination = summary["destinations"]["aws-bedrock"]
+        self.assertEqual(destination["status"], "failed")
+        self.assertTrue(destination["pricing"]["last_known_good_preserved"])
+        with self.engine.begin() as conn:
+            failed = fetch_one(
+                conn,
+                select(source_runs_table).where(
+                    source_runs_table.c.source_name == "pricing_aws-bedrock",
+                    source_runs_table.c.status == "failed",
+                ),
+            )
+        self.assertIsNotNone(failed)
 
     def test_missing_configuration_is_reported_as_skipped(self) -> None:
         with patch(
@@ -199,6 +241,26 @@ class InferenceSyncTests(unittest.TestCase):
         self.assertEqual(outcome.detail["mode"], "published-endpoints-only")
         self.assertEqual(len(outcome.records), 1)
         self.assertIn("global", outcome.records[0]["regions_json"])
+
+    def test_google_cloud_billing_preserves_every_tier_rate(self) -> None:
+        rates = _google_pricing_rates(
+            {
+                "effectiveTime": "2026-07-01T00:00:00Z",
+                "pricingExpression": {
+                    "usageUnitDescription": "1,000 characters",
+                    "displayQuantity": 1000,
+                    "tieredRates": [
+                        {"startUsageAmount": 0, "unitPrice": {"units": "0", "nanos": 5000000}},
+                        {"startUsageAmount": 1000000, "unitPrice": {"units": "0", "nanos": 3000000}},
+                    ],
+                },
+            }
+        )
+        self.assertEqual(len(rates), 2)
+        self.assertEqual(rates[0]["billing_unit"], "character")
+        self.assertEqual(rates[0]["unit_quantity"], 1000)
+        self.assertEqual(rates[0]["end_usage_amount"], 1000000)
+        self.assertEqual(rates[1]["start_usage_amount"], 1000000)
 
 
 if __name__ == "__main__":

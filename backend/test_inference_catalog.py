@@ -17,8 +17,8 @@ class InferenceCatalogTests(unittest.TestCase):
         )
 
         destination_ids = [destination["id"] for destination in model["inference_destinations"]]
-        self.assertEqual(destination_ids, ["azure-ai-foundry"])
-        self.assertEqual(model["inference_summary"]["destination_count"], 1)
+        self.assertEqual(destination_ids, ["openai-direct", "azure-ai-foundry"])
+        self.assertEqual(model["inference_summary"]["destination_count"], 2)
 
     def test_provider_aliases_surface_parent_cloud_destinations(self) -> None:
         nova = attach_inference_catalog(
@@ -52,8 +52,8 @@ class InferenceCatalogTests(unittest.TestCase):
         )
 
         destination_ids = [destination["id"] for destination in model["inference_destinations"]]
-        self.assertEqual(destination_ids, ["aws-bedrock", "google-vertex-ai"])
-        self.assertEqual(model["inference_summary"]["destination_count"], 2)
+        self.assertEqual(destination_ids, ["anthropic-direct", "aws-bedrock", "google-vertex-ai"])
+        self.assertEqual(model["inference_summary"]["destination_count"], 3)
         self.assertGreater(model["inference_summary"]["region_count"], 0)
 
     def test_unmapped_provider_has_empty_directory(self) -> None:
@@ -96,10 +96,11 @@ class InferenceCatalogTests(unittest.TestCase):
             authoritative_destinations={"azure-ai-foundry"},
         )
 
-        self.assertEqual(model["inference_destinations"][0]["regions"], ["eastus2"])
-        self.assertEqual(model["inference_destinations"][0]["deployment_modes"], ["Provisioned"])
+        azure = next(item for item in model["inference_destinations"] if item["id"] == "azure-ai-foundry")
+        self.assertEqual(azure["regions"], ["eastus2"])
+        self.assertEqual(azure["deployment_modes"], ["Provisioned"])
         self.assertEqual(
-            model["inference_destinations"][0]["pricing_label"],
+            azure["pricing_label"],
             "Input USD $2.00 / Output USD $8.00 per 1M tokens",
         )
 
@@ -116,7 +117,7 @@ class InferenceCatalogTests(unittest.TestCase):
         )
 
         destination_ids = [destination["id"] for destination in model["inference_destinations"]]
-        self.assertEqual(destination_ids, ["google-vertex-ai"])
+        self.assertEqual(destination_ids, ["anthropic-direct", "google-vertex-ai"])
 
 
 if __name__ == "__main__":

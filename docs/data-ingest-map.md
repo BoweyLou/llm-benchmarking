@@ -149,9 +149,10 @@ flowchart LR
    `--refresh-model-discovery` is passed. Hugging Face repository creation,
    OpenRouter addition, provider-catalog inclusion, and local discovery
    timestamps are retained as age proxies, not as official release dates.
-5. `python -m backend inference-sync` is a separate sync for hyperscaler
-   inference destinations. It writes availability, region, deployment-mode, and
-   pricing evidence to the inference catalog tables.
+5. `python -m backend inference-sync` syncs hyperscaler destinations and their
+   structured numeric SKU prices. `python -m backend pricing-sync` can refresh
+   direct, OpenRouter, or cloud pricing independently. Full updates run the
+   provider-pricing phase automatically after model discovery/canonicalization.
 
 The review catalog reports ingestion freshness without treating API response
 generation as a sync. `generated_at` remains the response-build timestamp;
@@ -215,7 +216,7 @@ collapse cannot pass merely because a handful of names still match.
 | Terminal-Bench | `TerminalBenchAdapter` | Best verified single-model Terminal-Bench score plus agent, version, integration method, date, and stderr metadata. | Phase-two only; distinguish model capability from best agent-system evidence. |
 | FaithJudge | `FaithJudgeAdapter` | Aggregate RAG hallucination rate plus task-level FaithBench/RAGTruth summarization, QA, and data-to-text rates. | Lower is better; task rows prevent one aggregate from carrying all RAG faithfulness meaning. |
 | Vectara Hallucination | `VectaraHallucinationAdapter` | Factual consistency plus hallucination-rate and answer-rate companion metrics. | This is grounded summarization evidence, not retrieval relevance. |
-| OpenRouter models | `_refresh_openrouter_model_metadata()` | All output modalities, model IDs/slugs, canonical OpenRouter identity, context and pricing fields, Hugging Face repo links, OpenRouter addition timestamp, newly discovered provisional models. | OpenRouter addition is an age proxy, not an official release date; source precedence prevents silent overrides. |
+| OpenRouter models | `_refresh_openrouter_model_metadata()` | All output modalities, model IDs/slugs, canonical OpenRouter identity, context fields, structured router pricing components, Hugging Face repo links, OpenRouter addition timestamp, newly discovered provisional models. | OpenRouter addition is an age proxy, not an official release date; source precedence prevents silent overrides. |
 | Configured model discovery | `_refresh_configured_model_discovery()` | Static provider catalog rows plus curated official/provider-owned Hugging Face repos and authenticated provider API catalogs, model roles, `huggingface_repo_id`, model-card/docs links, creation and modification timestamps, model size fields, context/output limits, pricing where exposed, small-model candidate flag, provisional or tracked catalog rows, and raw source records. | Metadata-only discovery does not synthesize scores or relax ranking gates. The baseline covers small generator families including Google Gemma, Microsoft Phi, Meta Llama 3.2 small models, Qwen small models, Mistral/Ministral small models, and IBM Granite generators; NVIDIA retrieval/NIM, IBM watsonx Slate, and IBM Granite retrieval entries; provider/open-weight text-to-speech entries from OpenAI, Google, ElevenLabs, Cartesia, Deepgram, Amazon Polly, Azure Speech, PlayHT, Resemble, and Kokoro; official OpenAI GPT-5.6 Sol, Terra, and Luna catalog rows; and restricted-access frontier/cyber rows such as Claude Mythos 5 and GPT-5.5-Cyber when official provider documentation exists, while excluding community quantizations/fine-tunes unless a trusted mirror is configured. Provider API discovery supports OpenAI, Anthropic, Google Gemini, Mistral, Cohere, and xAI when their environment keys are present; missing keys are recorded as skipped source runs. |
 
 GPT-5.6 has three provider model identities: Sol, Terra, and Luna. Reasoning
@@ -226,7 +227,8 @@ not provisional model identities. OpenRouter may enrich compatible fields but
 cannot replace authoritative curated provenance.
 | OpenRouter market | `_refresh_openrouter_market_signals()` | Global and programming rank, total tokens, share, change ratio, request count, volume snapshots. | Ranking page payloads are optional and can change shape; failures are nonfatal warnings and appear in freshness/degraded export context. |
 | Hugging Face model cards | `_refresh_model_card_metadata()` | Model-card URL/source, docs/repo/paper URLs, license, base models, languages, capabilities, intended use, limitations, training data, cutoff. | Only models with `huggingface_repo_id`; README extraction can be incomplete or noisy. |
-| Hyperscaler catalogs | `sync_inference_catalog()` | AWS Bedrock, Azure AI Foundry, and Google Vertex AI availability, regions, deployment modes, pricing, source links, sync status. | AWS/GCP richer catalog data needs credentials; Azure public pricing can rate-limit. |
+| Official provider pricing | `sync_pricing()` | OpenAI, Anthropic, Google Gemini, Mistral, Cohere, and xAI direct price offers plus OpenRouter offers, components, tiers, units, official source URLs, source runs, and verification timestamps. | HTML sources are guarded by canary/coverage checks; a rejected parse preserves the previous active offers. |
+| Hyperscaler catalogs | `sync_inference_catalog()` | AWS Bedrock, Azure AI Foundry, and Google Vertex AI availability, regions, deployment modes, structured numeric price offers, source links, and sync status. | AWS/GCP richer catalog data needs credentials; Azure public pricing can rate-limit. |
 | Repo baselines | `provider_origin_baseline.json`, `model_curation_baseline.json`, `model_license_baseline.json` | Durable manual provider origin, family/canonical curation, exact/family/provider license policy. Provider aliases such as Amazon Nova/AWS/Bedrock, Azure/Microsoft Azure/Azure AI Foundry, Qwen/Alibaba, Mistral/Mistral AI, and ibm-granite/IBM collapse to their parent provider rows. | Manual and only refreshed when exported. |
 
 ## Implemented Source-Review Outcomes

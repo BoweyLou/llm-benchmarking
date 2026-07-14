@@ -122,6 +122,20 @@
     .source-records { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; color: var(--muted); }
     .source-records summary { cursor: pointer; color: var(--text); font-weight: 690; }
     .source-records ul { margin: 10px 0 0; padding-left: 20px; line-height: 1.55; }
+    .pricing-grid { display: grid; grid-template-columns: repeat(2, minmax(230px, 1fr)); gap: 10px; }
+    .price-card { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); }
+    .price-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .price-card h4 { margin: 0; font-size: 13px; }
+    .price-card .provider { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .price-components { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 11px; }
+    .price-component { min-width: 0; padding: 8px; border-radius: 6px; background: #fff; }
+    .price-component span, .price-component small { display: block; color: var(--muted); font-size: 10px; }
+    .price-component strong { display: block; margin: 3px 0; font-size: 13px; overflow-wrap: anywhere; }
+    .price-source { margin-top: 10px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .price-source a { color: var(--blue); }
+    .price-more { margin-top: 10px; font-size: 11px; }
+    .price-more summary { cursor: pointer; color: var(--blue); font-weight: 680; }
+    .price-variant { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
     .bulk-bar { position: fixed; z-index: 4; left: 50%; bottom: 18px; width: min(720px, calc(100vw - 32px)); display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 13px 14px 13px 18px; border: 1px solid #32445f; border-radius: 11px; color: #fff; background: #172033; box-shadow: 0 14px 50px rgba(20,32,51,.3); transform: translateX(-50%); }
     .bulk-bar[hidden] { display: none; }
     .bulk-bar strong, .bulk-bar span { display: block; }
@@ -155,6 +169,8 @@
       .queue { max-height: 390px; border-bottom: 1px solid var(--line); }
       .detail { padding: 17px; }
       .details-grid { grid-template-columns: 1fr 1fr; }
+      .pricing-grid { grid-template-columns: 1fr; }
+      .price-components { grid-template-columns: repeat(3, minmax(82px, 1fr)); }
       .bulk-dialog { width: 100%; max-width: none; margin: auto 0 0; border-radius: 16px 16px 0 0; }
       .bulk-form-grid { grid-template-columns: 1fr; gap: 0; }
       .bulk-bar { bottom: 10px; }
@@ -323,6 +339,20 @@
           if (!existing || Number(item.fit_score || 0) > Number(existing.fit_score || 0)) suggestions.set(key, item);
         });
         const providers = [...new Set(members.map((model) => model.provider).filter(Boolean))];
+        const destinationMap = new Map();
+        members.flatMap((model) => model.inference_destinations || []).forEach((destination) => {
+          const current = destinationMap.get(destination.id) || { ...destination, pricing_offers: [] };
+          const seen = new Set(current.pricing_offers.map((offer) => `${offer.destination_id}|${offer.provider_model_id}|${offer.service_tier}|${offer.region || ""}|${offer.provenance?.url || ""}|${JSON.stringify(offer.components || [])}`));
+          (destination.pricing_offers || []).forEach((offer) => {
+            const key = `${offer.destination_id}|${offer.provider_model_id}|${offer.service_tier}|${offer.region || ""}|${offer.provenance?.url || ""}|${JSON.stringify(offer.components || [])}`;
+            if (!seen.has(key)) { current.pricing_offers.push(offer); seen.add(key); }
+          });
+          destinationMap.set(destination.id, current);
+        });
+        const groupedDestinations = [...destinationMap.values()];
+        const groupedFreshOffers = groupedDestinations.flatMap((destination) =>
+          (destination.pricing_offers || []).filter((offer) => !offer.provenance?.stale)
+        );
         return {
           ...representative,
           group_id: groupId,
@@ -333,6 +363,13 @@
           general_approval_status: unanimous(members, approvalStatus, "unreviewed"),
           general_recommendation_status: unanimous(members, recommendationStatus, "unrated"),
           suggested_use_cases: [...suggestions.values()].sort((left, right) => Number(right.fit_score || 0) - Number(left.fit_score || 0)),
+          inference_destinations: groupedDestinations,
+          pricing_summary: {
+            priced_route_count: new Set(groupedFreshOffers.map((offer) => offer.destination_id)).size,
+            offer_count: groupedFreshOffers.length,
+            currencies: [...new Set(groupedFreshOffers.map((offer) => offer.currency).filter(Boolean))].sort(),
+            stale_offer_count: groupedDestinations.flatMap((destination) => destination.pricing_offers || []).length - groupedFreshOffers.length
+          },
           searchable: members.map((model) => `${model.name} ${model.provider} ${model.id} ${model.canonical_model_id || ""}`).join(" ").toLowerCase()
         };
       });
@@ -423,6 +460,45 @@
         </div>`).join("")}${suggestions.length > 2 ? `<button class="btn ghost" id="toggleSuggestions">${state.showAllSuggestions ? "Show top 2" : `Show all ${suggestions.length}`}</button>` : ""}</div>`;
     }
 
+    function formatPriceComponent(component, currency) {
+      const amount = Number(component.amount);
+      if (!Number.isFinite(amount)) return "Custom";
+      if (amount === 0) return "Free";
+      const formatted = amount < 0.01 ? amount.toPrecision(2) : amount.toLocaleString(undefined, { maximumFractionDigits: 4 });
+      const quantity = Number(component.unit_quantity || 1);
+      const quantityLabel = quantity === 1000000 ? "1M" : quantity === 1000 ? "1K" : (quantity === 1 ? "" : quantity.toLocaleString());
+      return `${currency || "USD"} ${formatted}${quantityLabel ? ` / ${quantityLabel}` : " /"} ${label(component.billing_unit || "unit")}${quantity === 1 ? "" : "s"}`;
+    }
+
+    function priceComponentHtml(component, currency) {
+      return `<div class="price-component"><span>${escapeHtml(label(component.charge_type))}${component.modality && component.modality !== "text" ? ` · ${escapeHtml(label(component.modality))}` : ""}</span><strong>${escapeHtml(formatPriceComponent(component, currency))}</strong><small>${Object.keys(component.conditions || {}).length ? escapeHtml(JSON.stringify(component.conditions)) : "Published rate"}</small></div>`;
+    }
+
+    function renderPricing(model) {
+      const routeOrder = { "openai-direct": 0, "anthropic-direct": 0, "google-gemini-direct": 0, "mistral-direct": 0, "cohere-direct": 0, "xai-direct": 0, openrouter: 1, "aws-bedrock": 2, "azure-ai-foundry": 2, "google-vertex-ai": 2 };
+      const routes = (model.inference_destinations || []).map((destination) => ({
+        ...destination,
+        freshOffers: (destination.pricing_offers || []).filter((offer) => !offer.provenance?.stale)
+      })).sort((left, right) => (routeOrder[left.id] ?? 9) - (routeOrder[right.id] ?? 9) || String(left.name).localeCompare(String(right.name)));
+      if (!routes.length) return '<div class="reason">No current published price is available for this model.</div>';
+      return `<div class="pricing-grid">${routes.map((destination) => {
+        const standard = destination.freshOffers.find((offer) => offer.service_tier === "standard" && !Object.keys(offer.constraints || {}).length)
+          || destination.freshOffers.find((offer) => offer.service_tier === "standard") || destination.freshOffers[0];
+        const primary = (standard?.components || []).filter((component) => {
+          const conditions = component.conditions || {};
+          const primaryCondition = !Object.keys(conditions).length
+            || (Object.keys(conditions).length === 1 && conditions.context_band === "short");
+          return component.modality === "text" && ["input", "cached_input", "output"].includes(component.charge_type) && primaryCondition;
+        });
+        const variants = destination.freshOffers.flatMap((offer) => (offer.components || []).map((component) => ({ offer, component }))).filter((item) => !standard || item.offer.id !== standard.id || !primary.includes(item.component));
+        const source = standard?.provenance || (destination.pricing_offers || [])[0]?.provenance;
+        return `<article class="price-card"><div class="price-card-head"><div><h4>${escapeHtml(destination.name)}</h4><div class="provider">${escapeHtml(standard?.provider_model_id || "Published provider route")}</div></div>${standard ? badge(standard.service_tier || "standard") : badge("unavailable")}</div>
+          ${standard ? `<div class="price-components">${primary.map((component) => priceComponentHtml(component, standard.currency)).join("") || '<div class="reason">See pricing details for published variants.</div>'}</div>` : '<div class="reason" style="margin-top:10px">No current published price.</div>'}
+          ${source ? `<div class="price-source">Source: <a href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">${escapeHtml(source.label)}</a><br>Checked ${escapeHtml(formatDate(source.verified_at))}</div>` : ""}
+          ${variants.length ? `<details class="price-more"><summary>More pricing details (${variants.length})</summary>${variants.map(({ offer, component }) => `<div class="price-variant"><strong>${escapeHtml(label(offer.service_tier || "standard"))}${offer.region ? ` · ${escapeHtml(offer.region)}` : ""}</strong>${priceComponentHtml(component, offer.currency)}</div>`).join("")}</details>` : ""}</article>`;
+      }).join("")}</div>`;
+    }
+
     function choiceGroup(name, values, active) {
       return `<div class="choice-grid">${values.map((value) => `<button class="choice ${value === active ? "active" : ""}" data-choice-group="${name}" data-choice-value="${value}">${escapeHtml(label(value))}</button>`).join("")}</div>`;
     }
@@ -439,6 +515,10 @@
         <section class="section">
           <div class="section-head"><div><h3>Performance evidence</h3><p>The strongest currently available benchmark signals for this model.</p></div></div>
           <div class="metrics">${metrics.length ? metrics.map((metric) => `<div class="metric"><span>${escapeHtml(metric.name)}</span><strong>${escapeHtml(formatMetric(metric.value))}</strong><span>${metric.verified ? "Verified" : "Unverified"}</span></div>`).join("") : '<div class="reason">No benchmark scores available.</div>'}</div>
+        </section>
+        <section class="section">
+          <div class="section-head"><div><h3>Pricing by provider</h3><p>Current published route prices with source and verification date. Prices older than 30 days are hidden.</p></div><span class="badge">${Number(model.pricing_summary?.priced_route_count || (model.inference_destinations || []).filter((item) => (item.pricing_offers || []).some((offer) => !offer.provenance?.stale)).length)} priced</span></div>
+          ${renderPricing(model)}
         </section>
         <section class="section">
           <div class="section-head"><div><h3>Your general decision</h3><p>Make one decision for the model. It applies across the catalog, not to individual use cases.</p></div></div>

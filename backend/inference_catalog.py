@@ -36,6 +36,55 @@ GCP_ENDPOINTS_URL = "https://docs.cloud.google.com/vertex-ai/docs/reference/rest
 GCP_PRICING_URL = "https://docs.cloud.google.com/billing/docs/reference/pricing-api/rest/v2beta/skus.prices/list"
 
 DESTINATIONS: dict[str, dict[str, Any]] = {
+    "openai-direct": {
+        "id": "openai-direct", "name": "OpenAI Direct", "hyperscaler": "Direct",
+        "availability_scope": "Provider account scoped", "availability_note": "Available through the OpenAI API subject to account access and limits.",
+        "location_scope": "Provider managed", "regions": [], "deployment_modes": ["API"],
+        "pricing_label": "OpenAI API pricing", "pricing_note": "Official direct-provider prices.",
+        "sources": [{"label": "Pricing", "url": "https://developers.openai.com/api/docs/pricing"}],
+    },
+    "anthropic-direct": {
+        "id": "anthropic-direct", "name": "Anthropic Direct", "hyperscaler": "Direct",
+        "availability_scope": "Provider account scoped", "availability_note": "Available through the Anthropic API subject to account access and limits.",
+        "location_scope": "Provider managed", "regions": [], "deployment_modes": ["API"],
+        "pricing_label": "Anthropic API pricing", "pricing_note": "Official direct-provider prices.",
+        "sources": [{"label": "Pricing", "url": "https://docs.anthropic.com/en/docs/about-claude/pricing"}],
+    },
+    "google-gemini-direct": {
+        "id": "google-gemini-direct", "name": "Google Gemini Direct", "hyperscaler": "Direct",
+        "availability_scope": "Provider account scoped", "availability_note": "Available through the Gemini API subject to account access and limits.",
+        "location_scope": "Provider managed", "regions": [], "deployment_modes": ["API"],
+        "pricing_label": "Gemini API pricing", "pricing_note": "Official direct-provider prices.",
+        "sources": [{"label": "Pricing", "url": "https://ai.google.dev/gemini-api/docs/pricing"}],
+    },
+    "mistral-direct": {
+        "id": "mistral-direct", "name": "Mistral Direct", "hyperscaler": "Direct",
+        "availability_scope": "Provider account scoped", "availability_note": "Available through the Mistral API subject to account access and limits.",
+        "location_scope": "Provider managed", "regions": [], "deployment_modes": ["API"],
+        "pricing_label": "Mistral API pricing", "pricing_note": "Official direct-provider prices.",
+        "sources": [{"label": "Pricing", "url": "https://mistral.ai/pricing/api/"}],
+    },
+    "cohere-direct": {
+        "id": "cohere-direct", "name": "Cohere Direct", "hyperscaler": "Direct",
+        "availability_scope": "Provider account scoped", "availability_note": "Available through the Cohere API subject to account access and limits.",
+        "location_scope": "Provider managed", "regions": [], "deployment_modes": ["API"],
+        "pricing_label": "Cohere API pricing", "pricing_note": "Official direct-provider prices.",
+        "sources": [{"label": "Pricing", "url": "https://cohere.com/pricing"}],
+    },
+    "xai-direct": {
+        "id": "xai-direct", "name": "xAI Direct", "hyperscaler": "Direct",
+        "availability_scope": "Provider account scoped", "availability_note": "Available through the xAI API subject to account access and limits.",
+        "location_scope": "Provider managed", "regions": [], "deployment_modes": ["API"],
+        "pricing_label": "xAI API pricing", "pricing_note": "Official direct-provider prices.",
+        "sources": [{"label": "Pricing", "url": "https://docs.x.ai/developers/pricing"}],
+    },
+    "openrouter": {
+        "id": "openrouter", "name": "OpenRouter", "hyperscaler": "Router",
+        "availability_scope": "Router account scoped", "availability_note": "Availability depends on OpenRouter providers and routing policy.",
+        "location_scope": "Provider routed", "regions": [], "deployment_modes": ["Router API"],
+        "pricing_label": "OpenRouter Models API", "pricing_note": "Published router prices and model-specific components.",
+        "sources": [{"label": "Models API", "url": "https://openrouter.ai/api/v1/models"}],
+    },
     "aws-bedrock": {
         "id": "aws-bedrock",
         "name": "AWS Bedrock",
@@ -121,19 +170,21 @@ PROVIDER_DESTINATIONS: dict[str, list[str]] = {
     "amazon": ["aws-bedrock"],
     "amazon-nova": ["aws-bedrock"],
     "aws": ["aws-bedrock"],
-    "anthropic": ["aws-bedrock"],
-    "cohere": ["aws-bedrock"],
-    "google": ["google-vertex-ai"],
+    "anthropic": ["anthropic-direct", "aws-bedrock"],
+    "cohere": ["cohere-direct", "aws-bedrock"],
+    "google": ["google-gemini-direct", "google-vertex-ai"],
     "google-deepmind": ["google-vertex-ai"],
     "meta": ["aws-bedrock", "azure-ai-foundry", "google-vertex-ai"],
     "meta-ai": ["aws-bedrock", "azure-ai-foundry", "google-vertex-ai"],
-    "mistral": ["aws-bedrock", "azure-ai-foundry", "google-vertex-ai"],
-    "mistral-ai": ["aws-bedrock", "azure-ai-foundry", "google-vertex-ai"],
+    "mistral": ["mistral-direct", "aws-bedrock", "azure-ai-foundry", "google-vertex-ai"],
+    "mistral-ai": ["mistral-direct", "aws-bedrock", "azure-ai-foundry", "google-vertex-ai"],
     "microsoft": ["azure-ai-foundry"],
     "microsoft-azure": ["azure-ai-foundry"],
     "azure-ai-foundry": ["azure-ai-foundry"],
     "azure-openai": ["azure-ai-foundry"],
-    "openai": ["azure-ai-foundry"],
+    "openai": ["openai-direct", "azure-ai-foundry"],
+    "xai": ["xai-direct"],
+    "x-ai": ["xai-direct"],
 }
 
 FAMILY_DESTINATION_ADDITIONS: dict[str, list[str]] = {
@@ -209,6 +260,8 @@ def list_curated_inference_destinations(model: Mapping[str, Any]) -> list[dict[s
             destination_ids.extend(additions)
 
     unique_destination_ids = list(dict.fromkeys(destination_ids))
+    if str(model.get("openrouter_model_id") or model.get("openrouter_canonical_slug") or "").strip():
+        unique_destination_ids.append("openrouter")
     return [_materialize_destination(destination_id) for destination_id in unique_destination_ids]
 
 
@@ -266,6 +319,21 @@ def load_authoritative_destination_ids(conn: Connection) -> set[str]:
 def _materialize_destination(destination_id: str) -> dict[str, Any]:
     record = DESTINATIONS[destination_id]
     return _normalize_destination(record)
+
+
+def materialize_destination(destination_id: str) -> dict[str, Any]:
+    """Return a normalized first-class inference destination."""
+    if destination_id not in DESTINATIONS:
+        return _normalize_destination(
+            {
+                "id": destination_id,
+                "name": destination_id.replace("-", " ").title(),
+                "hyperscaler": "Provider",
+                "availability_scope": "Published route",
+                "location_scope": "Provider managed",
+            }
+        )
+    return _materialize_destination(destination_id)
 
 
 def _normalize_destination(record: Mapping[str, Any]) -> dict[str, Any]:

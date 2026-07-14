@@ -22,6 +22,7 @@ from .inference_sync import sync_inference_catalog
 from .model_card_audit import build_model_card_audit_summary, format_model_card_audit_summary
 from .model_curation import MODEL_CURATION_BASELINE_PATH, export_model_curation_baseline
 from .model_licenses import MODEL_LICENSE_BASELINE_PATH
+from .pricing import sync_pricing
 from .recommendation_engine import (
     PROFILE_AUSTRALIAN_BANK,
     SUPPORTED_PROFILES,
@@ -236,6 +237,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional subset of hyperscaler destinations to sync.",
     )
     inference_parser.set_defaults(func=cmd_inference_sync)
+
+    pricing_parser = subparsers.add_parser(
+        "pricing-sync",
+        help="Refresh provider-specific prices with provenance and last-known-good safeguards.",
+    )
+    pricing_parser.add_argument(
+        "--providers",
+        nargs="+",
+        choices=(
+            "openai", "anthropic", "google", "mistral", "cohere", "xai", "openrouter",
+            "aws-bedrock", "azure-ai-foundry", "google-vertex-ai",
+        ),
+        help="Optional subset of direct, router, or cloud pricing providers.",
+    )
+    pricing_parser.set_defaults(func=cmd_pricing_sync)
 
     model_card_parser = subparsers.add_parser(
         "model-card-sync",
@@ -503,6 +519,14 @@ def cmd_inference_sync(args: argparse.Namespace) -> int:
     summary = sync_inference_catalog(destination_ids=args.destinations)
     print(json.dumps(summary, indent=2, sort_keys=True))
     statuses = [item.get("status") for item in summary.get("destinations", {}).values()]
+    return 0 if statuses and all(status != "failed" for status in statuses) else 1
+
+
+def cmd_pricing_sync(args: argparse.Namespace) -> int:
+    bootstrap()
+    summary = sync_pricing(provider_ids=args.providers)
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    statuses = [item.get("status") for item in summary.get("providers", {}).values()]
     return 0 if statuses and all(status != "failed" for status in statuses) else 1
 
 

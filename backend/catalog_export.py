@@ -16,6 +16,7 @@ CSV_SIDECAR_SUFFIXES = {
     "suggested_use_cases": "suggested-use-cases",
     "use_case_approvals": "use-case-approvals",
     "inference_destinations": "inference-destinations",
+    "pricing_offers": "pricing-offers",
     "provider_origin_countries": "provider-origin-countries",
     "source_freshness": "source-freshness",
     "source_listings": "source-listings",
@@ -292,6 +293,14 @@ INFERENCE_DESTINATION_CSV_FIELDS = [
     "sources",
 ]
 
+PRICING_OFFER_CSV_FIELDS = [
+    "model_id", "model_name", "provider", "destination_id", "destination_name",
+    "offer_id", "provider_model_id", "service_tier", "region", "currency",
+    "price_status", "constraints", "modality", "charge_type", "amount",
+    "billing_unit", "unit_quantity", "conditions", "source_kind", "source_label",
+    "source_url", "verified_at", "stale",
+]
+
 PROVIDER_ORIGIN_COUNTRY_CSV_FIELDS = [
     "model_id",
     "model_name",
@@ -370,6 +379,10 @@ def render_model_metadata_csv_bundle(models: list[dict[str, Any]]) -> dict[str, 
         CSV_SIDECAR_SUFFIXES["inference_destinations"]: _render_csv_rows(
             INFERENCE_DESTINATION_CSV_FIELDS,
             _inference_destination_rows(models),
+        ),
+        CSV_SIDECAR_SUFFIXES["pricing_offers"]: _render_csv_rows(
+            PRICING_OFFER_CSV_FIELDS,
+            _pricing_offer_rows(models),
         ),
         CSV_SIDECAR_SUFFIXES["provider_origin_countries"]: _render_csv_rows(
             PROVIDER_ORIGIN_COUNTRY_CSV_FIELDS,
@@ -636,6 +649,36 @@ def _inference_destination_rows(models: list[dict[str, Any]]) -> list[dict[str, 
                     "sources": _join_values(_source_labels(destination.get("sources"))),
                 }
             )
+    return rows
+
+
+def _pricing_offer_rows(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for model in models:
+        for destination in _as_list(model.get("inference_destinations")):
+            if not isinstance(destination, dict):
+                continue
+            for offer in _as_list(destination.get("pricing_offers")):
+                if not isinstance(offer, dict):
+                    continue
+                provenance = offer.get("provenance") if isinstance(offer.get("provenance"), dict) else {}
+                components = [item for item in _as_list(offer.get("components")) if isinstance(item, dict)] or [{}]
+                for component in components:
+                    rows.append(
+                        {
+                            "model_id": model.get("id"), "model_name": model.get("name"), "provider": model.get("provider"),
+                            "destination_id": destination.get("id"), "destination_name": destination.get("name"),
+                            "offer_id": offer.get("id"), "provider_model_id": offer.get("provider_model_id"),
+                            "service_tier": offer.get("service_tier"), "region": offer.get("region"),
+                            "currency": offer.get("currency"), "price_status": offer.get("price_status"),
+                            "constraints": offer.get("constraints"), "modality": component.get("modality"),
+                            "charge_type": component.get("charge_type"), "amount": component.get("amount"),
+                            "billing_unit": component.get("billing_unit"), "unit_quantity": component.get("unit_quantity"),
+                            "conditions": component.get("conditions"), "source_kind": provenance.get("kind"),
+                            "source_label": provenance.get("label"), "source_url": provenance.get("url"),
+                            "verified_at": provenance.get("verified_at"), "stale": provenance.get("stale"),
+                        }
+                    )
     return rows
 
 

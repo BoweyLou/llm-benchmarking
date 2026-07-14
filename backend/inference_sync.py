@@ -41,6 +41,7 @@ from .inference_catalog import (
 from .model_taxonomy import infer_model_identity
 from .name_resolution import name_signatures, normalize_text
 from .seed_data import canonical_provider_name
+from . import pricing
 
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; LLMBenchmarkingBot/0.1; +https://localhost)",
@@ -117,7 +118,10 @@ def sync_inference_catalog(
             .order_by(models_table.c.provider.asc(), models_table.c.name.asc()),
         )
 
-    summary: dict[str, Any] = {"destinations": {}, "records_written": 0}
+    summary: dict[str, Any] = {
+        "destinations": {}, "records_written": 0,
+        "pricing_offers_written": 0, "pricing_components_written": 0,
+    }
     with httpx.Client(timeout=45.0, headers=HTTP_HEADERS, follow_redirects=True) as client:
         for destination_id in selected:
             try:
@@ -161,10 +165,35 @@ def sync_inference_catalog(
                     completed=True,
                 )
 
+            pricing_result: dict[str, Any] = {}
+            try:
+                source = DESTINATIONS[outcome.destination_id]["sources"][-1]
+                pricing_result = pricing.persist_cloud_pricing(
+                    engine=engine,
+                    destination_id=outcome.destination_id,
+                    source_url=str(source["url"]),
+                    source_label=str(source["label"]),
+                    records=outcome.records,
+                )
+            except Exception as exc:
+                pricing.record_failed_pricing_run(f"pricing_{outcome.destination_id}", str(exc), engine=engine)
+                pricing_result = {"status": "failed", "reason": str(exc), "last_known_good_preserved": True}
+                with engine.begin() as conn:
+                    _write_sync_status(
+                        conn,
+                        outcome.destination_id,
+                        status="failed",
+                        detail={**outcome.detail, "pricing_error": str(exc), "availability_records_written": len(outcome.records)},
+                        completed=False,
+                    )
+
             summary["records_written"] += len(outcome.records)
+            summary["pricing_offers_written"] += int(pricing_result.get("offer_count") or 0)
+            summary["pricing_components_written"] += int(pricing_result.get("component_count") or 0)
             summary["destinations"][destination_id] = {
-                "status": "completed",
                 **outcome.detail,
+                "status": "failed" if pricing_result.get("status") == "failed" else "completed",
+                "pricing": pricing_result,
             }
 
     return summary
@@ -273,6 +302,7 @@ def _sync_aws_bedrock(models: list[dict[str, Any]], client: httpx.Client) -> Syn
                 catalog_model_id=_first_non_empty(
                     entry.get("catalog_model_id") for entry in (matched_catalog or matched_prices)
                 ),
+                pricing_entries=matched_prices,
             )
         )
 
@@ -383,6 +413,7 @@ def _sync_azure_foundry(models: list[dict[str, Any]], client: httpx.Client) -> S
                     {"label": "Pricing API", "url": AZURE_PRICING_URL},
                 ],
                 catalog_model_id=_first_non_empty(_azure_model_resource_name(entry) for entry in matched_models),
+                pricing_entries=matched_prices,
             )
         )
 
@@ -467,6 +498,7 @@ def _sync_azure_foundry_public_pricing(
                 catalog_model_id=_first_non_empty(
                     entry.get("derived_model_name") or entry.get("meter_name") for entry in matched_prices
                 ),
+                pricing_entries=matched_prices,
             )
         )
 
@@ -557,6 +589,7 @@ def _sync_google_vertex_ai(models: list[dict[str, Any]], client: httpx.Client) -
                     {"label": "Pricing API", "url": GCP_PRICING_URL},
                 ],
                 catalog_model_id=_first_non_empty(entry.get("catalog_model_id") for entry in matched_catalog),
+                pricing_entries=matched_skus,
             )
         )
 
@@ -626,7 +659,10 @@ def _replace_destination_records(conn, destination_id: str, records: list[dict[s
     )
     if not records:
         return
-    conn.execute(model_inference_destinations_table.insert(), records)
+    conn.execute(
+        model_inference_destinations_table.insert(),
+        [{key: value for key, value in record.items() if not key.startswith("_")} for record in records],
+    )
 
 
 def _write_sync_status(
@@ -674,6 +710,7 @@ def _build_destination_record(
     pricing_note: str | None,
     sources: list[dict[str, str]],
     catalog_model_id: str | None,
+    pricing_entries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "model_id": model_id,
@@ -691,6 +728,7 @@ def _build_destination_record(
         "sources_json": json.dumps(sources),
         "catalog_model_id": catalog_model_id,
         "synced_at": utc_now_iso(),
+        "_pricing_entries": list(pricing_entries or []),
     }
 
 
@@ -1350,20 +1388,21 @@ def _google_vertex_skus(
             description = _clean_optional_text(item.get("description"))
             display_name = _clean_optional_text(item.get("displayName")) or description
             latest_pricing = _latest_google_pricing(item.get("pricingInfo"))
-            price_per_unit = _google_unit_price(latest_pricing)
-            unit = _google_pricing_unit(latest_pricing)
-            skus.append(
-                {
-                    "catalog_model_id": _resource_tail(item.get("name")),
-                    "description": description,
-                    "display_name": display_name,
-                    "provider": _provider_from_text(description or display_name or ""),
-                    "regions": item.get("serviceRegions") or [],
-                    "price_kind": _price_kind_from_text(description or "", display_name or ""),
-                    "price_per_mtok": _price_per_mtok(price_per_unit, unit) if price_per_unit is not None else None,
-                    "unit": unit,
-                }
-            )
+            regions = [str(region) for region in item.get("serviceRegions") or [""]]
+            for rate in _google_pricing_rates(latest_pricing):
+                for region in regions:
+                    skus.append(
+                        {
+                            "catalog_model_id": _resource_tail(item.get("name")),
+                            "description": description,
+                            "display_name": display_name,
+                            "provider": _provider_from_text(description or display_name or ""),
+                            "regions": item.get("serviceRegions") or [],
+                            "region": region or None,
+                            "price_kind": _price_kind_from_text(description or "", display_name or ""),
+                            **rate,
+                        }
+                    )
         page_token = str(payload.get("nextPageToken") or "").strip()
         if not page_token:
             break
@@ -1398,6 +1437,59 @@ def _google_unit_price(pricing_info: dict[str, Any] | None) -> float | None:
     units = _to_float(money.get("units")) or 0.0
     nanos = _to_float(money.get("nanos")) or 0.0
     return units + nanos / 1_000_000_000.0
+
+
+def _google_pricing_rates(pricing_info: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Preserve every current Cloud Billing tier as an exact structured rate."""
+    if not isinstance(pricing_info, dict):
+        return []
+    expression = pricing_info.get("pricingExpression")
+    if not isinstance(expression, dict):
+        return []
+    rates = [item for item in expression.get("tieredRates") or [] if isinstance(item, dict)]
+    unit_text = str(expression.get("usageUnitDescription") or expression.get("baseUnitDescription") or "").strip()
+    display_quantity = _to_float(expression.get("displayQuantity")) or 1.0
+    payload: list[dict[str, Any]] = []
+    for index, rate in enumerate(rates):
+        money = rate.get("unitPrice")
+        if not isinstance(money, dict):
+            continue
+        amount = (_to_float(money.get("units")) or 0.0) + (_to_float(money.get("nanos")) or 0.0) / 1_000_000_000.0
+        start = _to_float(rate.get("startUsageAmount")) or 0.0
+        next_start = _to_float(rates[index + 1].get("startUsageAmount")) if index + 1 < len(rates) else None
+        payload.append(
+            {
+                "amount": amount,
+                "billing_unit": _google_billing_unit(unit_text),
+                "unit_quantity": display_quantity,
+                "unit": unit_text,
+                "start_usage_amount": start,
+                "end_usage_amount": next_start,
+                "effective_time": pricing_info.get("effectiveTime"),
+            }
+        )
+    return payload
+
+
+def _google_billing_unit(value: str) -> str:
+    normalized = normalize_text(value)
+    if "token" in normalized:
+        return "token"
+    if "character" in normalized:
+        return "character"
+    if "image" in normalized:
+        return "image"
+    if "request" in normalized or "operation" in normalized:
+        return "request"
+    if "second" in normalized:
+        return "second"
+    if "minute" in normalized:
+        return "minute"
+    if "hour" in normalized:
+        return "hour"
+    if "page" in normalized:
+        return "page"
+    return normalized.replace(" ", "_") or "unit"
 
 
 def _google_pricing_unit(pricing_info: dict[str, Any] | None) -> str:

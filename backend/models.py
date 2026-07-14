@@ -84,6 +84,43 @@ class InferenceSourceOut(APIModel):
     url: str
 
 
+class PricingProvenanceOut(APIModel):
+    kind: str
+    label: str
+    url: str
+    verified_at: datetime
+    stale: bool = False
+
+
+class PricingComponentOut(APIModel):
+    modality: str = "text"
+    charge_type: str
+    amount: float | None = None
+    billing_unit: str
+    unit_quantity: float = 1
+    conditions: dict[str, Any] = Field(default_factory=dict)
+
+
+class PricingOfferOut(APIModel):
+    id: int
+    destination_id: str
+    provider_model_id: str | None = None
+    service_tier: str = "standard"
+    region: str | None = None
+    currency: str = "USD"
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    price_status: str = "published"
+    components: list[PricingComponentOut] = Field(default_factory=list)
+    provenance: PricingProvenanceOut
+
+
+class PricingSummaryOut(APIModel):
+    priced_route_count: int = 0
+    offer_count: int = 0
+    currencies: list[str] = Field(default_factory=list)
+    stale_offer_count: int = 0
+
+
 class InferenceDestinationOut(APIModel):
     id: str
     name: str
@@ -97,6 +134,7 @@ class InferenceDestinationOut(APIModel):
     pricing_label: str | None = None
     pricing_note: str | None = None
     sources: list[InferenceSourceOut] = Field(default_factory=list)
+    pricing_offers: list[PricingOfferOut] = Field(default_factory=list)
 
 
 class InferenceSummaryOut(APIModel):
@@ -412,6 +450,7 @@ class ModelOut(APIModel):
     active: bool = True
     inference_destinations: list[InferenceDestinationOut] = Field(default_factory=list)
     inference_summary: InferenceSummaryOut = Field(default_factory=InferenceSummaryOut)
+    pricing_summary: PricingSummaryOut = Field(default_factory=PricingSummaryOut)
     source_freshness: list[SourceFreshnessOut] = Field(default_factory=list)
     source_listings: list[SourceListingOut] = Field(default_factory=list)
     scores: dict[str, ScoreOut | None] = Field(default_factory=dict)

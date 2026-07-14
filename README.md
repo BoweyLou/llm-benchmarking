@@ -8,8 +8,8 @@ The primary output is now a simple model metadata list:
 python -m backend list-models
 ```
 
-That command prints a JSON array. Each model item includes the serialized metadata used by the old dashboard, including scores, source details, model roles, release-date provenance, model-age evidence, model size fields, small-model candidate visibility, provider origin, license policy, provenance policy, use-case approvals, inference destinations, OpenRouter market metadata, model-card fields, and family/duplicate curation fields.
-It also writes spreadsheet-friendly CSV output to `output/model-list.csv` by default, plus normalized companion CSVs for scores, source listings, use-case approvals, inference destinations, provider-origin countries, and source freshness. Score exports preserve confidence, sample-size, rank, category, methodology, publication, style-control, preliminary, and source-revision evidence. When recommendation proposals have been synced, use-case approvals include proposed and effective recommendation fields.
+That command prints a JSON array. Each model item includes scores, source details, model roles, release-date provenance, model-age evidence, model size fields, provider origin, license and provenance policy, inference destinations with provider-specific pricing offers, OpenRouter market metadata, model-card fields, and family/duplicate curation fields.
+It also writes spreadsheet-friendly CSV output to `output/model-list.csv` by default, plus normalized companion CSVs for scores, source listings, use-case approvals, inference destinations, pricing offers, provider-origin countries, and source freshness. The pricing sidecar contains one row per price component and retains its route, tier, region, unit, official source URL, verification time, and staleness status.
 
 ## Stack
 
@@ -40,7 +40,7 @@ What those commands do:
 - `python -m backend bootstrap`
   Creates the schema, repairs local runtime state, seeds reference data, and applies repo-backed provider-origin, model-curation, and model-license baselines. It does not call external metadata services.
 - `python -m backend update`
-  Runs the benchmark ingestion/update pipeline, refreshes external OpenRouter/catalog-discovery/model-card/market metadata, and writes update history plus audit results. Full updates run configured model discovery; benchmark-scoped updates skip it unless `--refresh-model-discovery` is passed.
+  Runs the benchmark ingestion/update pipeline, refreshes external OpenRouter/catalog-discovery/provider-pricing/model-card/market metadata, and writes update history plus audit results. Full updates run configured model discovery; benchmark-scoped updates skip discovery unless `--refresh-model-discovery` is passed, but still refresh provider pricing.
 - `python -m backend list-models`
   Prints or exports the complete active model metadata list and writes a default clean CSV bundle.
 
@@ -58,7 +58,7 @@ Print a pretty JSON list to stdout:
 python -m backend list-models
 ```
 
-By default this also writes `output/model-list.csv` and companion files named `model-list-scores.csv`, `model-list-source-listings.csv`, `model-list-use-case-approvals.csv`, `model-list-inference-destinations.csv`, `model-list-provider-origin-countries.csv`, and `model-list-source-freshness.csv`. The main CSV keeps model-level columns readable and replaces nested JSON blobs with summary columns. Use `--csv-output <path>` to choose another CSV path, `--no-csv-sidecars` to suppress companion files, or `--no-csv` to suppress the CSV bundle when a script needs stdout only.
+By default this also writes `output/model-list.csv` and companion files named `model-list-scores.csv`, `model-list-source-listings.csv`, `model-list-use-case-approvals.csv`, `model-list-inference-destinations.csv`, `model-list-pricing-offers.csv`, `model-list-provider-origin-countries.csv`, and `model-list-source-freshness.csv`. The main CSV keeps model-level columns readable and replaces nested JSON blobs with summary columns. Use `--csv-output <path>` to choose another CSV path, `--no-csv-sidecars` to suppress companion files, or `--no-csv` to suppress the CSV bundle when a script needs stdout only.
 
 LM Arena ingestion reads the official `lmarena-ai/leaderboard-dataset` Parquet
 files. Each run resolves one dataset commit SHA and uses it for all selected
@@ -423,6 +423,7 @@ python -m backend list-models --format csv --output output/model-metadata.csv
 python -m backend list-models --format raw-csv --output output/model-metadata-raw.csv
 python -m backend inference-sync
 python -m backend inference-sync --destinations aws-bedrock azure-ai-foundry
+python -m backend pricing-sync --providers openai openrouter aws-bedrock
 python -m backend model-card-sync
 python -m backend model-card-audit
 python -m backend recommendation-audit
@@ -443,6 +444,7 @@ Notes:
 - `model-discovery-sync` runs only the curated metadata discovery lane. `--source configured` runs static provider catalog rows, provider-owned Hugging Face discovery, and authenticated provider API catalogs when their keys are present; use `--source huggingface`, `--source catalog`, or `--source provider-api` to narrow the run. Provider API discovery currently supports OpenAI (`OPENAI_API_KEY`), Anthropic (`ANTHROPIC_API_KEY`), Google Gemini (`GEMINI_API_KEY` or `GOOGLE_API_KEY`), Mistral (`MISTRAL_API_KEY`), Cohere (`COHERE_API_KEY`), and xAI (`XAI_API_KEY`). Missing provider keys are recorded as skipped source runs rather than hard failures. Dynamically discovered rows are provisional unless the provider marks them deprecated; matching curated tracked rows remain tracked. The repo-backed baseline covers small generator families such as Google Gemma, Microsoft Phi, Meta Llama 3.2 small models, Qwen small models, Mistral/Ministral small models, and IBM Granite generators, plus NVIDIA retrieval, IBM watsonx Slate, and IBM Granite retrieval entries. It intentionally excludes community quantizations/fine-tunes unless a trusted mirror is configured.
 - OpenRouter model refresh requests all output modalities so non-text-capable catalog rows are not hidden by the provider default.
 - `inference-sync` supports destination subsets.
+- `pricing-sync` refreshes official direct-provider, router, and cloud prices. Supported provider keys are `openai`, `anthropic`, `google`, `mistral`, `cohere`, `xai`, `openrouter`, `aws-bedrock`, `azure-ai-foundry`, and `google-vertex-ai`. Each source refresh is atomic: zero results, a missing configured canary, or component coverage below 70% records a failed source run and preserves the last-known-good offers. Prices remain auditable indefinitely, but offers older than 30 days are excluded from the review preview and model pricing summary.
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.
 - `recommendation-audit` previews generated use-case recommendation proposals. `recommendation-sync` persists them so `list-models`, CSV export, and the API include proposed/effective recommendation fields.

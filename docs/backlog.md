@@ -17,6 +17,7 @@ the row is older than 14 days or the backend/API shape has changed.
 ## Done
 
 - [x] LBM-070: P1 Stabilize GPT-5.6 identities, configurations, and usage policy
+- [x] LBM-071: P1 Add provider-specific pricing and provenance
   - Source: Human request 2026-07-14 after missing and duplicate GPT-5.6 variants appeared in the review catalog.
   - Problem: reasoning-effort labels were treated as model identities and then collapsed to one best score, while OpenRouter-added product modes created duplicate active rows and could replace authoritative provenance.
   - Scope: retain Sol/Terra/Luna as stable model identities; persist effort-level score evidence independently; add model-level effort ceilings and restricted Pro/Ultra modes; migrate malformed rows without losing evidence or decisions; enforce source precedence; fix skipped source-run serialization.

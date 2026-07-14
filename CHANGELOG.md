@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0 - 2026-07-14
+
+- Added provider-specific pricing offers and components for direct provider, OpenRouter, AWS Bedrock, Azure AI Foundry, and Google Vertex AI routes, with official-source provenance and 30-day freshness status.
+- Added transactional pricing refreshes with source-run/raw-record evidence, canary and 70% coverage guards, and last-known-good preservation when a provider page or API changes.
+- Added `pricing-sync`, automatic pricing refresh during full updates, review catalog schema v3 pricing contracts, a normalized pricing CSV sidecar, and a responsive Pricing by provider panel.
+- Retained the model-level input/output price fields for one compatibility release while preferring fresh direct-standard prices and then OpenRouter prices.
+
 ## 0.7.0 - 2026-07-14
 
 - Added model-level usage policies with a reasoning-effort ceiling and restricted `pro`/`ultra` product modes, including review UI, API, snapshot v3, model API, and CSV export support.

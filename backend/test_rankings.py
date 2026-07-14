@@ -960,11 +960,12 @@ class RankingTests(unittest.TestCase):
         models = update_engine.list_models()
         gpt = next(model for model in models if model["id"] == "gpt-5-4")
 
-        self.assertEqual(len(gpt["inference_destinations"]), 1)
-        self.assertEqual(gpt["inference_destinations"][0]["regions"], ["eastus2"])
-        self.assertEqual(gpt["inference_destinations"][0]["deployment_modes"], ["Provisioned"])
+        self.assertEqual(len(gpt["inference_destinations"]), 2)
+        azure = next(item for item in gpt["inference_destinations"] if item["id"] == "azure-ai-foundry")
+        self.assertEqual(azure["regions"], ["eastus2"])
+        self.assertEqual(azure["deployment_modes"], ["Provisioned"])
         self.assertEqual(
-            gpt["inference_destinations"][0]["pricing_label"],
+            azure["pricing_label"],
             "Input USD $2.00 / Output USD $8.00 per 1M tokens",
         )
 
@@ -1715,6 +1716,7 @@ class RankingTests(unittest.TestCase):
             patch.object(update_engine, "_refresh_openrouter_model_metadata"),
             patch.object(update_engine, "_refresh_model_card_metadata"),
             patch.object(update_engine, "_refresh_model_license_metadata"),
+            patch.object(update_engine.pricing, "sync_pricing", return_value={"providers": {}}),
             patch.object(
                 update_engine,
                 "_refresh_openrouter_market_signals",

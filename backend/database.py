@@ -242,6 +242,43 @@ model_inference_destinations = Table(
     Column("synced_at", String, nullable=False),
 )
 
+model_pricing_offers = Table(
+    "model_pricing_offers",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("model_id", String, ForeignKey("models.id"), nullable=False),
+    Column("destination_id", String, nullable=False),
+    Column("offer_key", String, nullable=False),
+    Column("provider_model_id", String),
+    Column("service_tier", String, nullable=False, server_default=text("'standard'")),
+    Column("region", String),
+    Column("currency", String, nullable=False, server_default=text("'USD'")),
+    Column("constraints_json", Text, nullable=False, server_default=text("'{}'")),
+    Column("price_status", String, nullable=False, server_default=text("'published'")),
+    Column("source_name", String, nullable=False),
+    Column("source_url", Text, nullable=False),
+    Column("source_type", String, nullable=False, server_default=text("'official'")),
+    Column("source_run_id", Integer, ForeignKey("source_runs.id")),
+    Column("effective_at", String),
+    Column("verified_at", String, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("superseded_at", String),
+    Column("active", Integer, nullable=False, server_default=text("1")),
+)
+
+model_pricing_components = Table(
+    "model_pricing_components",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("offer_id", Integer, ForeignKey("model_pricing_offers.id"), nullable=False),
+    Column("modality", String, nullable=False, server_default=text("'text'")),
+    Column("charge_type", String, nullable=False),
+    Column("amount", Float),
+    Column("billing_unit", String, nullable=False),
+    Column("unit_quantity", Float, nullable=False, server_default=text("1")),
+    Column("conditions_json", Text, nullable=False, server_default=text("'{}'")),
+)
+
 inference_sync_status = Table(
     "inference_sync_status",
     metadata,
@@ -421,6 +458,8 @@ TABLES: tuple[Table, ...] = (
     model_duplicate_overrides,
     models,
     model_inference_destinations,
+    model_pricing_offers,
+    model_pricing_components,
     inference_sync_status,
     scores,
     model_source_listings,
@@ -698,6 +737,51 @@ def _create_schema_sql() -> list[str]:
         """
         CREATE UNIQUE INDEX IF NOT EXISTS idx_model_inference_destinations_unique
         ON model_inference_destinations (model_id, destination_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS model_pricing_offers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_id TEXT NOT NULL REFERENCES models(id),
+            destination_id TEXT NOT NULL,
+            offer_key TEXT NOT NULL,
+            provider_model_id TEXT,
+            service_tier TEXT NOT NULL DEFAULT 'standard',
+            region TEXT,
+            currency TEXT NOT NULL DEFAULT 'USD',
+            constraints_json TEXT NOT NULL DEFAULT '{}',
+            price_status TEXT NOT NULL DEFAULT 'published',
+            source_name TEXT NOT NULL,
+            source_url TEXT NOT NULL,
+            source_type TEXT NOT NULL DEFAULT 'official',
+            source_run_id INTEGER REFERENCES source_runs(id),
+            effective_at TEXT,
+            verified_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            superseded_at TEXT,
+            active INTEGER NOT NULL DEFAULT 1
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_model_pricing_offers_unique
+        ON model_pricing_offers (model_id, destination_id, offer_key) WHERE active = 1
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS model_pricing_components (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            offer_id INTEGER NOT NULL REFERENCES model_pricing_offers(id),
+            modality TEXT NOT NULL DEFAULT 'text',
+            charge_type TEXT NOT NULL,
+            amount REAL,
+            billing_unit TEXT NOT NULL,
+            unit_quantity REAL NOT NULL DEFAULT 1,
+            conditions_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_model_pricing_components_unique
+        ON model_pricing_components (
+            offer_id, modality, charge_type, billing_unit, unit_quantity, amount, conditions_json
+        )
         """,
         """
         CREATE TABLE IF NOT EXISTS inference_sync_status (
@@ -1744,6 +1828,63 @@ def _migration_20260714_gpt56_configuration_policy(conn: Connection) -> None:
         )
 
 
+def _migration_20260714_provider_pricing(conn: Connection) -> None:
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS model_pricing_offers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_id TEXT NOT NULL REFERENCES models(id),
+            destination_id TEXT NOT NULL,
+            offer_key TEXT NOT NULL,
+            provider_model_id TEXT,
+            service_tier TEXT NOT NULL DEFAULT 'standard',
+            region TEXT,
+            currency TEXT NOT NULL DEFAULT 'USD',
+            constraints_json TEXT NOT NULL DEFAULT '{}',
+            price_status TEXT NOT NULL DEFAULT 'published',
+            source_name TEXT NOT NULL,
+            source_url TEXT NOT NULL,
+            source_type TEXT NOT NULL DEFAULT 'official',
+            source_run_id INTEGER REFERENCES source_runs(id),
+            effective_at TEXT,
+            verified_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            superseded_at TEXT,
+            active INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
+    conn.exec_driver_sql(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_model_pricing_offers_unique
+        ON model_pricing_offers (model_id, destination_id, offer_key) WHERE active = 1
+        """
+    )
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS model_pricing_components (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            offer_id INTEGER NOT NULL REFERENCES model_pricing_offers(id),
+            modality TEXT NOT NULL DEFAULT 'text',
+            charge_type TEXT NOT NULL,
+            amount REAL,
+            billing_unit TEXT NOT NULL,
+            unit_quantity REAL NOT NULL DEFAULT 1,
+            conditions_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    conn.exec_driver_sql("DROP INDEX IF EXISTS idx_model_pricing_components_unique")
+    conn.exec_driver_sql(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_model_pricing_components_unique
+        ON model_pricing_components (
+            offer_id, modality, charge_type, billing_unit, unit_quantity, amount, conditions_json
+        )
+        """
+    )
+
+
 SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
     ("20260701_002_model_roles", _migration_20260701_model_roles),
@@ -1758,6 +1899,7 @@ SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260714_001_general_model_recommendations", _migration_20260714_general_model_recommendations),
     ("20260714_002_general_recommendation_simplification", _migration_20260714_general_recommendation_simplification),
     ("20260714_003_gpt56_configuration_policy", _migration_20260714_gpt56_configuration_policy),
+    ("20260714_004_provider_pricing", _migration_20260714_provider_pricing),
 )
 
 
@@ -1809,6 +1951,8 @@ __all__ = [
     "model_duplicate_overrides",
     "model_identity_overrides",
     "model_inference_destinations",
+    "model_pricing_offers",
+    "model_pricing_components",
     "model_market_snapshots",
     "model_use_case_inference_approvals",
     "model_use_case_approvals",

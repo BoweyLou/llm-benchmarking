@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "canaries": {
+    "openai": "gpt-5.6-sol"
+  },
+  "aliases": {
+    "openai": {
+      "GPT-5.6 Sol": "gpt-5-6-sol",
+      "GPT-5.6 Terra": "gpt-5-6-terra",
+      "GPT-5.6 Luna": "gpt-5-6-luna",
+      "gpt-5.6-sol": "gpt-5-6-sol",
+      "gpt-5.6-terra": "gpt-5-6-terra",
+      "gpt-5.6-luna": "gpt-5-6-luna"
+    },
+    "anthropic": {},
+    "google": {
+      "text-embedding-001": "google-text-embedding-001"
+    },
+    "mistral": {},
+    "cohere": {},
+    "xai": {
+      "grok-build-0.1": "grok-build-0-1",
+      "grok-4.3": "grok-4-3",
+      "grok-4.20-multi-agent-0309": "grok-4-20-multi-agent",
+      "grok-4.20-0309-reasoning": "grok-4-20-beta-0309-reasoning",
+      "grok-4.20-0309-non-reasoning": "grok-4-20-beta-0309",
+      "grok-imagine-video-1.5": "grok-imagine-video"
+    }
+  }
+}

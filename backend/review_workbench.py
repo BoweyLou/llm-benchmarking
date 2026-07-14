@@ -52,7 +52,7 @@ def build_review_catalog() -> dict[str, Any]:
     facets = _build_facets(models, providers, families)
     sync_metadata = _latest_sync_metadata()
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": utc_now_iso(),
         "database_updated_at": sqlite_database_updated_at(update_engine.ENGINE),
         **sync_metadata,
