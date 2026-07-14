@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1 - 2026-07-15
+
+- Added `GOOGLE_CLOUD_BILLING_API_KEY` authentication for Google Vertex AI Cloud Billing SKU pricing while retaining OAuth access-token authentication for publisher-model discovery.
+- Added a key-only Vertex mode that combines published endpoint availability with structured pricing offers, preserves the no-credential fallback, and redacts credential-bearing billing request failures.
+
 ## 0.8.0 - 2026-07-14
 
 - Added provider-specific pricing offers and components for direct provider, OpenRouter, AWS Bedrock, Azure AI Foundry, and Google Vertex AI routes, with official-source provenance and 30-day freshness status.

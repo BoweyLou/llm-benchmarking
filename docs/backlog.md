@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-072: P1 Authenticate Vertex pricing independently from publisher discovery
+  - Source: Human request 2026-07-15 after creating a Cloud Billing Catalog API key for the pricing refresh.
+  - Problem: Google Vertex pricing incorrectly required an OAuth access token because Cloud Billing SKU ingestion and Vertex publisher-model discovery shared one credential gate.
+  - Scope: accept a restricted Cloud Billing API key for pricing, retain OAuth bearer authentication for publisher discovery, combine key-backed pricing with published endpoint availability, redact credential-bearing request failures, and document the split.
+  - Acceptance: `pricing-sync --providers google-vertex-ai` can create structured offers with only `GOOGLE_CLOUD_BILLING_API_KEY`; OAuth discovery remains available; the no-credential fallback and last-known-good safeguards remain unchanged; secrets never appear in surfaced errors.
+  - Validation: focused key-query, key-only pricing, redaction, and no-credential regressions; full inference suite; docs and version checks.
+  - Completed: 2026-07-15. Vertex pricing now uses a dedicated Cloud Billing API key while publisher discovery continues to use its optional OAuth access token.
+
 - [x] LBM-070: P1 Stabilize GPT-5.6 identities, configurations, and usage policy
 - [x] LBM-071: P1 Add provider-specific pricing and provenance
   - Source: Human request 2026-07-14 after missing and duplicate GPT-5.6 variants appeared in the review catalog.

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 import hashlib
 import hmac
 import json
@@ -516,10 +517,21 @@ def _sync_azure_foundry_public_pricing(
 
 def _sync_google_vertex_ai(models: list[dict[str, Any]], client: httpx.Client) -> SyncOutcome:
     token = os.getenv("GOOGLE_CLOUD_ACCESS_TOKEN") or os.getenv("GCP_ACCESS_TOKEN")
-    if not token:
+    api_key = os.getenv("GOOGLE_CLOUD_BILLING_API_KEY") or os.getenv("GCP_BILLING_API_KEY")
+    if not token and not api_key:
         return _sync_google_vertex_public_endpoints(models)
 
-    gcp_headers = {"Authorization": f"Bearer {token}"}
+    gcp_headers = {"Authorization": f"Bearer {token}"} if token else {}
+    billing_headers = {} if api_key else gcp_headers
+    service_id = _google_vertex_service_id(client, billing_headers, api_key=api_key)
+    sku_entries = (
+        _google_vertex_skus(client, billing_headers, service_id, api_key=api_key)
+        if service_id
+        else []
+    )
+    if not token:
+        return _sync_google_vertex_public_endpoints(models, pricing_entries=sku_entries)
+
     publishers = _vertex_publishers_for_models(models)
     regions = _configured_regions("GOOGLE_VERTEX_REGIONS", GCP_DEFAULT_REGIONS)
     publisher_models: list[dict[str, Any]] = []
@@ -535,9 +547,6 @@ def _sync_google_vertex_ai(models: list[dict[str, Any]], client: httpx.Client) -
                 entry["region"] = region
                 entry["publisher"] = publisher
                 publisher_models.append(entry)
-
-    service_id = _google_vertex_service_id(client, gcp_headers)
-    sku_entries = _google_vertex_skus(client, gcp_headers, service_id) if service_id else []
 
     records: list[dict[str, Any]] = []
     for model in models:
@@ -558,13 +567,7 @@ def _sync_google_vertex_ai(models: list[dict[str, Any]], client: httpx.Client) -
         matched_skus = [
             sku
             for sku in sku_entries
-            if _catalog_entry_matches_model(
-                model,
-                sku.get("provider"),
-                sku.get("display_name"),
-                sku.get("description"),
-                sku.get("catalog_model_id"),
-            )
+            if _google_sku_matches_model(model, sku)
         ]
         records.append(
             _build_destination_record(
@@ -606,14 +609,25 @@ def _sync_google_vertex_ai(models: list[dict[str, Any]], client: httpx.Client) -
     )
 
 
-def _sync_google_vertex_public_endpoints(models: list[dict[str, Any]]) -> SyncOutcome:
+def _sync_google_vertex_public_endpoints(
+    models: list[dict[str, Any]],
+    *,
+    pricing_entries: list[dict[str, Any]] | None = None,
+) -> SyncOutcome:
     regions = _configured_regions("GOOGLE_VERTEX_REGIONS", GCP_DEFAULT_REGIONS)
     deployment_modes = _google_public_deployment_modes(regions)
+    has_billing_catalog = pricing_entries is not None
+    sku_entries = pricing_entries or []
     records: list[dict[str, Any]] = []
 
     for model in models:
         if not _model_has_curated_destination(model, "google-vertex-ai"):
             continue
+        matched_skus = [
+            sku
+            for sku in sku_entries
+            if _google_sku_matches_model(model, sku)
+        ]
         records.append(
             _build_destination_record(
                 model_id=str(model["id"]),
@@ -628,14 +642,31 @@ def _sync_google_vertex_public_endpoints(models: list[dict[str, Any]]) -> SyncOu
                 location_scope="Published Vertex endpoints",
                 regions=regions,
                 deployment_modes=deployment_modes,
-                pricing_label=None,
-                pricing_note="Cloud Billing pricing and model availability require authenticated Google APIs.",
+                pricing_label=_pricing_label(
+                    input_prices=[
+                        entry["price_per_mtok"]
+                        for entry in matched_skus
+                        if entry.get("price_kind") == "input"
+                    ],
+                    output_prices=[
+                        entry["price_per_mtok"]
+                        for entry in matched_skus
+                        if entry.get("price_kind") == "output"
+                    ],
+                    currency_code="USD",
+                ),
+                pricing_note=(
+                    _google_pricing_note(matched_skus)
+                    if has_billing_catalog
+                    else "Cloud Billing pricing and model availability require authenticated Google APIs."
+                ),
                 sources=[
                     {"label": "Catalog API", "url": GCP_MODELS_URL},
                     {"label": "Endpoint docs", "url": GCP_ENDPOINTS_URL},
                     {"label": "Pricing API", "url": GCP_PRICING_URL},
                 ],
                 catalog_model_id=str(model.get("canonical_model_id") or model.get("family_id") or model["id"]),
+                pricing_entries=matched_skus,
             )
         )
 
@@ -644,7 +675,7 @@ def _sync_google_vertex_public_endpoints(models: list[dict[str, Any]]) -> SyncOu
         records=records,
         detail={
             "status": "completed",
-            "mode": "published-endpoints-only",
+            "mode": "published-endpoints+pricing" if has_billing_catalog else "published-endpoints-only",
             "model_count": len(records),
             "regions_scanned": len(regions),
         },
@@ -1354,21 +1385,44 @@ def _extract_google_publisher_models(payload: dict[str, Any]) -> list[dict[str, 
     return records
 
 
-def _google_vertex_service_id(client: httpx.Client, headers: dict[str, str]) -> str | None:
-    payload = _request_json(client, GCP_BILLING_SERVICES_URL, headers=headers)
+def _google_vertex_service_id(
+    client: httpx.Client,
+    headers: dict[str, str],
+    *,
+    api_key: str | None = None,
+) -> str | None:
+    payload = _google_billing_request_json(
+        client,
+        GCP_BILLING_SERVICES_URL,
+        headers=headers,
+        api_key=api_key,
+    )
+    fallback_service_id: str | None = None
     for service in payload.get("services", []):
         if not isinstance(service, dict):
             continue
-        display_name = str(service.get("displayName") or "")
-        if "Vertex AI" in display_name:
-            return _resource_tail(service.get("name"))
-    return None
+        service_id = _resource_tail(service.get("name"))
+        display_name = normalize_text(str(service.get("displayName") or ""))
+        if not service_id or not display_name:
+            continue
+        if display_name == "vertex ai":
+            return service_id
+        business_name = normalize_text(str(service.get("businessEntityName") or ""))
+        if (
+            fallback_service_id is None
+            and display_name.startswith("vertex ai ")
+            and business_name in {"google", "google llc"}
+        ):
+            fallback_service_id = service_id
+    return fallback_service_id
 
 
 def _google_vertex_skus(
     client: httpx.Client,
     headers: dict[str, str],
     service_id: str,
+    *,
+    api_key: str | None = None,
 ) -> list[dict[str, Any]]:
     skus: list[dict[str, Any]] = []
     page_token = ""
@@ -1376,11 +1430,12 @@ def _google_vertex_skus(
         params = {"pageSize": 500}
         if page_token:
             params["pageToken"] = page_token
-        payload = _request_json(
+        payload = _google_billing_request_json(
             client,
             GCP_BILLING_SERVICE_SKUS_URL.format(service_id=service_id),
             headers=headers,
             params=params,
+            api_key=api_key,
         )
         for item in payload.get("skus", []):
             if not isinstance(item, dict):
@@ -1396,10 +1451,10 @@ def _google_vertex_skus(
                             "catalog_model_id": _resource_tail(item.get("name")),
                             "description": description,
                             "display_name": display_name,
-                            "provider": _provider_from_text(description or display_name or ""),
+                            "provider": _google_provider_from_sku_text(description or display_name or ""),
                             "regions": item.get("serviceRegions") or [],
                             "region": region or None,
-                            "price_kind": _price_kind_from_text(description or "", display_name or ""),
+                            "price_kind": _google_price_kind_from_text(description or "", display_name or ""),
                             **rate,
                         }
                     )
@@ -1407,6 +1462,26 @@ def _google_vertex_skus(
         if not page_token:
             break
     return skus
+
+
+def _google_billing_request_json(
+    client: httpx.Client,
+    url: str,
+    *,
+    headers: dict[str, str],
+    api_key: str | None,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    request_params = dict(params or {})
+    if api_key:
+        request_params["key"] = api_key
+    try:
+        return _request_json(client, url, headers=headers, params=request_params or None)
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        raise RuntimeError(f"Google Cloud Billing API request failed with HTTP {status_code}.") from None
+    except httpx.HTTPError:
+        raise RuntimeError("Google Cloud Billing API request failed.") from None
 
 
 def _latest_google_pricing(value: Any) -> dict[str, Any] | None:
@@ -1450,6 +1525,7 @@ def _google_pricing_rates(pricing_info: dict[str, Any] | None) -> list[dict[str,
     unit_text = str(expression.get("usageUnitDescription") or expression.get("baseUnitDescription") or "").strip()
     display_quantity = _to_float(expression.get("displayQuantity")) or 1.0
     payload: list[dict[str, Any]] = []
+    billing_unit = _google_billing_unit(unit_text)
     for index, rate in enumerate(rates):
         money = rate.get("unitPrice")
         if not isinstance(money, dict):
@@ -1460,9 +1536,14 @@ def _google_pricing_rates(pricing_info: dict[str, Any] | None) -> list[dict[str,
         payload.append(
             {
                 "amount": amount,
-                "billing_unit": _google_billing_unit(unit_text),
+                "billing_unit": billing_unit,
                 "unit_quantity": display_quantity,
                 "unit": unit_text,
+                "price_per_mtok": (
+                    amount * (1_000_000.0 / display_quantity)
+                    if billing_unit == "token" and display_quantity > 0
+                    else None
+                ),
                 "start_usage_amount": start,
                 "end_usage_amount": next_start,
                 "effective_time": pricing_info.get("effectiveTime"),
@@ -1506,36 +1587,164 @@ def _google_pricing_unit(pricing_info: dict[str, Any] | None) -> str:
     ).strip()
 
 
-def _catalog_entry_matches_model(
-    model: dict[str, Any],
-    provider: Any,
-    *candidate_values: Any,
-) -> bool:
+def _google_sku_matches_model(model: dict[str, Any], sku: dict[str, Any]) -> bool:
+    provider = sku.get("provider")
     provider_aliases = _provider_aliases(provider)
     model_provider_aliases = _provider_aliases(model.get("provider"))
     if provider_aliases and model_provider_aliases and not provider_aliases.intersection(model_provider_aliases):
         return False
 
-    local_aliases = _model_aliases(model)
-    local_signatures = _model_signatures(model)
-    local_identity_ids = {
+    model_aliases = _google_specific_model_aliases(model)
+    if not model_aliases:
+        return False
+    for value in (sku.get("display_name"), sku.get("description")):
+        candidate = _normalize_google_sku_match_text(value)
+        if not candidate:
+            continue
+        for alias in model_aliases:
+            prefix = f"{alias} "
+            if not candidate.startswith(prefix):
+                continue
+            suffix_first_token = candidate[len(prefix):].split(" ", 1)[0]
+            if suffix_first_token in _GOOGLE_SKU_PRICING_QUALIFIERS:
+                return True
+    return False
+
+
+def _google_specific_model_aliases(model: dict[str, Any]) -> tuple[str, ...]:
+    values = tuple(
+        value if isinstance(value, str) else ""
+        for value in (
+            model.get("name"),
+            model.get("canonical_model_name"),
+            model.get("openrouter_model_id"),
+            model.get("openrouter_canonical_slug"),
+            model.get("id"),
+        )
+    )
+    return _cached_google_specific_model_aliases(values)
+
+
+@lru_cache(maxsize=4096)
+def _cached_google_specific_model_aliases(values: tuple[str, ...]) -> tuple[str, ...]:
+    aliases: set[str] = set()
+    for raw_value in values:
+        if not raw_value.strip():
+            continue
+        variants = {raw_value}
+        if "::" in raw_value:
+            variants.add(raw_value.rsplit("::", 1)[-1])
+        tail = _resource_tail(raw_value)
+        if tail:
+            variants.add(tail)
+        for variant in variants:
+            alias = normalize_text(variant)
+            tokens = alias.split()
+            if len(alias) >= 7 and len(tokens) >= 2 and any(character.isdigit() for character in alias):
+                aliases.add(alias)
+    return tuple(sorted(aliases, key=lambda value: (-len(value), value)))
+
+
+_GOOGLE_SKU_BOILERPLATE_PREFIXES = (
+    "cloud vertex ai garden as a service",
+    "vertex ai garden as a service",
+    "cloud vertex ai garden",
+    "vertex ai garden",
+    "cloud vertex ai",
+    "vertex ai",
+)
+_GOOGLE_SKU_PRICING_QUALIFIERS = {
+    "audio",
+    "batch",
+    "cache",
+    "cached",
+    "caching",
+    "character",
+    "characters",
+    "embedding",
+    "embeddings",
+    "image",
+    "input",
+    "online",
+    "output",
+    "prediction",
+    "predictions",
+    "priority",
+    "request",
+    "requests",
+    "standard",
+    "text",
+    "token",
+    "tokens",
+    "training",
+    "tuning",
+    "video",
+}
+
+
+def _normalize_google_sku_match_text(value: Any) -> str:
+    return _cached_normalize_google_sku_match_text(str(value or ""))
+
+
+@lru_cache(maxsize=32768)
+def _cached_normalize_google_sku_match_text(value: str) -> str:
+    normalized = normalize_text(value)
+    for prefix in _GOOGLE_SKU_BOILERPLATE_PREFIXES:
+        bounded_prefix = f"{prefix} "
+        if normalized.startswith(bounded_prefix):
+            return normalized[len(bounded_prefix):].strip()
+    return normalized
+
+
+def _google_provider_from_sku_text(value: str) -> str | None:
+    return _provider_from_text(value) or _provider_from_model_name(_normalize_google_sku_match_text(value))
+
+
+def _catalog_entry_matches_model(
+    model: dict[str, Any],
+    provider: Any,
+    *candidate_values: Any,
+) -> bool:
+    provider_text = str(provider or "")
+    provider_aliases = _cached_provider_aliases(provider_text)
+    (
+        model_provider_aliases,
+        local_aliases,
+        local_signatures,
+        local_identity_ids,
+    ) = _cached_local_model_match_features(
+        str(model.get("provider") or ""),
+        tuple(
+            value if isinstance(value, str) and value.strip() else ""
+            for value in (
+                model.get("name"),
+                model.get("canonical_model_name"),
+                model.get("family_name"),
+                model.get("openrouter_model_id"),
+                model.get("openrouter_canonical_slug"),
+                model.get("id"),
+            )
+        ),
         str(model.get("family_id") or "").strip(),
         str(model.get("canonical_model_id") or "").strip(),
-    }
-    local_identity_ids.discard("")
+    )
+    if provider_aliases and model_provider_aliases and not provider_aliases.intersection(model_provider_aliases):
+        return False
 
     remote_aliases: set[str] = set()
     remote_signatures: set[str] = set()
     remote_identity_ids: set[str] = set()
+    provider_display_name = _provider_display_name(provider)
     for value in candidate_values:
         if not value:
             continue
-        for variant in _value_variants(value):
-            remote_aliases.add(variant)
-        for signature in name_signatures(str(value)):
-            remote_signatures.add(signature)
-        identity = infer_model_identity(str(value), _provider_display_name(provider), str(value))
-        remote_identity_ids.update({identity.family_id, identity.canonical_model_id})
+        aliases, signatures, identity_ids = _cached_remote_candidate_match_features(
+            str(value),
+            provider_display_name,
+        )
+        remote_aliases.update(aliases)
+        remote_signatures.update(signatures)
+        remote_identity_ids.update(identity_ids)
 
     if local_identity_ids.intersection(remote_identity_ids):
         return True
@@ -1544,6 +1753,48 @@ def _catalog_entry_matches_model(
     if local_signatures.intersection(remote_signatures):
         return True
     return False
+
+
+@lru_cache(maxsize=256)
+def _cached_provider_aliases(value: str) -> frozenset[str]:
+    return frozenset(_provider_aliases(value))
+
+
+@lru_cache(maxsize=4096)
+def _cached_local_model_match_features(
+    provider: str,
+    values: tuple[str, ...],
+    family_id: str,
+    canonical_model_id: str,
+) -> tuple[frozenset[str], frozenset[str], frozenset[str], frozenset[str]]:
+    aliases: set[str] = set()
+    signatures: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        aliases.update(_value_variants(value))
+        signatures.update(name_signatures(value))
+    identity_ids = {family_id, canonical_model_id}
+    identity_ids.discard("")
+    return (
+        _cached_provider_aliases(provider),
+        frozenset(aliases),
+        frozenset(signatures),
+        frozenset(identity_ids),
+    )
+
+
+@lru_cache(maxsize=32768)
+def _cached_remote_candidate_match_features(
+    value: str,
+    provider_display_name: str,
+) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    identity = infer_model_identity(value, provider_display_name, value)
+    return (
+        frozenset(_value_variants(value)),
+        frozenset(name_signatures(value)),
+        frozenset({identity.family_id, identity.canonical_model_id}),
+    )
 
 
 def _model_aliases(model: dict[str, Any]) -> set[str]:
@@ -1672,6 +1923,21 @@ def _price_kind_from_text(*values: str) -> str | None:
     if has_input and has_tokens:
         return "input"
     if has_output and has_tokens:
+        return "output"
+    return None
+
+
+def _google_price_kind_from_text(*values: str) -> str | None:
+    existing = _price_kind_from_text(*values)
+    if existing:
+        return existing
+    tokens = set(normalize_text(" ".join(values)).split())
+    modality_tokens = {"audio", "image", "text", "video"}
+    if not tokens.intersection(modality_tokens):
+        return None
+    if "input" in tokens:
+        return "input"
+    if "output" in tokens:
         return "output"
     return None
 
