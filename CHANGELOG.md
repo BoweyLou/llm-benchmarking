@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 - 2026-07-14
+
+- Added model-level usage policies with a reasoning-effort ceiling and restricted `pro`/`ultra` product modes, including review UI, API, snapshot v3, model API, and CSV export support.
+- Restored GPT-5.6 Sol, Terra, and Luna as the three stable catalog identities while preserving distinct benchmark observations for `none`, `low`, `medium`, `high`, `xhigh`, and `max` reasoning configurations.
+- Added an idempotent GPT-5.6 backfill that preserves evidence and general decisions, deprecates malformed review rows, and translates a restricted Sol Pro decision into a Sol product-mode restriction.
+- Prevented OpenRouter enrichment from replacing authoritative curated provenance or adding GPT-5.6 effort/product modes as duplicate active model rows, and fixed skipped source-run API serialization.
+
 ## 0.6.0 - 2026-07-14
 
 - Added explicit all-filtered bulk general decisions with a confirmation step, shared rationale, exact selected-model and source-record counts, and responsive mobile controls.

@@ -227,6 +227,10 @@ def api_apply_review_model_decisions(payload: ReviewModelDecisionIn) -> dict[str
             approval_notes=payload.approval_notes,
             recommendation_status=payload.recommendation_status,
             recommendation_notes=payload.recommendation_notes,
+            reasoning_effort_ceiling=payload.reasoning_effort_ceiling,
+            reasoning_effort_ceiling_set="reasoning_effort_ceiling" in payload.model_fields_set,
+            restricted_modes=payload.restricted_modes,
+            usage_policy_notes=payload.usage_policy_notes,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

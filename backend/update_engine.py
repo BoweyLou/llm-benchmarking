@@ -1122,6 +1122,7 @@ def list_models(*, include_recommendation_proposals: bool = True) -> list[dict[s
     benchmark_ids = [benchmark["id"] for benchmark in benchmarks]
     benchmark_source_ids = _benchmark_source_ids(benchmarks)
     latest_scores = _load_latest_scores()
+    score_configurations = _load_latest_score_configurations()
 
     with get_connection(ENGINE) as conn:
         provider_rows = fetch_all(
@@ -1195,6 +1196,11 @@ def list_models(*, include_recommendation_proposals: bool = True) -> list[dict[s
             else None
             for benchmark_id in benchmark_ids
         }
+        model["score_configurations"] = [
+            {"benchmark_id": benchmark_id, **_serialize_score(score)}
+            for (configuration_model_id, benchmark_id, _key, _value), score in score_configurations.items()
+            if configuration_model_id == model["id"]
+        ]
         payload.append(model)
     return payload
 
@@ -2801,6 +2807,7 @@ def _update_model_change_snapshot() -> dict[str, dict[str, Any]]:
                 models_table.c.provider,
                 models_table.c.catalog_status,
                 models_table.c.model_roles_json,
+                models_table.c.metadata_source_name,
                 models_table.c.capabilities_json,
                 models_table.c.release_date,
                 models_table.c.context_window_tokens,
@@ -4009,10 +4016,17 @@ def _persist_source_result(
             )
         }
 
-    resolved_candidates: dict[tuple[str, str], tuple[str, ScoreCandidate]] = {}
+    resolved_candidates: dict[tuple[str, str, str, str], tuple[str, ScoreCandidate]] = {}
     for candidate in result.candidates:
+        gpt56 = _gpt56_identity_and_configuration(candidate.raw_model_name)
+        if gpt56 is not None:
+            model_id, candidate.configuration_key, candidate.configuration_value = gpt56
+            _ensure_gpt56_base_model(model_id)
+        else:
+            model_id = None
         existing_models_only = bool(candidate.metadata.get("existing_models_only"))
-        model_id = _resolve_model_id(candidate.raw_model_name) if existing_models_only else None
+        if model_id is None and existing_models_only:
+            model_id = _resolve_model_id(candidate.raw_model_name)
         if model_id is None and existing_models_only:
             source_meta_by_identity[_record_identity(candidate.raw_model_name, candidate.raw_model_key)] = (
                 candidate.source_type,
@@ -4031,7 +4045,12 @@ def _persist_source_result(
         model_ids_by_identity[identity] = model_id
         source_meta_by_identity[identity] = (candidate.source_type, candidate.verified)
 
-        candidate_key = (model_id, candidate.benchmark_id)
+        candidate_key = (
+            model_id,
+            candidate.benchmark_id,
+            candidate.configuration_key or "",
+            candidate.configuration_value or "",
+        )
         current_best = resolved_candidates.get(candidate_key)
         if current_best is not None:
             benchmark = benchmarks_by_id.get(candidate.benchmark_id)
@@ -4485,9 +4504,17 @@ def _persist_score_candidate(
                 scores_table.c.source_listing_status,
                 scores_table.c.source_metadata_json,
             )
+            .where(scores_table.c.model_id == model_id)
+            .where(scores_table.c.benchmark_id == candidate.benchmark_id)
             .where(
-                scores_table.c.model_id == model_id,
-                scores_table.c.benchmark_id == candidate.benchmark_id,
+                scores_table.c.configuration_key.is_(None)
+                if candidate.configuration_key is None
+                else scores_table.c.configuration_key == candidate.configuration_key
+            )
+            .where(
+                scores_table.c.configuration_value.is_(None)
+                if candidate.configuration_value is None
+                else scores_table.c.configuration_value == candidate.configuration_value
             )
             .order_by(scores_table.c.collected_at.desc(), scores_table.c.id.desc())
             .limit(1),
@@ -4547,6 +4574,8 @@ def _persist_score_candidate(
                         style_control=None if candidate.style_control is None else (1 if candidate.style_control else 0),
                         preliminary=None if candidate.preliminary is None else (1 if candidate.preliminary else 0),
                         source_metadata_json=json.dumps(candidate.source_metadata, ensure_ascii=True, sort_keys=True),
+                        configuration_key=candidate.configuration_key,
+                        configuration_value=candidate.configuration_value,
                     )
                 )
                 return model_id, "updated"
@@ -4584,6 +4613,8 @@ def _persist_score_candidate(
                 style_control=None if candidate.style_control is None else (1 if candidate.style_control else 0),
                 preliminary=None if candidate.preliminary is None else (1 if candidate.preliminary else 0),
                 source_metadata_json=json.dumps(candidate.source_metadata, ensure_ascii=True, sort_keys=True),
+                configuration_key=candidate.configuration_key,
+                configuration_value=candidate.configuration_value,
             )
         )
 
@@ -4737,6 +4768,9 @@ def _ensure_model(
     *,
     discovered_update_log_id: int | None = None,
 ) -> str:
+    gpt56 = _gpt56_identity_and_configuration(raw_model_name)
+    if gpt56 is not None:
+        return _ensure_gpt56_base_model(gpt56[0])
     resolved = _resolve_model_id(raw_model_name)
     if resolved:
         return resolved
@@ -5706,6 +5740,7 @@ def _refresh_openrouter_model_metadata() -> None:
                 models_table.c.canonical_model_name,
                 models_table.c.variant_label,
                 models_table.c.model_roles_json,
+                models_table.c.metadata_source_name,
                 models_table.c.openrouter_model_id,
                 models_table.c.openrouter_canonical_slug,
             ).where(models_table.c.active == 1),
@@ -5829,6 +5864,8 @@ def _refresh_openrouter_model_metadata() -> None:
                 item,
                 verified_at=verified_at,
                 current_model_roles=model_rows_by_id.get(model_id, {}).get("model_roles_json"),
+                current_metadata_source_name=model_rows_by_id.get(model_id, {}).get("metadata_source_name"),
+                current_catalog_status=model_rows_by_id.get(model_id, {}).get("catalog_status"),
             )
             if not values:
                 continue
@@ -6528,6 +6565,8 @@ def _openrouter_model_values(
     *,
     verified_at: str,
     current_model_roles: Any | None = None,
+    current_metadata_source_name: Any | None = None,
+    current_catalog_status: Any | None = None,
 ) -> dict[str, Any]:
     top_provider = item.get("top_provider") if isinstance(item.get("top_provider"), dict) else {}
     pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
@@ -6542,11 +6581,13 @@ def _openrouter_model_values(
         supported_parameters=item.get("supported_parameters"),
     )
 
-    values: dict[str, Any] = {
-        "metadata_source_name": "openrouter",
-        "metadata_source_url": OPENROUTER_MODELS_URL,
-        "metadata_verified_at": verified_at,
-    }
+    values: dict[str, Any] = {}
+    if not _clean_text(current_metadata_source_name) or _clean_text(current_metadata_source_name) == "openrouter" or _clean_text(current_catalog_status) == CATALOG_STATUS_PROVISIONAL:
+        values.update(
+            metadata_source_name="openrouter",
+            metadata_source_url=OPENROUTER_MODELS_URL,
+            metadata_verified_at=verified_at,
+        )
 
     model_id = str(item.get("id") or "").strip()
     canonical_slug = str(item.get("canonical_slug") or "").strip()
@@ -6810,6 +6851,10 @@ def _import_openrouter_provisional_models(
         canonical_slug = str(item.get("canonical_slug") or "").strip()
         provider = _openrouter_provider_name(item)
         display_name = _suggest_display_name(_openrouter_display_name(item)) or _openrouter_display_name(item) or model_id
+        if _gpt56_identity_and_configuration(display_name) is not None:
+            # GPT-5.6 effort and product modes belong to the stable base model,
+            # not the active review catalog as provisional model identities.
+            continue
         identity = infer_model_identity(display_name, provider, canonical_slug or model_id or None)
         if not allow_existing_canonical_model_ids and identity.canonical_model_id in existing_canonical_model_ids:
             continue
@@ -7139,6 +7184,14 @@ def _humanize_display_token(token: str) -> str:
 
 
 def _resolve_model_id(raw_model_name: str) -> str | None:
+    gpt56 = _gpt56_identity_and_configuration(raw_model_name)
+    if gpt56 is not None:
+        with get_connection(ENGINE) as conn:
+            existing = fetch_one(
+                conn,
+                select(models_table.c.id).where(models_table.c.id == gpt56[0], models_table.c.active == 1),
+            )
+        return gpt56[0] if existing is not None else None
     with get_connection(ENGINE) as conn:
         model_rows = fetch_all(
             conn,
@@ -7155,6 +7208,65 @@ def _resolve_model_id(raw_model_name: str) -> str | None:
     return resolve_model_name(raw_model_name, model_rows)
 
 
+_GPT56_NAME_RE = re.compile(r"gpt\s*[-.]?\s*5[.-]6\s+(sol|terra|luna)\b", re.IGNORECASE)
+_GPT56_EFFORT_RE = re.compile(r"\b(none|low|medium|high|xhigh|max)\b", re.IGNORECASE)
+_GPT56_BASE_MODELS = {
+    "gpt-5-6-sol": ("GPT-5.6 Sol", 5.0, 30.0),
+    "gpt-5-6-terra": ("GPT-5.6 Terra", 2.5, 15.0),
+    "gpt-5-6-luna": ("GPT-5.6 Luna", 1.0, 6.0),
+}
+
+
+def _gpt56_identity_and_configuration(raw_name: str) -> tuple[str, str | None, str | None] | None:
+    """Map GPT-5.6 evaluation labels to their provider model and request configuration."""
+    text = str(raw_name or "")
+    tier_match = _GPT56_NAME_RE.search(text)
+    if tier_match is None:
+        return None
+    model_id = f"gpt-5-6-{tier_match.group(1).lower()}"
+    lowered = text.lower()
+    if re.search(r"\bnon[- ]reasoning\b", lowered):
+        return model_id, "reasoning_effort", "none"
+    effort_match = _GPT56_EFFORT_RE.search(lowered)
+    if effort_match is not None:
+        return model_id, "reasoning_effort", effort_match.group(1).lower()
+    if re.search(r"\bpro\b", lowered):
+        return model_id, "product_mode", "pro"
+    if re.search(r"\bultra\b", lowered):
+        return model_id, "product_mode", "ultra"
+    return model_id, None, None
+
+
+def _ensure_gpt56_base_model(model_id: str) -> str:
+    """Create a stable GPT-5.6 base identity if benchmark evidence arrives first."""
+    name, input_price, output_price = _GPT56_BASE_MODELS[model_id]
+    tier = model_id.rsplit("-", 1)[-1]
+    with ENGINE.begin() as conn:
+        provider_id = _ensure_provider_row("OpenAI", conn=conn)
+        stmt = sqlite_insert(models_table).values(
+            id=model_id,
+            name=name,
+            provider_id=provider_id,
+            provider="OpenAI",
+            type="proprietary",
+            model_roles_json=json.dumps([MODEL_ROLE_GENERATOR]),
+            catalog_status=CATALOG_STATUS_TRACKED,
+            release_date="2026-07-09",
+            price_input_per_mtok=input_price,
+            price_output_per_mtok=output_price,
+            metadata_source_name=CATALOG_MODEL_DISCOVERY_SOURCE_NAME,
+            metadata_source_url="https://openai.com/index/gpt-5-6/",
+            family_id="openai::gpt-5-6",
+            family_name="GPT-5.6",
+            canonical_model_id=f"openai::gpt-5-6-{tier}",
+            canonical_model_name=name,
+            discovered_at=utc_now_iso(),
+            active=1,
+        ).on_conflict_do_nothing(index_elements=["id"])
+        conn.execute(stmt)
+    return model_id
+
+
 def _load_latest_scores() -> dict[tuple[str, str], dict[str, Any]]:
     with get_connection(ENGINE) as conn:
         rows = [dict(row._mapping) for row in conn.exec_driver_sql("SELECT * FROM latest_scores").fetchall()]
@@ -7165,6 +7277,28 @@ def _load_latest_scores() -> dict[tuple[str, str], dict[str, Any]]:
             raise ValueError(f"Duplicate latest score rows detected for model={key[0]} benchmark={key[1]}")
         payload[key] = row
     return payload
+
+
+def _load_latest_score_configurations() -> dict[tuple[str, str, str, str], dict[str, Any]]:
+    """Return the newest observation for each explicit evaluation configuration."""
+    with get_connection(ENGINE) as conn:
+        rows = [dict(row._mapping) for row in conn.exec_driver_sql(
+            """
+            SELECT * FROM (
+                SELECT s.*, ROW_NUMBER() OVER (
+                    PARTITION BY model_id, benchmark_id, configuration_key, configuration_value
+                    ORDER BY collected_at DESC, id DESC
+                ) AS row_num
+                FROM scores s
+                WHERE configuration_key IS NOT NULL AND configuration_value IS NOT NULL
+            ) WHERE row_num = 1
+            ORDER BY model_id, benchmark_id, configuration_key, configuration_value
+            """
+        ).fetchall()]
+    return {
+        (str(row["model_id"]), str(row["benchmark_id"]), str(row["configuration_key"]), str(row["configuration_value"])): row
+        for row in rows
+    }
 
 
 def _serialize_benchmark(row: dict[str, Any]) -> dict[str, Any]:
@@ -7424,6 +7558,10 @@ def _serialize_model(
     )
     payload["general_recommendation_notes"] = _clean_text(payload.get("general_recommendation_notes"))
     payload["general_recommendation_updated_at"] = payload.get("general_recommendation_updated_at")
+    payload["reasoning_effort_ceiling"] = _clean_text(payload.get("reasoning_effort_ceiling"))
+    payload["restricted_modes"] = _decode_json_string_list(payload.pop("restricted_modes_json", None))
+    payload["usage_policy_notes"] = _clean_text(payload.get("usage_policy_notes"))
+    payload["usage_policy_updated_at"] = payload.get("usage_policy_updated_at")
     payload["suggested_use_cases"] = _build_suggested_use_cases(recommendation_proposals)
     payload.update(_model_age_payload(payload))
     payload["use_case_approvals"] = {
@@ -7500,6 +7638,8 @@ def _serialize_score(row: dict[str, Any]) -> dict[str, Any]:
         "source_metadata": _decode_json_object(row.get("source_metadata_json")),
         "variant_model_id": row.get("variant_model_id"),
         "variant_model_name": row.get("variant_model_name"),
+        "configuration_key": row.get("configuration_key"),
+        "configuration_value": row.get("configuration_value"),
     }
 
 

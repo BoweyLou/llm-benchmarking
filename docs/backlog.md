@@ -16,6 +16,14 @@ the row is older than 14 days or the backend/API shape has changed.
 
 ## Done
 
+- [x] LBM-070: P1 Stabilize GPT-5.6 identities, configurations, and usage policy
+  - Source: Human request 2026-07-14 after missing and duplicate GPT-5.6 variants appeared in the review catalog.
+  - Problem: reasoning-effort labels were treated as model identities and then collapsed to one best score, while OpenRouter-added product modes created duplicate active rows and could replace authoritative provenance.
+  - Scope: retain Sol/Terra/Luna as stable model identities; persist effort-level score evidence independently; add model-level effort ceilings and restricted Pro/Ultra modes; migrate malformed rows without losing evidence or decisions; enforce source precedence; fix skipped source-run serialization.
+  - Acceptance: a reviewer can approve/recommend Sol, allow it through High, and restrict Ultra; all 18 tier/effort observations survive; malformed rows leave the active review queue but remain auditable; suggested use cases stay read-only.
+  - Validation: migration, ingestion, API, snapshot, CSV, UI, source-precedence, skipped-run, ranking, docs, and version checks.
+  - Completed: 2026-07-14. GPT-5.6 model identity, evaluation configuration, and reviewer usage policy are now separate durable concepts.
+
 - [x] LBM-069: P1 Add bulk general decisions and safe canonical review groups
   - Source: Human request 2026-07-14 after reviewing the simplified general-decision workflow.
   - Problem: general review still required repetitive one-model saves, `Discouraged` duplicated the meaning of `Not recommended`, and safe duplicate source rows cluttered the queue.

@@ -11,6 +11,9 @@ SourceType = Literal["primary", "secondary", "manual"]
 ModelRole = Literal["generator", "embedding", "reranker", "multimodal_embedding", "speech_to_text", "text_to_speech"]
 RawSourceResolutionStatus = Literal["resolved", "skipped_aggregate", "skipped_unmatched_listing", "unresolved"]
 UpdateStatus = Literal["running", "completed", "failed"]
+SourceRunStatus = Literal["running", "completed", "failed", "skipped"]
+ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
+RestrictedMode = Literal["pro", "ultra"]
 TriggeredBy = Literal["manual", "api", "scheduled", "bootstrap", "cli"]
 AuditStatus = Literal["passed", "warning", "failed"]
 AuditSeverity = Literal["blocker", "warning", "info"]
@@ -72,6 +75,8 @@ class ScoreOut(APIModel):
     source_metadata: dict[str, Any] = Field(default_factory=dict)
     variant_model_id: str | None = None
     variant_model_name: str | None = None
+    configuration_key: str | None = None
+    configuration_value: str | None = None
 
 
 class InferenceSourceOut(APIModel):
@@ -393,6 +398,11 @@ class ModelOut(APIModel):
     general_recommendation_status: GeneralRecommendationStatusIn = "unrated"
     general_recommendation_notes: str | None = None
     general_recommendation_updated_at: datetime | None = None
+    reasoning_effort_ceiling: ReasoningEffort | None = None
+    restricted_modes: list[RestrictedMode] = Field(default_factory=list)
+    usage_policy_notes: str | None = None
+    usage_policy_updated_at: datetime | None = None
+    score_configurations: list[dict[str, Any]] = Field(default_factory=list)
     suggested_use_cases: list[SuggestedUseCaseOut] = Field(default_factory=list)
     approved_for_use: bool = False
     approval_use_case_count: int = 0
@@ -494,6 +504,10 @@ class ModelSummaryOut(APIModel):
     general_recommendation_status: GeneralRecommendationStatusIn = "unrated"
     general_recommendation_notes: str | None = None
     general_recommendation_updated_at: datetime | None = None
+    reasoning_effort_ceiling: ReasoningEffort | None = None
+    restricted_modes: list[RestrictedMode] = Field(default_factory=list)
+    usage_policy_notes: str | None = None
+    usage_policy_updated_at: datetime | None = None
     suggested_use_cases: list[SuggestedUseCaseOut] = Field(default_factory=list)
     approved_for_use: bool = False
     approval_use_case_count: int = 0
@@ -554,6 +568,9 @@ class ReviewModelDecisionIn(APIModel):
     approval_notes: str | None = None
     recommendation_status: GeneralRecommendationStatusIn | None = None
     recommendation_notes: str | None = None
+    reasoning_effort_ceiling: ReasoningEffort | None = None
+    restricted_modes: list[RestrictedMode] | None = None
+    usage_policy_notes: str | None = None
 
     @field_validator("recommendation_status", mode="before")
     @classmethod
@@ -729,7 +746,7 @@ class SourceRunOut(APIModel):
     benchmark_id: str | None = None
     started_at: datetime
     completed_at: datetime | None = None
-    status: UpdateStatus = "running"
+    status: SourceRunStatus = "running"
     records_found: int = 0
     error_message: str | None = None
     details_json: str | None = None

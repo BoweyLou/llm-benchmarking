@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from backend import main, recommendation_engine, review_workbench, update_engine
+from backend import catalog_export, main, recommendation_engine, review_workbench, update_engine
 from backend.database import (
     get_engine,
     init_db,
@@ -18,6 +18,7 @@ from backend.database import (
     model_use_case_recommendation_proposals as recommendation_proposals_table,
     models as models_table,
     scores as scores_table,
+    source_runs as source_runs_table,
     sqlite_database_updated_at,
     update_log as update_log_table,
 )
@@ -89,6 +90,8 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Suggested use cases", app_response.text)
         self.assertIn("These are not approvals or recommendations", app_response.text)
         self.assertIn("Your general decision", app_response.text)
+        self.assertIn("Reasoning effort limit", app_response.text)
+        self.assertIn("Restricted product modes", app_response.text)
         self.assertIn("General recommendation", app_response.text)
         self.assertIn("Restricted", app_response.text)
         self.assertNotIn("Discouraged", app_response.text)
@@ -527,6 +530,63 @@ class ReviewWorkbenchTests(unittest.TestCase):
             {"Use only with human oversight."},
         )
         self.assertEqual(legacy_rows, [])
+
+    def test_model_decision_policy_round_trips_through_catalog_snapshot_and_csv(self) -> None:
+        os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
+        self._insert_review_model("gpt-5-6-sol")
+        with patch("backend.main.bootstrap"):
+            response = TestClient(main.app).post(
+                "/api/review/model-decisions",
+                json={
+                    "model_ids": ["gpt-5-6-sol"],
+                    "approval_status": "approved",
+                    "recommendation_status": "restricted",
+                    "reasoning_effort_ceiling": "high",
+                    "restricted_modes": ["ultra"],
+                    "usage_policy_notes": "Allowed through High; Ultra requires separate review.",
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reasoning_effort_ceiling"], "high")
+        self.assertEqual(response.json()["restricted_modes"], ["ultra"])
+
+        model = next(model for model in review_workbench.build_review_catalog()["models"] if model["id"] == "gpt-5-6-sol")
+        self.assertEqual(model["reasoning_effort_ceiling"], "high")
+        self.assertEqual(model["restricted_modes"], ["ultra"])
+        snapshot = review_workbench.export_review_snapshot()
+        self.assertEqual(snapshot["schema_version"], 3)
+        policy_row = next(row for row in snapshot["model_approvals"] if row["id"] == "gpt-5-6-sol")
+        self.assertEqual(policy_row["reasoning_effort_ceiling"], "high")
+        self.assertEqual(json.loads(policy_row["restricted_modes_json"]), ["ultra"])
+        csv_text = catalog_export.render_model_metadata_list([model], output_format="csv")
+        self.assertIn("reasoning_effort_ceiling", csv_text.splitlines()[0])
+        self.assertIn("restricted_modes", csv_text.splitlines()[0])
+
+        with self.engine.begin() as conn:
+            conn.execute(models_table.update().where(models_table.c.id == "gpt-5-6-sol").values(
+                reasoning_effort_ceiling=None, restricted_modes_json="[]", usage_policy_notes=None,
+            ))
+        review_workbench.import_review_snapshot(snapshot)
+        restored = next(model for model in review_workbench.build_review_catalog()["models"] if model["id"] == "gpt-5-6-sol")
+        self.assertEqual(restored["reasoning_effort_ceiling"], "high")
+        self.assertEqual(restored["restricted_modes"], ["ultra"])
+
+    def test_skipped_source_run_serializes_in_update_history(self) -> None:
+        with self.engine.begin() as conn:
+            log_id = conn.execute(update_log_table.insert().values(
+                started_at="2026-07-14T00:00:00Z", completed_at="2026-07-14T00:00:01Z",
+                triggered_by="manual", status="completed",
+            )).inserted_primary_key[0]
+            conn.execute(source_runs_table.insert().values(
+                update_log_id=log_id, source_name="model_discovery:openai",
+                started_at="2026-07-14T00:00:00Z", completed_at="2026-07-14T00:00:01Z",
+                status="skipped", records_found=0, error_message="Missing OPENAI_API_KEY",
+            ))
+        with patch("backend.main.bootstrap"):
+            response = TestClient(main.app).get(f"/api/update/history/{log_id}/sources")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["status"], "skipped")
 
     def test_general_model_decision_normalizes_discouraged_to_not_recommended(self) -> None:
         os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"

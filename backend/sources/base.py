@@ -57,6 +57,8 @@ class RawSourceRecord:
     raw_model_key: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    configuration_key: str | None = None
+    configuration_value: str | None = None
 
 
 @dataclass(slots=True)
@@ -87,6 +89,8 @@ class ScoreCandidate:
     preliminary: bool | None = None
     source_metadata: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    configuration_key: str | None = None
+    configuration_value: str | None = None
 
 
 @dataclass(slots=True)

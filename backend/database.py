@@ -211,6 +211,10 @@ models = Table(
     Column("general_recommendation_status", String, nullable=False, server_default=text("'unrated'")),
     Column("general_recommendation_notes", Text),
     Column("general_recommendation_updated_at", String),
+    Column("reasoning_effort_ceiling", String),
+    Column("restricted_modes_json", Text, nullable=False, server_default=text("'[]'")),
+    Column("usage_policy_notes", Text),
+    Column("usage_policy_updated_at", String),
     Column("approved_for_use", Integer, nullable=False, server_default=text("0")),
     Column("approval_notes", Text),
     Column("approval_updated_at", String),
@@ -275,6 +279,8 @@ scores = Table(
     Column("style_control", Integer),
     Column("preliminary", Integer),
     Column("source_metadata_json", Text),
+    Column("configuration_key", String),
+    Column("configuration_value", String),
 )
 
 model_source_listings = Table(
@@ -585,6 +591,10 @@ def _create_schema_sql() -> list[str]:
             general_recommendation_status TEXT NOT NULL DEFAULT 'unrated',
             general_recommendation_notes TEXT,
             general_recommendation_updated_at TEXT,
+            reasoning_effort_ceiling TEXT,
+            restricted_modes_json TEXT NOT NULL DEFAULT '[]',
+            usage_policy_notes TEXT,
+            usage_policy_updated_at TEXT,
             approved_for_use INTEGER NOT NULL DEFAULT 0,
             approval_notes TEXT,
             approval_updated_at TEXT,
@@ -724,6 +734,8 @@ def _create_schema_sql() -> list[str]:
             ,style_control INTEGER
             ,preliminary INTEGER
             ,source_metadata_json TEXT
+            ,configuration_key TEXT
+            ,configuration_value TEXT
         )
         """,
         """
@@ -881,12 +893,21 @@ SELECT
     ,ranked.style_control
     ,ranked.preliminary
     ,ranked.source_metadata_json
+    ,ranked.configuration_key
+    ,ranked.configuration_value
 FROM (
     SELECT
         s.*,
         ROW_NUMBER() OVER (
             PARTITION BY s.model_id, s.benchmark_id
-            ORDER BY s.collected_at DESC, s.id DESC
+            ORDER BY
+                s.collected_at DESC,
+                CASE lower(coalesce(s.configuration_value, ''))
+                    WHEN 'max' THEN 6 WHEN 'xhigh' THEN 5 WHEN 'high' THEN 4
+                    WHEN 'medium' THEN 3 WHEN 'low' THEN 2 WHEN 'none' THEN 1
+                    ELSE 0
+                END DESC,
+                s.id DESC
         ) AS row_num
     FROM scores s
 ) ranked
@@ -1586,6 +1607,143 @@ def _migration_20260714_general_recommendation_simplification(conn: Connection) 
     )
 
 
+_GPT56_TIERS = {
+    "sol": ("GPT-5.6 Sol", 5.0, 30.0),
+    "terra": ("GPT-5.6 Terra", 2.5, 15.0),
+    "luna": ("GPT-5.6 Luna", 1.0, 6.0),
+}
+def _migration_20260714_gpt56_configuration_policy(conn: Connection) -> None:
+    """Restore stable GPT-5.6 identities and retain legacy rows as inactive audit records."""
+    model_columns = {str(row[1]) for row in conn.exec_driver_sql("PRAGMA table_info(models)").fetchall()}
+    score_columns = {str(row[1]) for row in conn.exec_driver_sql("PRAGMA table_info(scores)").fetchall()}
+    for column_name, sql_type in {
+        "reasoning_effort_ceiling": "TEXT",
+        "restricted_modes_json": "TEXT NOT NULL DEFAULT '[]'",
+        "usage_policy_notes": "TEXT",
+        "usage_policy_updated_at": "TEXT",
+    }.items():
+        if column_name not in model_columns:
+            conn.exec_driver_sql(f"ALTER TABLE models ADD COLUMN {column_name} {sql_type}")
+    for column_name in ("configuration_key", "configuration_value"):
+        if column_name not in score_columns:
+            conn.exec_driver_sql(f"ALTER TABLE scores ADD COLUMN {column_name} TEXT")
+
+    migrated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    status_priority = {"unrated": 0, "recommended": 1, "not_recommended": 2, "restricted": 3}
+    for tier, (name, input_price, output_price) in _GPT56_TIERS.items():
+        base_id = f"gpt-5-6-{tier}"
+        legacy_rows = conn.exec_driver_sql(
+            """
+            SELECT * FROM models
+            WHERE id != ? AND active = 1 AND (
+                id LIKE ? OR id LIKE ? OR lower(name) LIKE ? OR lower(name) LIKE ?
+            )
+            """,
+            (
+                base_id,
+                f"{base_id}-%",
+                f"openai-{base_id}-%",
+                f"gpt-5.6 {tier}%",
+                f"gpt 5.6 {tier}%",
+            ),
+        ).mappings().all()
+        if not legacy_rows:
+            continue
+        conn.exec_driver_sql(
+            """
+            INSERT OR IGNORE INTO models (
+                id, name, provider, type, model_roles_json, catalog_status, release_date,
+                price_input_per_mtok, price_output_per_mtok, metadata_source_name,
+                metadata_source_url, canonical_model_id, canonical_model_name, active
+            ) VALUES (?, ?, 'OpenAI', 'proprietary', '["generator"]', 'tracked', '2026-07-09',
+                      ?, ?, 'catalog_model_discovery', 'https://openai.com/index/gpt-5-6/',
+                      ?, ?, 1)
+            """,
+            (base_id, name, input_price, output_price, f"openai::gpt-5-6-{tier}", name),
+        )
+        base_row = conn.exec_driver_sql("SELECT * FROM models WHERE id=?", (base_id,)).mappings().one()
+        non_product_legacy_rows = [
+            row for row in legacy_rows
+            if not re.search(r"\b(?:pro|ultra)\b", f"{row.get('id', '')} {row.get('name', '')}", re.IGNORECASE)
+        ]
+        # Product-mode rows constrain how the base model may be used; they do
+        # not downgrade the base model's general recommendation. Fall back to
+        # all legacy rows only for old databases that contain no base/effort row.
+        decision_rows = [base_row, *(non_product_legacy_rows or legacy_rows)]
+        approved_rows = [row for row in decision_rows if int(row.get("general_approved_for_use") or 0)]
+        recommendation = max(
+            (str(row.get("general_recommendation_status") or "unrated") for row in decision_rows),
+            key=lambda value: status_priority.get(value, 0),
+        )
+        approval_notes = " | ".join(dict.fromkeys(
+            str(row.get("general_approval_notes") or "").strip() for row in decision_rows
+            if str(row.get("general_approval_notes") or "").strip()
+        )) or None
+        recommendation_notes = " | ".join(dict.fromkeys(
+            str(row.get("general_recommendation_notes") or "").strip() for row in decision_rows
+            if str(row.get("general_recommendation_notes") or "").strip()
+        )) or None
+        try:
+            restricted_modes = list(json.loads(str(base_row.get("restricted_modes_json") or "[]")))
+        except (TypeError, json.JSONDecodeError):
+            restricted_modes = []
+        if tier == "sol" and any(
+            "pro" in f"{row.get('id', '')} {row.get('name', '')}".lower()
+            and str(row.get("general_recommendation_status") or "") == "restricted"
+            for row in legacy_rows
+        ):
+            if "pro" not in restricted_modes:
+                restricted_modes.append("pro")
+
+        for row in legacy_rows:
+            legacy_id = str(row["id"])
+            # The legacy row label is not trustworthy: the old best-score collapse
+            # could leave a max observation on a row named "low". Preserve those
+            # scores as unconfigured until a source refresh repopulates exact variants.
+            configuration_value = None
+            if "pro" in f"{row.get('name', '')} {legacy_id}".lower():
+                configuration_key, configuration_value = "product_mode", "pro"
+            else:
+                configuration_key = "reasoning_effort" if configuration_value else None
+            conn.exec_driver_sql(
+                "UPDATE scores SET model_id=?, configuration_key=coalesce(configuration_key, ?), "
+                "configuration_value=coalesce(configuration_value, ?) WHERE model_id=?",
+                (base_id, configuration_key, configuration_value, legacy_id),
+            )
+            conn.exec_driver_sql(
+                "UPDATE raw_source_records SET normalized_model_id=? WHERE normalized_model_id=?",
+                (base_id, legacy_id),
+            )
+            conn.exec_driver_sql(
+                "UPDATE model_source_listings SET model_id=? WHERE model_id=?",
+                (base_id, legacy_id),
+            )
+            conn.exec_driver_sql(
+                "UPDATE models SET catalog_status='deprecated', active=0 WHERE id=?",
+                (legacy_id,),
+            )
+
+        conn.exec_driver_sql(
+            """
+            UPDATE models SET
+                name=?, provider='OpenAI', catalog_status='tracked', active=1,
+                general_approved_for_use=?, general_approval_notes=coalesce(?, general_approval_notes),
+                general_approval_updated_at=CASE WHEN ? THEN coalesce(general_approval_updated_at, ?) ELSE general_approval_updated_at END,
+                general_recommendation_status=CASE WHEN ? != 'unrated' THEN ? ELSE general_recommendation_status END,
+                general_recommendation_notes=coalesce(?, general_recommendation_notes),
+                general_recommendation_updated_at=CASE WHEN ? != 'unrated' THEN coalesce(general_recommendation_updated_at, ?) ELSE general_recommendation_updated_at END,
+                restricted_modes_json=?, usage_policy_updated_at=CASE WHEN ? != '[]' THEN coalesce(usage_policy_updated_at, ?) ELSE usage_policy_updated_at END,
+                metadata_source_name='catalog_model_discovery', metadata_source_url='https://openai.com/index/gpt-5-6/'
+            WHERE id=?
+            """,
+            (
+                name, 1 if approved_rows else 0, approval_notes, bool(approved_rows), migrated_at,
+                recommendation, recommendation, recommendation_notes, recommendation, migrated_at,
+                json.dumps(restricted_modes), json.dumps(restricted_modes), migrated_at, base_id,
+            ),
+        )
+
+
 SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
     ("20260701_002_model_roles", _migration_20260701_model_roles),
@@ -1599,6 +1757,7 @@ SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260713_001_score_evidence", _migration_20260713_score_evidence),
     ("20260714_001_general_model_recommendations", _migration_20260714_general_model_recommendations),
     ("20260714_002_general_recommendation_simplification", _migration_20260714_general_recommendation_simplification),
+    ("20260714_003_gpt56_configuration_policy", _migration_20260714_gpt56_configuration_policy),
 )
 
 

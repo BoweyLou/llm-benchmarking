@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Iterable
 
 from sqlalchemy import or_, select, update
@@ -31,7 +32,7 @@ from .database import (
 )
 from .model_evidence import enrich_models_with_selection_evidence
 
-SNAPSHOT_SCHEMA_VERSION = 2
+SNAPSHOT_SCHEMA_VERSION = 3
 GENERAL_RECOMMENDATION_STATUSES = ("unrated", "recommended", "restricted", "not_recommended")
 
 
@@ -176,6 +177,10 @@ def apply_model_decisions(
     approval_notes: str | None = None,
     recommendation_status: str | None = None,
     recommendation_notes: str | None = None,
+    reasoning_effort_ceiling: str | None = None,
+    reasoning_effort_ceiling_set: bool = False,
+    restricted_modes: Iterable[str] | None = None,
+    usage_policy_notes: str | None = None,
 ) -> dict[str, Any]:
     """Save general model decisions without creating use-case decision rows."""
     normalized_model_ids = _unique_clean(model_ids)
@@ -183,8 +188,8 @@ def apply_model_decisions(
         raise ValueError("At least one model id is required.")
     _ensure_models_exist(normalized_model_ids)
 
-    if approval_status is None and recommendation_status is None:
-        raise ValueError("At least one general decision is required.")
+    if approval_status is None and recommendation_status is None and not reasoning_effort_ceiling_set and restricted_modes is None:
+        raise ValueError("At least one general decision or usage policy field is required.")
 
     values: dict[str, Any] = {}
     saved_at = utc_now_iso()
@@ -215,6 +220,20 @@ def apply_model_decisions(
             if normalized_recommendation_status == "unrated"
             else saved_at,
         )
+    normalized_restricted_modes: list[str] | None = None
+    if reasoning_effort_ceiling_set:
+        if reasoning_effort_ceiling not in {None, "none", "low", "medium", "high", "xhigh", "max"}:
+            raise ValueError("Unknown reasoning effort ceiling.")
+        values["reasoning_effort_ceiling"] = reasoning_effort_ceiling
+        values["usage_policy_updated_at"] = saved_at
+    if restricted_modes is not None:
+        normalized_restricted_modes = sorted(dict.fromkeys(str(mode).strip().lower() for mode in restricted_modes))
+        if any(mode not in {"pro", "ultra"} for mode in normalized_restricted_modes):
+            raise ValueError("Restricted modes must contain only pro or ultra.")
+        values["restricted_modes_json"] = json.dumps(normalized_restricted_modes)
+        values["usage_policy_updated_at"] = saved_at
+    if reasoning_effort_ceiling_set or restricted_modes is not None:
+        values["usage_policy_notes"] = _clean_text(usage_policy_notes)
 
     with update_engine.ENGINE.begin() as conn:
         result = conn.execute(
@@ -230,6 +249,8 @@ def apply_model_decisions(
         "approved_for_use": normalized_approval_status == "approved" if normalized_approval_status else None,
         "approval_status": normalized_approval_status,
         "recommendation_status": normalized_recommendation_status,
+        "reasoning_effort_ceiling": reasoning_effort_ceiling if reasoning_effort_ceiling_set else None,
+        "restricted_modes": normalized_restricted_modes,
         "saved_at": saved_at,
     }
 
@@ -289,6 +310,10 @@ def export_review_snapshot() -> dict[str, Any]:
                 models_table.c.general_recommendation_status,
                 models_table.c.general_recommendation_notes,
                 models_table.c.general_recommendation_updated_at,
+                models_table.c.reasoning_effort_ceiling,
+                models_table.c.restricted_modes_json,
+                models_table.c.usage_policy_notes,
+                models_table.c.usage_policy_updated_at,
             )
             .where(models_table.c.active == 1)
             .where(
@@ -299,6 +324,9 @@ def export_review_snapshot() -> dict[str, Any]:
                     models_table.c.general_recommendation_status != "unrated",
                     models_table.c.general_recommendation_notes.is_not(None),
                     models_table.c.general_recommendation_updated_at.is_not(None),
+                    models_table.c.reasoning_effort_ceiling.is_not(None),
+                    models_table.c.restricted_modes_json != "[]",
+                    models_table.c.usage_policy_notes.is_not(None),
                 )
             )
             .order_by(models_table.c.provider.asc(), models_table.c.name.asc()),
@@ -341,7 +369,7 @@ def export_review_snapshot() -> dict[str, Any]:
 def import_review_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Import a review snapshot into the current SQLite database."""
     update_engine.bootstrap()
-    if int(snapshot.get("schema_version") or 0) not in {1, SNAPSHOT_SCHEMA_VERSION}:
+    if int(snapshot.get("schema_version") or 0) not in {1, 2, SNAPSHOT_SCHEMA_VERSION}:
         raise ValueError(f"Unsupported review snapshot schema version: {snapshot.get('schema_version')}")
 
     created_manual_models = 0
@@ -609,6 +637,10 @@ def _import_model_approvals(rows: Iterable[Any]) -> int:
                     general_recommendation_updated_at=_clean_text(
                         row.get("general_recommendation_updated_at")
                     ),
+                    reasoning_effort_ceiling=_clean_text(row.get("reasoning_effort_ceiling")),
+                    restricted_modes_json=_clean_text(row.get("restricted_modes_json")) or "[]",
+                    usage_policy_notes=_clean_text(row.get("usage_policy_notes")),
+                    usage_policy_updated_at=_clean_text(row.get("usage_policy_updated_at")),
                 )
             )
             updated += int(result.rowcount or 0)

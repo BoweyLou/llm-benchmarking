@@ -116,6 +116,10 @@ MODEL_CSV_BASE_FIELDS = [
     "general_recommendation_status",
     "general_recommendation_notes",
     "general_recommendation_updated_at",
+    "reasoning_effort_ceiling",
+    "restricted_modes",
+    "usage_policy_notes",
+    "usage_policy_updated_at",
     "approved_for_use",
     "approval_use_case_count",
     "approval_notes",
@@ -168,6 +172,7 @@ NESTED_MODEL_FIELDS = {
     "inference_destinations",
     "inference_summary",
     "scores",
+    "score_configurations",
     "source_freshness",
     "source_listings",
 }
@@ -200,6 +205,8 @@ SCORE_CSV_FIELDS = [
     "source_metadata",
     "variant_model_id",
     "variant_model_name",
+    "configuration_key",
+    "configuration_value",
 ]
 
 SOURCE_LISTING_CSV_FIELDS = [
@@ -517,6 +524,17 @@ def _score_rows(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
             score_row["source_metadata"] = json.dumps(
                 score.get("source_metadata") or {}, sort_keys=True
             )
+            rows.append(score_row)
+        for score in _as_list(model.get("score_configurations")):
+            if not isinstance(score, dict):
+                continue
+            score_row = {
+                "model_id": model.get("id"),
+                "model_name": model.get("name"),
+                "provider": model.get("provider"),
+                **score,
+            }
+            score_row["source_metadata"] = json.dumps(score.get("source_metadata") or {}, sort_keys=True)
             rows.append(score_row)
     return rows
 

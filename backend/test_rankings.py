@@ -754,6 +754,74 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(matching[0]["catalog_status"], "tracked")
         self.assertEqual(summary["models_created"], 0)
 
+    def test_gpt_5_6_effort_observations_use_three_models_and_remain_distinct(self) -> None:
+        tiers = ("sol", "terra", "luna")
+        efforts = ("none", "low", "medium", "high", "xhigh", "max")
+        candidates = [
+            ScoreCandidate(
+                source_id="artificial_analysis",
+                benchmark_id="aa_intelligence",
+                raw_model_name=f"GPT-5.6 {tier.title()} ({effort})",
+                raw_model_key=f"gpt-5-6-{tier}-{effort}",
+                value=float(index),
+                raw_value=str(index),
+                source_url="https://artificialanalysis.ai/leaderboards/models",
+                collected_at="2026-07-14T00:00:00Z",
+            )
+            for index, (tier, effort) in enumerate(
+                ((tier, effort) for tier in tiers for effort in efforts), start=1
+            )
+        ]
+        result = SourceFetchResult(
+            source_id="artificial_analysis",
+            source_url="https://artificialanalysis.ai/leaderboards/models",
+            fetched_at="2026-07-14T00:00:00Z",
+            raw_records=[],
+            candidates=candidates,
+        )
+
+        added, updated = update_engine._persist_source_result(1, result)
+
+        self.assertEqual((added, updated), (18, 0))
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                scores_table.select().where(scores_table.c.model_id.like("gpt-5-6-%"))
+            ).mappings().all()
+            active_ids = conn.execute(
+                select(models_table.c.id).where(models_table.c.id.like("gpt-5-6-%"), models_table.c.active == 1)
+            ).scalars().all()
+        self.assertEqual(set(active_ids), {"gpt-5-6-sol", "gpt-5-6-terra", "gpt-5-6-luna"})
+        self.assertEqual(len(rows), 18)
+        self.assertEqual({row["configuration_key"] for row in rows}, {"reasoning_effort"})
+        self.assertEqual({row["configuration_value"] for row in rows}, set(efforts))
+        models = {model["id"]: model for model in update_engine.list_models() if model["id"] in active_ids}
+        self.assertTrue(all(len(model["score_configurations"]) == 6 for model in models.values()))
+
+    def test_openrouter_does_not_clobber_curated_provenance_or_import_gpt56_modes(self) -> None:
+        values = update_engine._openrouter_model_values(
+            {"id": "openai/gpt-5.6-sol", "canonical_slug": "openai/gpt-5.6-sol"},
+            verified_at="2026-07-14T00:00:00Z",
+            current_metadata_source_name="catalog_model_discovery",
+            current_catalog_status="tracked",
+        )
+        self.assertNotIn("metadata_source_name", values)
+        with self.engine.begin() as conn:
+            update_engine._import_openrouter_provisional_models(
+                conn,
+                unmatched_items=[{
+                    "id": "openai/gpt-5.6-sol-pro",
+                    "canonical_slug": "openai/gpt-5.6-sol-pro-20260709",
+                    "name": "OpenAI: GPT-5.6 Sol Pro",
+                }],
+                existing_canonical_model_ids=set(),
+                verified_at="2026-07-14T00:00:00Z",
+                allow_existing_canonical_model_ids=True,
+            )
+            rows = conn.execute(
+                select(models_table.c.id).where(models_table.c.name.like("%GPT-5.6%"))
+            ).all()
+        self.assertEqual(rows, [])
+
     def test_internal_view_weight_boosts_scored_models_without_blocking_missing_models(self) -> None:
         self.add_model("internal-a", "Internal A")
         self.add_model("internal-b", "Internal B")
