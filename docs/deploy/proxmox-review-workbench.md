@@ -40,6 +40,76 @@ The first deploy seeds the remote persistent database from local `data/db.sqlite
 when that file exists. Later deploys preserve the remote database and token
 fallback so manual review decisions survive code updates.
 
+### Decision-preservation gate
+
+For every deploy over an existing database, take a review snapshot before the
+deploy, after the deploy script's first service start, and after one explicit
+second restart. The three snapshots must contain identical durable decision
+content. Stop the rollout if any catalog status, general decision, usage policy,
+legacy use-case decision, or manual model changes.
+
+Before running the deploy script:
+
+```bash
+BASE_URL="http://<proxmox-tailscale-ip>:8766"
+curl -fsS -X POST "$BASE_URL/api/review/snapshots/export" \
+  -H 'Content-Type: application/json' \
+  --data '{}' \
+  --output /tmp/lbm-review-pre-deploy.json
+```
+
+Run the deploy script, capture the first-start snapshot, restart once more, and
+capture the second-start snapshot:
+
+```bash
+BASE_URL="http://<proxmox-tailscale-ip>:8766"
+scripts/deploy_proxmox_review_workbench.sh
+curl -fsS -X POST "$BASE_URL/api/review/snapshots/export" \
+  -H 'Content-Type: application/json' \
+  --data '{}' \
+  --output /tmp/lbm-review-post-first-start.json
+ssh proxmox "systemctl restart llm-benchmarking.service"
+curl -fsS -X POST "$BASE_URL/api/review/snapshots/export" \
+  -H 'Content-Type: application/json' \
+  --data '{}' \
+  --output /tmp/lbm-review-post-second-start.json
+```
+
+Compare the durable snapshot sections while ignoring only each export's
+`exported_at` timestamp:
+
+```bash
+python3 - \
+  /tmp/lbm-review-pre-deploy.json \
+  /tmp/lbm-review-post-first-start.json \
+  /tmp/lbm-review-post-second-start.json <<'PY'
+import json
+import sys
+
+durable_keys = (
+    "schema_version",
+    "catalog_statuses",
+    "model_approvals",
+    "manual_models",
+    "decisions",
+)
+
+snapshots = []
+for path in sys.argv[1:]:
+    with open(path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+    snapshots.append({key: payload.get(key) for key in durable_keys})
+
+if snapshots[1] != snapshots[0] or snapshots[2] != snapshots[0]:
+    raise SystemExit("Review decisions changed across deploy/restart; stop rollout")
+print("Review decisions survived both service starts")
+PY
+```
+
+Keep the pre-deploy snapshot until the rollout and any separate, explicitly
+reviewed repair are complete. Snapshot equality proves decision preservation;
+it does not authorize restoring or overwriting other database state.
+
 On Debian-based Proxmox hosts, the script installs `python3-venv` or the
 matching versioned package, such as `python3.11-venv`, if the base Python
 runtime cannot create a virtual environment.

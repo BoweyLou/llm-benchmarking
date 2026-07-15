@@ -1496,6 +1496,17 @@ MODELS: list[dict[str, Any]] = [
     },
 ]
 
+MODEL_SEED_OWNED_COLUMNS = (
+    "name",
+    "provider_id",
+    "provider",
+    "type",
+    "model_roles_json",
+    "release_date",
+    "context_window",
+    "active",
+)
+
 USE_CASES: list[dict[str, Any]] = [
     {
         "id": "general_reasoning",
@@ -2018,20 +2029,22 @@ def _upsert_rows(
     table,
     rows: Iterable[Mapping[str, Any]],
     *,
-    preserve_columns: Iterable[str] = (),
+    update_columns: Iterable[str] | None = None,
 ) -> None:
     rows_list = list(rows)
     if not rows_list:
         return
 
     stmt = sqlite_insert(table).values(rows_list)
-    preserved = set(preserve_columns)
-    update_columns = {
+    owned_columns = tuple(update_columns) if update_columns is not None else tuple(
+        column.name for column in table.columns if column.name != "id"
+    )
+    update_values = {
         column.name: getattr(stmt.excluded, column.name)
         for column in table.columns
-        if column.name != "id" and column.name not in preserved
+        if column.name in owned_columns
     }
-    stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=update_columns)
+    stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=update_values)
     conn.execute(stmt)
 
 
@@ -2072,14 +2085,7 @@ def seed_reference_data(target: Connection | Engine, *, include_seed_scores: boo
             }
             for row in MODELS
         ],
-        preserve_columns=(
-            "general_approved_for_use",
-            "general_approval_notes",
-            "general_approval_updated_at",
-            "approved_for_use",
-            "approval_notes",
-            "approval_updated_at",
-        ),
+        update_columns=MODEL_SEED_OWNED_COLUMNS,
     )
 
     if include_seed_scores and not _has_rows(conn, scores):

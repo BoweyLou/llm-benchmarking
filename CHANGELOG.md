@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1 - 2026-07-15
+
+- Made model startup seeding decision-safe by limiting existing-row updates to the eight fields owned by the code seed: name, provider identity, type, roles, release date, context window, and active status. The model seed upsert now leaves general and legacy approvals, recommendations, usage policy, catalog lifecycle, enrichment, pricing, capabilities, family/discovery metadata, and future non-seed model columns untouched; authoritative benchmark upserts are unchanged.
+- Added a regression covering two consecutive reseeds and documented a required pre-deploy, first-start, and second-start review-snapshot comparison for persistent Proxmox deployments (LBM-075).
+
 ## 0.10.0 - 2026-07-15
 
 - Added a downloadable model-guide ZIP for decision makers with one readable `models.csv` row per server-owned review entity, normalized `inference-costs.csv` route/location/offer/component evidence, and a bundled `README.txt` legend.

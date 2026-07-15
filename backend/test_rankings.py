@@ -1506,6 +1506,65 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(model["approval_notes"], "Approved by internal review")
         self.assertEqual(len(approvals), len(update_engine.USE_CASES))
 
+    def test_seed_reference_data_preserves_model_decisions_across_reseed(self) -> None:
+        preserved_sentinels = {
+            "general_approved_for_use": 1,
+            "general_approval_notes": "General approval sentinel",
+            "general_approval_updated_at": "2026-07-15T01:02:03Z",
+            "general_recommendation_status": "restricted",
+            "general_recommendation_notes": "General recommendation sentinel",
+            "general_recommendation_updated_at": "2026-07-15T02:03:04Z",
+            "reasoning_effort_ceiling": "high",
+            "restricted_modes_json": '["pro"]',
+            "usage_policy_notes": "Usage policy sentinel",
+            "usage_policy_updated_at": "2026-07-15T03:04:05Z",
+            "approved_for_use": 1,
+            "approval_notes": "Legacy approval sentinel",
+            "approval_updated_at": "2026-07-15T04:05:06Z",
+            "catalog_status": "deprecated",
+            "model_card_url": "https://example.com/enriched-model-card",
+        }
+        stale_seed_owned_values = {
+            "name": "Stale seed name",
+            "provider_id": None,
+            "provider": "Stale provider",
+            "type": "stale-type",
+            "model_roles_json": '["reranker"]',
+            "release_date": "1900",
+            "context_window": "1 token",
+            "active": 0,
+        }
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                update(models_table)
+                .where(models_table.c.id == "gpt-5-4")
+                .values(**preserved_sentinels, **stale_seed_owned_values)
+            )
+            seed_reference_data(conn, include_seed_scores=False)
+            seed_reference_data(conn, include_seed_scores=False)
+            model = conn.execute(
+                models_table.select().where(models_table.c.id == "gpt-5-4")
+            ).mappings().one()
+
+        for field, expected in preserved_sentinels.items():
+            with self.subTest(field=field):
+                self.assertEqual(model[field], expected)
+
+        self.assertEqual(
+            {field: model[field] for field in stale_seed_owned_values},
+            {
+                "name": "GPT-5.4 (xhigh)",
+                "provider_id": "openai",
+                "provider": "OpenAI",
+                "type": "proprietary",
+                "model_roles_json": '["generator"]',
+                "release_date": "2026-Q1",
+                "context_window": "128k tokens",
+                "active": 1,
+            },
+        )
+
     def test_update_model_use_case_approval_updates_only_selected_lens(self) -> None:
         updated = update_engine.update_model_use_case_approval(
             "gpt-5-4",

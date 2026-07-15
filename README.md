@@ -38,7 +38,7 @@ python -m backend list-models --output output/model-metadata.json
 What those commands do:
 
 - `python -m backend bootstrap`
-  Creates the schema, repairs local runtime state, seeds reference data, and applies repo-backed provider-origin, model-curation, and model-license baselines. It does not call external metadata services.
+  Creates the schema, repairs local runtime state, seeds reference data, and applies repo-backed provider-origin, model-curation, and model-license baselines. On existing model rows, the model seed upsert owns only the baseline name, provider identity, type, roles, release date, context window, and active flag; it does not replace review decisions, usage policy, catalog status, enrichment, pricing, capabilities, family/discovery metadata, or other non-seed columns with seed defaults. It does not call external metadata services.
 - `python -m backend update`
   Runs the benchmark ingestion/update pipeline, refreshes external OpenRouter/catalog-discovery/provider-pricing/model-card/market metadata, and writes update history plus audit results. Full updates run configured model discovery; benchmark-scoped updates skip discovery unless `--refresh-model-discovery` is passed, but still refresh provider pricing.
 - `python -m backend list-models`
@@ -426,7 +426,13 @@ Useful local URLs:
 - Model list API: `http://127.0.0.1:8000/api/models`
 - API docs: `http://127.0.0.1:8000/docs`
 
-The backend bootstraps local schema and repo-backed baselines on startup if needed. Startup does not perform network metadata refreshes; use the explicit CLI or API update paths for that work.
+The backend bootstraps local schema and repo-backed baselines on startup if
+needed. Model seed rows refresh only their eight seed-owned baseline fields;
+the seed upsert leaves all other existing model columns untouched. Later
+repo-backed baselines and migrations retain their documented authority.
+Benchmark definitions remain code-owned and authoritative during their seed
+upsert. Startup does not perform network metadata refreshes; use the explicit
+CLI or API update paths for that work.
 
 Read-only routes do not require credentials. Write routes are disabled unless
 `LLM_BENCHMARKING_ADMIN_TOKEN` is set in the server environment or
@@ -548,7 +554,11 @@ SQLite is the runtime store, but important manual metadata is also kept in track
 - model curation baseline: [backend/model_curation_baseline.json](backend/model_curation_baseline.json)
 - model license baseline: [backend/model_license_baseline.json](backend/model_license_baseline.json)
 
-Those baselines are applied during bootstrap and can be re-exported from the live DB. Network-backed metadata refreshes are intentionally kept out of bootstrap so API startup stays local and predictable.
+Those baselines are applied during bootstrap and can be re-exported from the
+live DB. Repeated bootstrap does not replace existing model decisions, policy,
+catalog lifecycle, provenance, prices, capabilities, family identity, or
+discovery metadata with seed defaults. Network-backed metadata refreshes are
+intentionally kept out of bootstrap so API startup stays local and predictable.
 
 Banking review decisions are runtime SQLite state by default. Export a review
 snapshot from `/review` or `POST /api/review/snapshots/export` before rebuilding
