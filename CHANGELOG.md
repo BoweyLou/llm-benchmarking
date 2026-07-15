@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.0 - 2026-07-15
+
+- Added a downloadable model-guide ZIP for decision makers with one readable `models.csv` row per server-owned review entity, normalized `inference-costs.csv` route/location/offer/component evidence, and a bundled `README.txt` legend.
+- Added read-only API, CLI, and LLM Model Tool export paths for all models, the complete current filtered result, or selected model groups while preserving every underlying source-record ID and reporting `mixed` only when grouped general decisions disagree.
+- Added Australia-first inference ordering and evidence-safe price matching: non-Australian, regionless, and price-only evidence cannot become confirmed Australian availability or summary pricing; availability-only, price-only, and no-known-route states remain explicit.
+- Preserved native currency, amount, billing unit and quantity, modality, charge type, tier, conditions, constraints, source provenance, verification time, lifecycle status (`current`, `free`, `unavailable`, or `custom`), and independent staleness without currency conversion or a misleading cheapest-price claim. Model summaries use only fresh matched standard text input/output pairs, include honest free pairs, and distinguish confirmed synced Australian availability from an unconfirmed curated fallback.
+- Kept suggested use cases as labelled, read-only metric evidence with fit, confidence, policy, and computation context where available; legacy per-use-case approval rows remain outside the model-guide decision surface (LBM-074).
+
 ## 0.9.0 - 2026-07-15
 
 - Added a server-owned registry for all 92 code-owned benchmark definitions and a role-aware comparison contract with formatted values, strict and broad cohorts, competition ranks, tie-aware percentiles, distributions, database coverage, evidence depth, warnings, and `as_of` timestamps. Retired database definitions are deactivated without deleting historical scores.

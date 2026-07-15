@@ -166,6 +166,18 @@
     .bulk-bar .btn { flex: 0 0 auto; }
     .bulk-preview { max-height: 150px; overflow: auto; margin: 14px 0; padding: 10px 12px; border-radius: 8px; background: var(--panel-soft); color: var(--muted); font-size: 12px; line-height: 1.55; }
     .bulk-safety { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .export-options { display: grid; gap: 9px; margin: 16px 0 0; padding: 0; border: 0; }
+    .export-options legend { margin-bottom: 9px; color: var(--muted); font-size: 12px; font-weight: 690; }
+    .export-option { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-soft); cursor: pointer; }
+    .export-option:has(input:checked) { border-color: var(--blue); background: var(--blue-soft); box-shadow: 0 0 0 1px var(--blue); }
+    .export-option:has(input:disabled) { cursor: not-allowed; opacity: .58; }
+    .export-option input { width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--blue); }
+    .export-option strong, .export-option small { display: block; }
+    .export-option small { margin-top: 3px; color: var(--muted); line-height: 1.4; }
+    .export-note { margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .export-status { margin: 12px 0 0; padding: 9px 10px; border-radius: 7px; background: var(--blue-soft); color: var(--blue); font-size: 12px; line-height: 1.45; }
+    .export-status:empty { display: none; }
+    .export-status.error { background: var(--red-soft); color: var(--red); }
     .toast { position: fixed; right: 20px; bottom: 20px; z-index: 8; max-width: 360px; padding: 11px 14px; border-radius: 8px; background: #172033; color: #fff; box-shadow: var(--shadow); opacity: 0; transform: translateY(8px); pointer-events: none; transition: .18s ease; }
     .toast.show { opacity: 1; transform: translateY(0); }
     dialog { width: min(460px, calc(100vw - 32px)); border: 0; border-radius: 12px; padding: 0; box-shadow: 0 20px 70px rgba(20,32,51,.28); }
@@ -175,6 +187,7 @@
     .bulk-dialog .dialog-body { padding: 24px; }
     .bulk-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     .error { color: var(--red); }
     @media (max-width: 1180px) {
       .layout { grid-template-columns: 220px 360px minmax(440px, 1fr); }
@@ -214,6 +227,7 @@
     </div>
     <div class="header-actions">
       <button class="btn" id="runUpdates">Run updates</button>
+      <button class="btn" id="openExport" aria-haspopup="dialog" aria-controls="exportDialog" disabled>Export</button>
       <button class="btn" id="openSettings">Admin token</button>
     </div>
   </header>
@@ -263,6 +277,21 @@
       <div class="dialog-actions"><button class="btn" value="cancel">Cancel</button><button class="btn primary" id="saveToken" value="default">Save token</button></div>
     </form>
   </dialog>
+  <dialog id="exportDialog" aria-labelledby="exportDialogTitle" aria-describedby="exportDialogDescription">
+    <form class="dialog-body" id="exportForm">
+      <p class="eyebrow">Model guide</p><h2 id="exportDialogTitle">Export review data</h2>
+      <p class="intro" id="exportDialogDescription">Download a ZIP with a readable model summary, AU-first inference and cost details, and a field guide.</p>
+      <fieldset class="export-options">
+        <legend>Models to include</legend>
+        <label class="export-option" for="exportScopeAll"><input id="exportScopeAll" name="exportScope" type="radio" value="all" checked><span><strong>All models</strong><small id="exportAllMeta">Entire review catalog</small></span></label>
+        <label class="export-option" for="exportScopeFiltered"><input id="exportScopeFiltered" name="exportScope" type="radio" value="filtered"><span><strong>Filtered models</strong><small id="exportFilteredMeta">Current filter results</small></span></label>
+        <label class="export-option" for="exportScopeSelected"><input id="exportScopeSelected" name="exportScope" type="radio" value="selected" disabled><span><strong>Selected models</strong><small id="exportSelectedMeta">Select models in the queue first</small></span></label>
+      </fieldset>
+      <p class="export-note">Grouped models include every underlying source record. Stale prices remain in the detail CSV and are clearly marked.</p>
+      <p class="export-status" id="exportStatus" role="status" aria-live="polite" aria-atomic="true"></p>
+      <div class="dialog-actions"><button type="button" class="btn" id="cancelExport">Cancel</button><button type="submit" class="btn primary" id="downloadExport">Download ZIP</button></div>
+    </form>
+  </dialog>
   <dialog id="bulkDecisionDialog" class="bulk-dialog">
     <form class="dialog-body" id="bulkDecisionForm">
       <p class="eyebrow">Bulk review</p><h2>Apply general decision</h2>
@@ -277,7 +306,7 @@
       <div class="dialog-actions"><button type="button" class="btn" id="cancelBulkDecision">Cancel</button><button type="submit" class="btn primary" id="applyBulkDecision">Apply to selected models</button></div>
     </form>
   </dialog>
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script>
     const state = {
@@ -291,16 +320,19 @@
       selectionMode: false,
       selectedGroupIds: new Set(),
       bulkSaving: false,
+      exporting: false,
       visibleLimit: 200,
       groupCacheCatalog: null,
       groupCache: []
     };
 
     const els = Object.fromEntries([
-      "databaseUpdated", "lastSynced", "runUpdates", "openSettings", "search", "providerFilter",
+      "databaseUpdated", "lastSynced", "runUpdates", "openExport", "openSettings", "search", "providerFilter",
       "approvalFilter", "recommendationFilter", "needsDecision", "resetFilters", "queueCount",
       "queueList", "detail", "settingsDialog", "adminToken", "saveToken", "toast", "toggleSelection",
       "selectionTools", "selectionCount", "selectAllFiltered", "clearSelection",
+      "exportDialog", "exportForm", "exportScopeAll", "exportScopeFiltered", "exportScopeSelected",
+      "exportAllMeta", "exportFilteredMeta", "exportSelectedMeta", "cancelExport", "downloadExport", "exportStatus",
       "bulkBar", "bulkBarTitle", "bulkBarMeta", "openBulkDecision", "bulkDecisionDialog",
       "bulkDecisionForm", "bulkApproval", "bulkRecommendation", "bulkNotes", "bulkPreview",
       "cancelBulkDecision", "applyBulkDecision"
@@ -322,6 +354,13 @@
         throw new Error(message);
       }
       return response.json();
+    }
+
+    function safeDownloadFilename(contentDisposition) {
+      const match = /(?:^|;)\s*filename\s*=\s*(?:"([^"]+)"|([^;]+))/i.exec(String(contentDisposition || ""));
+      const filename = String(match?.[1] || match?.[2] || "").trim();
+      if (!/^[a-z0-9][a-z0-9._-]{0,127}\.zip$/i.test(filename) || filename.includes("..")) return null;
+      return filename;
     }
 
     function escapeHtml(value) {
@@ -916,6 +955,96 @@
     }
 
     function selectedGroups() { const selected = state.selectedGroupIds; return reviewGroups().filter((model) => selected.has(model.group_id)); }
+    function completeExportModelIds(groups) {
+      return [...new Set(groups.flatMap((group) => group.member_ids || []))];
+    }
+    function modelIdsForExportScope(scope) {
+      if (scope === "all") return null;
+      return completeExportModelIds(scope === "filtered" ? filteredGroups() : selectedGroups());
+    }
+    function exportScopeMeta(groups) {
+      const records = completeExportModelIds(groups).length;
+      return `${groups.length} model${groups.length === 1 ? "" : "s"} · ${records} source record${records === 1 ? "" : "s"}`;
+    }
+    function updateExportOptions() {
+      const all = reviewGroups();
+      const filtered = filteredGroups();
+      const selected = selectedGroups();
+      els.exportAllMeta.textContent = exportScopeMeta(all);
+      els.exportFilteredMeta.textContent = exportScopeMeta(filtered);
+      els.exportSelectedMeta.textContent = selected.length ? exportScopeMeta(selected) : "Select models in the queue first";
+      els.exportScopeAll.disabled = state.exporting;
+      els.exportScopeFiltered.disabled = state.exporting || filtered.length === 0;
+      els.exportScopeSelected.disabled = state.exporting || selected.length === 0;
+      if ((els.exportScopeFiltered.checked && !filtered.length) || (els.exportScopeSelected.checked && !selected.length)) {
+        els.exportScopeAll.checked = true;
+      }
+      els.cancelExport.disabled = state.exporting;
+      els.downloadExport.disabled = state.exporting;
+      els.downloadExport.textContent = state.exporting ? "Preparing…" : "Download ZIP";
+    }
+    function openExportDialog() {
+      updateExportOptions();
+      els.exportStatus.textContent = "";
+      els.exportDialog.showModal();
+    }
+    function setExportStatus(message, isError = false, showToast = isError) {
+      els.exportStatus.textContent = message;
+      els.exportStatus.classList?.toggle("error", isError);
+      if (message && showToast) toast(message, isError);
+    }
+    function preventExportDialogCancel(event) {
+      if (!state.exporting) return;
+      event.preventDefault();
+      setExportStatus("The model-guide export is still being prepared.");
+    }
+    async function downloadModelGuide(event) {
+      event.preventDefault();
+      if (state.exporting) return;
+      const scope = new FormData(els.exportForm).get("exportScope") || "all";
+      const modelIds = modelIdsForExportScope(scope);
+      if (scope !== "all" && !modelIds.length) {
+        setExportStatus(`No ${scope} models are available to export.`, true);
+        updateExportOptions();
+        return;
+      }
+
+      state.exporting = true;
+      setExportStatus("Preparing the model-guide ZIP…");
+      updateExportOptions();
+      try {
+        const response = await fetch("/api/review/exports/model-guide", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model_ids: modelIds })
+        });
+        if (!response.ok) {
+          let message = `Export failed (${response.status})`;
+          try { message = (await response.json()).detail || message; } catch (_) {}
+          throw new Error(message);
+        }
+        const blob = await response.blob();
+        const filename = safeDownloadFilename(response.headers.get("Content-Disposition")) || "llm-model-guide.zip";
+        const objectUrl = URL.createObjectURL(blob);
+        try {
+          const anchor = document.createElement("a");
+          anchor.href = objectUrl;
+          anchor.download = filename;
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+        els.exportDialog.close();
+        setExportStatus("Model-guide ZIP download started.", false, true);
+      } catch (error) {
+        setExportStatus(error.message || "The model-guide export failed.", true);
+      } finally {
+        state.exporting = false;
+        updateExportOptions();
+      }
+    }
     function renderBulkBar() {
       const groups = selectedGroups();
       const records = groups.reduce((sum, group) => sum + group.member_ids.length, 0);
@@ -1014,6 +1143,7 @@
     async function loadCatalog(preferredModelId = null) {
       const catalog = await request("/api/review/catalog");
       state.catalog = catalog;
+      els.openExport.disabled = false;
       els.databaseUpdated.textContent = `Database updated: ${formatDate(catalog.database_updated_at)}`;
       els.lastSynced.textContent = `Last sync: ${formatDate(catalog.last_sync_at)}`;
       const providers = [...new Set(catalog.models.map((model) => model.provider))].sort();
@@ -1062,6 +1192,10 @@
       if (event.target.closest("#skipModel")) selectNext();
     });
     els.detail.addEventListener("input", (event) => { if (event.target.id === "decisionNotes" && state.draft) state.draft.notes = event.target.value; });
+    els.openExport.addEventListener("click", openExportDialog);
+    els.cancelExport.addEventListener("click", () => els.exportDialog.close());
+    els.exportDialog.addEventListener("cancel", preventExportDialogCancel);
+    els.exportForm.addEventListener("submit", downloadModelGuide);
     els.openSettings.addEventListener("click", () => { els.adminToken.value = sessionStorage.getItem("llm_benchmarking_admin_token") || ""; els.settingsDialog.showModal(); });
     els.saveToken.addEventListener("click", () => { sessionStorage.setItem("llm_benchmarking_admin_token", els.adminToken.value); toast("Admin token saved for this tab"); });
     els.runUpdates.addEventListener("click", runUpdates);

@@ -43,6 +43,8 @@ What those commands do:
   Runs the benchmark ingestion/update pipeline, refreshes external OpenRouter/catalog-discovery/provider-pricing/model-card/market metadata, and writes update history plus audit results. Full updates run configured model discovery; benchmark-scoped updates skip discovery unless `--refresh-model-discovery` is passed, but still refresh provider pricing.
 - `python -m backend list-models`
   Prints or exports the complete active model metadata list and writes a default clean CSV bundle.
+- `python -m backend review-export`
+  Writes a decision-friendly, AU-first model guide ZIP from the current read-only review catalog.
 
 If you want the older one-shot bootstrap-and-ingest flow, it still exists:
 
@@ -119,6 +121,85 @@ Write the legacy one-row-per-model CSV with nested JSON cells:
 
 ```bash
 python -m backend list-models --format raw-csv --output output/model-metadata-raw.csv
+```
+
+### Model decision and inference guide
+
+For a compact export intended for review and procurement conversations, run:
+
+```bash
+python -m backend review-export
+```
+
+The default output is `output/llm-model-guide-<UTC timestamp>.zip`. Use
+`--output <path>` to choose the file and repeat `--model-id`, or pass several
+IDs after one flag, to limit the export to exact source records:
+
+```bash
+python -m backend review-export \
+  --model-id model-id-one model-id-two \
+  --output output/shortlist-model-guide.zip
+```
+
+The ZIP contains three files:
+
+- `models.csv` has one readable row per server-owned `review_entity_id` group.
+  It preserves the stable group ID, source-record count and IDs, general
+  approval, general recommendation, read-only suggested-use evidence, and an
+  AU-first inference summary. `mixed` appears only when the grouped source
+  records disagree on the corresponding general decision.
+- `inference-costs.csv` is the normalized evidence table: one row per source
+  record, route, location, offer, and price component. It retains native
+  currency, amount, billing unit and quantity, modality, charge type, service
+  tier, constraints, conditions, source URL and label, verification time, and
+  stale state.
+- `README.txt` is a portable legend for the decision and pricing fields and
+  their caveats.
+
+Suggested use cases come only from the current metric-derived
+`suggested_use_cases` contract. They are positive fit evidence, may include a
+candidate that still requires restrictions or controls, and are never a human
+approval or general recommendation. The guide does not roll legacy
+per-use-case approval rows into this list. Fit, confidence, policy version, and
+computed time are retained where the review catalog provides them.
+
+Inference locations sort as Australia, other named countries alphabetically,
+Global, provider-managed or provider-routed routes, then unknown location.
+Published region identifiers are kept as identifiers; the export does not
+invent city names. A price is matched to a listed location only when its region
+matches. Non-Australian or regionless price evidence is retained honestly as
+price-only evidence and never attached to an Australian route. A price-only
+Australian row likewise cannot become a confirmed Australian inference option
+or model-summary price. Availability-only and no-known-route rows remain
+visible.
+
+The `availability_evidence_kind` field and the bracketed labels in the readable
+summary distinguish synced account/project catalog evidence,
+`curated_fallback` possibilities, `pricing_only` observations, and
+provider-managed or provider-routed paths. A curated fallback is not confirmed
+model availability in a named account or region; verify account entitlement,
+quota, residency controls, and the cited source before deployment.
+
+Price evidence keeps lifecycle status (`current`, `free`, `unavailable`, or
+`custom`) separate from the `pricing_is_stale` freshness flag. No currency
+conversion or global cheapest-price calculation is performed. The model-level
+Australian price summary includes only fresh, matched, standard-tier text
+input/output pairs in their native unit, reports a genuinely free pair as free,
+and explicitly distinguishes a confirmed synced Australian route without a
+current price from a possible, unconfirmed curated fallback. Use
+`inference-costs.csv`, not the summary, for conditional, multimodal, batch,
+cached, provisioned, or other non-comparable charges.
+
+The matching read-only API accepts an omitted or `null` `model_ids` field for
+the whole catalog, or a non-empty exact source-record list. Empty and unknown
+ID scopes are rejected instead of silently exporting all models. It does not
+require the admin write token:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8000/api/review/exports/model-guide \
+  -H 'Content-Type: application/json' \
+  --data '{"model_ids":["model-id-one","model-id-two"]}' \
+  --output llm-model-guide.zip
 ```
 
 ## Recommendation Proposals
@@ -255,6 +336,14 @@ The queue renders results in progressive 200-row batches for responsiveness;
 `Select all filtered` still targets the complete filtered result, including
 rows not yet rendered.
 
+The header `Export` control downloads the same model-guide ZIP without changing
+review state. Choose `All models`, `Current filtered list`, or `Selected
+models`. Filtered export includes every underlying source ID in every matching
+review group, including groups beyond the current 200-row render batch.
+Selected export includes every source ID in the selected groups and stays
+disabled with clear guidance when nothing is selected. Export is read-only, so
+it does not use the admin token.
+
 The workbench can export and import a JSON review snapshot. Use that snapshot
 when rebuilding a database so manual listings, deprecation markers, and
 general model decisions can be restored. Version 3 snapshots also include model
@@ -369,7 +458,7 @@ export and triage. Tags include roles such as `generator`, `embedding`, and
 the `frontier` tag for generator models that are not marked as small-model
 candidates.
 
-Review catalog schema version 2 keeps response-build time in `generated_at`
+Review catalog schema version 4 keeps response-build time in `generated_at`
 and exposes two separate operational timestamps. `database_updated_at` is the
 newest UTC modification time of the configured SQLite database file or its WAL,
 so it covers database writes outside the update runner. `last_sync_at`,

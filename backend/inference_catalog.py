@@ -225,7 +225,10 @@ def list_inference_destinations(
         destination["id"]: destination for destination in list_curated_inference_destinations(model)
     }
     live_destinations = {
-        str(destination.get("id") or ""): _normalize_destination(destination)
+        str(destination.get("id") or ""): _normalize_destination(
+            destination,
+            default_evidence_kind="synced",
+        )
         for destination in synced_destinations or []
         if str(destination.get("id") or "").strip()
     }
@@ -281,6 +284,30 @@ def load_synced_inference_catalog(
             model_inference_destinations_table.c.destination_id.asc(),
         ),
     )
+    destination_ids = sorted(
+        {
+            str(row.get("destination_id") or "").strip()
+            for row in rows
+            if str(row.get("destination_id") or "").strip()
+        }
+    )
+    status_rows = (
+        fetch_all(
+            conn,
+            select(inference_sync_status_table).where(
+                inference_sync_status_table.c.destination_id.in_(destination_ids)
+            ),
+        )
+        if destination_ids
+        else []
+    )
+    sync_modes = {
+        str(row.get("destination_id") or ""): str(
+            _parse_json_object(row.get("detail_json")).get("mode") or ""
+        )
+        for row in status_rows
+        if str(row.get("destination_id") or "").strip()
+    }
 
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -301,6 +328,10 @@ def load_synced_inference_catalog(
                     "sources": _parse_json_list(row.get("sources_json")),
                     "catalog_model_id": row.get("catalog_model_id"),
                     "synced_at": row.get("synced_at"),
+                    "availability_evidence_kind": _synced_availability_evidence_kind(
+                        row,
+                        mode=sync_modes.get(str(row.get("destination_id") or "")),
+                    ),
                 }
             )
         )
@@ -318,29 +349,50 @@ def load_authoritative_destination_ids(conn: Connection) -> set[str]:
 
 def _materialize_destination(destination_id: str) -> dict[str, Any]:
     record = DESTINATIONS[destination_id]
-    return _normalize_destination(record)
+    return _normalize_destination(
+        record,
+        default_evidence_kind=_curated_evidence_kind(record),
+    )
 
 
 def materialize_destination(destination_id: str) -> dict[str, Any]:
-    """Return a normalized first-class inference destination."""
-    if destination_id not in DESTINATIONS:
-        return _normalize_destination(
+    """Return metadata for a destination discovered from pricing evidence only."""
+    record = dict(
+        DESTINATIONS.get(
+            destination_id,
             {
                 "id": destination_id,
                 "name": destination_id.replace("-", " ").title(),
                 "hyperscaler": "Provider",
-                "availability_scope": "Published route",
-                "location_scope": "Provider managed",
-            }
+            },
         )
-    return _materialize_destination(destination_id)
+    )
+    record.update(
+        {
+            "availability_scope": "Published pricing evidence",
+            "availability_note": (
+                "A price was observed for this destination; route and regional availability "
+                "are not confirmed by pricing evidence alone."
+            ),
+            "location_scope": "Pricing offer locations only",
+            "regions": [],
+            "region_count": 0,
+            "deployment_modes": [],
+            "availability_evidence_kind": "pricing_only",
+        }
+    )
+    return _normalize_destination(record)
 
 
-def _normalize_destination(record: Mapping[str, Any]) -> dict[str, Any]:
+def _normalize_destination(
+    record: Mapping[str, Any],
+    *,
+    default_evidence_kind: str | None = None,
+) -> dict[str, Any]:
     regions = _string_list(record.get("regions"))
     deployment_modes = _string_list(record.get("deployment_modes"))
     sources = _source_list(record.get("sources"))
-    return {
+    payload = {
         "id": str(record.get("id") or ""),
         "name": str(record.get("name") or ""),
         "hyperscaler": str(record.get("hyperscaler") or ""),
@@ -353,7 +405,32 @@ def _normalize_destination(record: Mapping[str, Any]) -> dict[str, Any]:
         "pricing_label": _clean_optional_text(record.get("pricing_label")),
         "pricing_note": _clean_optional_text(record.get("pricing_note")),
         "sources": sources,
+        "catalog_model_id": _clean_optional_text(record.get("catalog_model_id")),
+        "synced_at": _clean_optional_text(record.get("synced_at")),
+        "availability_evidence_kind": (
+            _clean_optional_text(record.get("availability_evidence_kind"))
+            or default_evidence_kind
+            or _curated_evidence_kind(record)
+        ),
     }
+    if "pricing_offers" in record:
+        payload["pricing_offers"] = [
+            dict(offer)
+            for offer in record.get("pricing_offers") or []
+            if isinstance(offer, Mapping)
+        ]
+    if "freshness" in record:
+        payload["freshness"] = record.get("freshness")
+    return payload
+
+
+def _curated_evidence_kind(record: Mapping[str, Any]) -> str:
+    location_scope = str(record.get("location_scope") or "").strip().casefold()
+    if location_scope == "provider managed":
+        return "provider_managed"
+    if location_scope == "provider routed":
+        return "provider_routed"
+    return "curated_fallback"
 
 
 def _build_summary(destinations: list[dict[str, Any]]) -> dict[str, Any]:
@@ -385,6 +462,48 @@ def _parse_json_list(value: Any) -> list[Any]:
     except json.JSONDecodeError:
         return []
     return parsed if isinstance(parsed, list) else []
+
+
+def _parse_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return dict(parsed) if isinstance(parsed, Mapping) else {}
+
+
+def _synced_availability_evidence_kind(
+    record: Mapping[str, Any],
+    *,
+    mode: str | None,
+) -> str:
+    explicit = _clean_optional_text(record.get("availability_evidence_kind"))
+    if explicit:
+        return explicit
+
+    normalized_mode = str(mode or "").strip().casefold()
+    if normalized_mode in {"pricing-only", "public-pricing-only"}:
+        return "pricing_only"
+    if normalized_mode.startswith("published-endpoints"):
+        return "curated_fallback"
+
+    availability_scope = str(record.get("availability_scope") or "").strip().casefold()
+    location_scope = str(record.get("location_scope") or "").strip().casefold()
+    if (
+        availability_scope in {"public retail pricing footprint", "region scoped via live pricing"}
+        or location_scope in {"live azure retail pricing regions", "live bedrock pricing regions"}
+    ):
+        return "pricing_only"
+    if (
+        availability_scope == "published endpoint footprint"
+        or location_scope == "published vertex endpoints"
+    ):
+        return "curated_fallback"
+    return "synced"
 
 
 def _string_list(value: Any) -> list[str]:

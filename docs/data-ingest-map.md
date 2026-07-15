@@ -75,6 +75,8 @@ flowchart LR
         API["FastAPI model, ranking, update, audit APIs"]
         CSV["output/model-list.csv"]
         Rankings["use-case weighted rankings"]
+        ReviewCatalog["Schema-4 review catalog and review entities"]
+        ModelGuide["Model guide ZIP: models.csv, inference-costs.csv, README.txt"]
     end
 
     Schema --> Store
@@ -125,6 +127,8 @@ flowchart LR
     Store --> API
     CLI --> CSV
     Store --> Rankings
+    Store --> ReviewCatalog
+    ReviewCatalog --> ModelGuide
 ```
 
 ## Update Sequence
@@ -163,6 +167,48 @@ WAL file modification time, while `last_sync_at`, `last_sync_status`, and
 `last_sync_log_id` come from the newest `update_log` row ordered by start time
 and id. Running updates use their start time; terminal updates use their
 completion time.
+
+## Model Guide Export
+
+`python -m backend review-export`, the read-only
+`POST /api/review/exports/model-guide` endpoint, and the LLM Model Tool export
+control all project the current schema-4 review catalog into the same ZIP
+contract. This is a presentation/export stage; it does not refresh a source,
+mutate catalog or review data, or create a second model identity rule. Normal
+application bootstrap can still initialize or repair the local schema before a
+read when required.
+
+`models.csv` groups only by the server-owned `review_entity_id` already used by
+the review queue. The row exposes that stable ID and every represented source
+record ID. General approval and general recommendation remain separate, and
+`mixed` is derived only when the represented source records disagree on that
+decision. `suggested_use_cases` remain positive, read-only metric evidence from
+the catalog, with fit/confidence and policy/computation context where present.
+They can still require controls or restricted use and are not populated from
+legacy per-use-case human decisions.
+
+`inference-costs.csv` normalizes source record, destination, location, offer,
+and component evidence. Location order is Australia first, other named
+countries alphabetically, Global, provider-managed/routed, then unknown.
+Published cloud region identifiers are retained without inventing city labels.
+Exact region matching keeps a non-Australian or regionless price from being
+attached to an Australian availability row. A listed route without a matching
+price becomes availability-only evidence; a published price without matching
+availability remains price-only; a model with neither gets an explicit
+no-known-route row. Price-only Australian evidence does not become a confirmed
+Australian route or enter the readable Australian price summary. Availability
+evidence separately identifies synced account/project catalogs, curated
+fallbacks, pricing-only observations, and provider-managed/routed paths.
+
+Prices remain in their native currency, amount, billing unit and quantity,
+modality, charge type, service tier, constraints, conditions, and provenance.
+Lifecycle status (`current`, `free`, `unavailable`, or `custom`) and independent
+staleness stay distinct. The readable model summary may show only fresh matched
+standard-tier text input/output pairs for an exact Australian region, reports a
+genuinely free pair as free, and distinguishes a confirmed synced AU route from
+a possible, unconfirmed curated fallback when no current AU-specific price is
+available. The export does not convert currencies or select a global cheapest
+provider.
 
 ## Benchmark Presentation and Comparison
 
@@ -324,6 +370,9 @@ cannot replace authoritative curated provenance.
   Analysis TTS adapter, provider catalog seeds, and role-specific ranking lane.
 - `LBM-062`: restricted-access frontier/cyber models such as Claude Mythos 5 and
   GPT-5.5-Cyber now have official provider catalog rows.
+- `LBM-074`: the schema-4 review catalog now has a decision-friendly model-guide
+  ZIP with server-owned review groups and AU-first normalized inference-price
+  evidence across UI, API, and CLI read surfaces.
 
 ### New Source Adapters
 

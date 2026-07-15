@@ -98,6 +98,69 @@ operations or if trusted tailnet writes are disabled:
 ssh proxmox "sed -n 's/^LLM_BENCHMARKING_ADMIN_TOKEN=//p' /etc/llm-benchmarking.env"
 ```
 
+## Export the Model Guide
+
+The LLM Model Tool header has an `Export` control with `All models`, `Current
+filtered list`, and `Selected models` scopes. The filtered scope includes the
+complete filtered review result, not only the current progressive 200-row
+render batch. Filtered and selected scopes send every underlying source-record
+ID represented by each review group. `Selected models` remains unavailable
+until at least one group is selected.
+
+The download is a read-only projection of the current persistent SQLite
+catalog. It does not refresh providers, change review decisions, or require the
+admin token. The ZIP contains `models.csv`, `inference-costs.csv`, and
+`README.txt`.
+
+The same all-model export can be requested directly from any tailnet client:
+
+```bash
+BASE_URL="http://<proxmox-tailscale-ip>:8766"
+curl -fsS -X POST "$BASE_URL/api/review/exports/model-guide" \
+  -H 'Content-Type: application/json' \
+  --data '{}' \
+  --output llm-model-guide.zip
+python3 -m zipfile -l llm-model-guide.zip
+```
+
+To export an exact shortlist, provide a non-empty source-model ID list. Empty
+or unknown ID scopes are rejected rather than falling back to the full catalog:
+
+```bash
+curl -fsS -X POST "$BASE_URL/api/review/exports/model-guide" \
+  -H 'Content-Type: application/json' \
+  --data '{"model_ids":["model-id-one","model-id-two"]}' \
+  --output shortlist-model-guide.zip
+```
+
+The host-side CLI has parity and defaults to a timestamped file under
+`output/` relative to the deployed checkout:
+
+```bash
+ssh proxmox '
+  cd /opt/llm-benchmarking/current
+  set -a
+  . /etc/llm-benchmarking.env
+  set +a
+  .venv/bin/python -m backend review-export \
+    --output /tmp/llm-model-guide.zip
+'
+```
+
+Read `README.txt` before using the pricing evidence. Australia is ordered first,
+but only an exact Australian region price is attached to an Australian route.
+Regionless and non-Australian prices remain price-only evidence. Native
+currency and billing units are not converted. Price lifecycle (`current`,
+`free`, `unavailable`, or `custom`) and the independent staleness flag remain
+explicit alongside availability-only, price-only, and no-known-route states.
+Price-only Australian evidence cannot become confirmed availability or summary
+pricing. The model summary is intentionally limited to fresh matched standard
+text input/output pairs, with truly free pairs labelled free. Without such a
+pair it distinguishes confirmed synced availability from a possible,
+unconfirmed curated fallback; it is not a cheapest-provider calculation.
+Suggested use cases are metric-derived, read-only evidence, not approval or
+recommendation decisions.
+
 ## Verify the Comparison Release
 
 Set the tailnet base URL locally, then inspect the public contracts:
@@ -144,6 +207,12 @@ Verify the following before treating the rollout as complete:
   production approval. Missing evidence must follow the active use case's
   positive weights and required benchmarks before falling back to role defaults.
   Check populated and empty states on both desktop and a narrow mobile viewport.
+- A model-guide POST returns `application/zip` with a timestamped attachment
+  filename and exactly `models.csv`, `inference-costs.csv`, and `README.txt`.
+  Spot-check one AWS, Azure, or Vertex model with an Australian route: AU rows
+  must sort first, while a US-only or regionless price must not appear as
+  Australian pricing. Check at least one availability-only route and one stale
+  or unavailable price state.
 
 ## Operate
 

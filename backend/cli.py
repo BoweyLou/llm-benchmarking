@@ -30,6 +30,7 @@ from .recommendation_engine import (
     format_recommendation_audit_summary,
     sync_recommendation_proposals,
 )
+from .review_export import export_model_guide
 from .seed_data import PROVIDER_ORIGIN_BASELINE_PATH, export_provider_origin_baseline
 from .update_engine import (
     bootstrap,
@@ -83,6 +84,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not write normalized CSV companion files for scores, approvals, inference destinations, origins, and source freshness.",
     )
     list_models_parser.set_defaults(func=cmd_list_models)
+
+    review_export_parser = subparsers.add_parser(
+        "review-export",
+        help="Export a readable AU-first model guide and inference-cost ZIP.",
+    )
+    review_export_parser.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        help="Output ZIP path. Defaults to output/ with a timestamped filename.",
+    )
+    review_export_parser.add_argument(
+        "--model-id",
+        dest="model_ids",
+        action="extend",
+        nargs="+",
+        help="Limit the export to model ids. Accepts space-separated values and may be repeated.",
+    )
+    review_export_parser.set_defaults(func=cmd_review_export)
 
     banking_review_parser = subparsers.add_parser(
         "banking-review",
@@ -394,6 +414,23 @@ def cmd_list_models(args: argparse.Namespace) -> int:
     if args.output and sidecar_paths:
         print(f"Exported {len(sidecar_paths)} CSV companion files next to {sidecar_paths[0].parent}")
 
+    return 0
+
+
+def cmd_review_export(args: argparse.Namespace) -> int:
+    try:
+        archive = export_model_guide(model_ids=args.model_ids)
+    except ValueError as exc:
+        print(f"review-export: {exc}", file=sys.stderr)
+        return 2
+    output_path = args.output or Path("output") / archive.filename
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(archive.content)
+    suffix = "" if archive.model_count == 1 else "s"
+    print(
+        f"Exported {archive.model_count} model group{suffix} "
+        f"from {archive.source_record_count} source records to {output_path}"
+    )
     return 0
 
 

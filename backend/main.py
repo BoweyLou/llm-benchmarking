@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 from .catalog_export import build_model_metadata_list
 from .models import (
@@ -38,6 +38,7 @@ from .models import (
     ReviewModelApprovalIn,
     ReviewModelDecisionIn,
     ReviewModelCreateIn,
+    ReviewModelGuideExportIn,
     ReviewSnapshotIn,
     SourceRunOut,
     UpdateLogOut,
@@ -73,6 +74,7 @@ from .update_engine import (
     update_provider_origin,
     update_use_case_internal_weight,
 )
+from .review_export import export_model_guide
 from .review_workbench import (
     add_review_model,
     apply_model_decisions,
@@ -189,6 +191,21 @@ def api_providers() -> list[dict]:
 @app.get("/api/review/catalog", response_model=dict[str, Any])
 def api_review_catalog() -> dict[str, Any]:
     return build_review_catalog()
+
+
+@app.post("/api/review/exports/model-guide")
+def api_export_review_model_guide(payload: ReviewModelGuideExportIn) -> Response:
+    try:
+        archive = export_model_guide(model_ids=payload.model_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(
+        content=archive.content,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{archive.filename}"',
+        },
+    )
 
 
 @app.post("/api/review/decisions", response_model=dict[str, Any], dependencies=[Depends(require_local_admin)])

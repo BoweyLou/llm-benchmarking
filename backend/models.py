@@ -734,6 +734,10 @@ class ReviewSnapshotIn(APIModel):
     decisions: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ReviewModelGuideExportIn(APIModel):
+    model_ids: list[str] | None = None
+
+
 class UseCaseOut(APIModel):
     id: str
     label: str

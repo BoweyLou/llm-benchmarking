@@ -122,6 +122,23 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertNotIn("bulkUseCaseTargetsForModels", app_response.text)
         self.assertIn("runUpdates", app_response.text)
         self.assertIn("Run updates", app_response.text)
+        self.assertIn('id="openExport"', app_response.text)
+        self.assertIn("Export review data", app_response.text)
+        self.assertIn('value="all"', app_response.text)
+        self.assertIn('value="filtered"', app_response.text)
+        self.assertIn('value="selected" disabled', app_response.text)
+        self.assertIn('id="exportStatus" role="status" aria-live="polite"', app_response.text)
+        export_dialog_start = app_response.text.index('id="exportDialog"')
+        export_dialog_end = app_response.text.index("</dialog>", export_dialog_start)
+        export_status = app_response.text.index('id="exportStatus"')
+        self.assertLess(export_dialog_start, export_status)
+        self.assertLess(export_status, export_dialog_end)
+        self.assertIn('/api/review/exports/model-guide', app_response.text)
+        self.assertIn("completeExportModelIds", app_response.text)
+        self.assertIn("response.blob()", app_response.text)
+        self.assertIn('response.headers.get("Content-Disposition")', app_response.text)
+        self.assertIn("URL.revokeObjectURL", app_response.text)
+        self.assertIn("preventExportDialogCancel", app_response.text)
         self.assertIn('id="databaseUpdated">Database updated:', app_response.text)
         self.assertIn('id="lastSynced">Last sync:', app_response.text)
         self.assertIn("toLocaleString()", app_response.text)
@@ -226,6 +243,105 @@ function label(value) { return String(value); }
 eval(section("    function benchmarkEvidence", "    function formatBenchmarkValue"));
 const missing = benchmarkEvidence({relevant_benchmark_ids: ["role_metric"]}).missing.map((item) => item.id).sort();
 if (JSON.stringify(missing) !== JSON.stringify(["context_metric", "required_metric"])) throw new Error("Missing evidence ignored active use-case relevance");
+"""
+        completed = subprocess.run(
+            ["node", "-e", harness],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "REVIEW_SOURCE": script},
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required for the review export UI contract")
+    def test_review_export_ui_uses_complete_group_membership_and_revokes_blob_url(self) -> None:
+        script = main.REVIEW_APP_PATH.read_text(encoding="utf-8")
+        harness = r"""
+const source = process.env.REVIEW_SOURCE;
+function section(start, end) {
+  const from = source.indexOf(start);
+  const to = source.indexOf(end, from);
+  if (from < 0 || to < 0) throw new Error(`Missing section: ${start}`);
+  return source.slice(from, to);
+}
+eval(section("    function safeDownloadFilename", "    function escapeHtml"));
+if (safeDownloadFilename('attachment; filename="llm-model-guide-20260715T050000Z.zip"') !== "llm-model-guide-20260715T050000Z.zip") throw new Error("Safe export filename was rejected");
+if (safeDownloadFilename('attachment; filename="../../escape.zip"') !== null) throw new Error("Unsafe path filename was accepted");
+if (safeDownloadFilename('attachment; filename="model-guide.exe"') !== null) throw new Error("Non-ZIP filename was accepted");
+
+const groups = [
+  {group_id: "visible-entity", member_ids: ["visible-direct", "visible-provider-variant"]},
+  {group_id: "hidden-selected-entity", member_ids: ["hidden-direct", "hidden-provider-variant"]}
+];
+const state = {selectedGroupIds: new Set(["hidden-selected-entity"]), exporting: false};
+function reviewGroups() { return groups; }
+function filteredGroups() { return [groups[0]]; }
+function toast() {}
+const els = {
+  exportAllMeta: {textContent: ""}, exportFilteredMeta: {textContent: ""}, exportSelectedMeta: {textContent: ""},
+  exportScopeAll: {disabled: false, checked: false}, exportScopeFiltered: {disabled: false, checked: true},
+  exportScopeSelected: {disabled: false, checked: false}, cancelExport: {disabled: false},
+  downloadExport: {disabled: false, textContent: ""}, exportStatus: {textContent: ""},
+  exportDialog: {closed: false, close() { this.closed = true; }, showModal() {}}
+};
+eval(section("    function selectedGroups", "    function renderBulkBar"));
+
+const filteredIds = modelIdsForExportScope("filtered");
+if (JSON.stringify(filteredIds) !== JSON.stringify(["visible-direct", "visible-provider-variant"])) throw new Error("Filtered export omitted grouped provider membership");
+const selectedIds = modelIdsForExportScope("selected");
+if (JSON.stringify(selectedIds) !== JSON.stringify(["hidden-direct", "hidden-provider-variant"])) throw new Error("Selected export lost a group hidden by current filters");
+if (modelIdsForExportScope("all") !== null) throw new Error("All-model export should use an unscoped request");
+
+state.selectedGroupIds.clear();
+els.exportScopeSelected.checked = true;
+els.exportScopeFiltered.checked = false;
+updateExportOptions();
+if (!els.exportScopeSelected.disabled) throw new Error("Empty Selected export remained enabled");
+if (!els.exportScopeAll.checked) throw new Error("Empty Selected scope did not fall back to All");
+
+state.exporting = true;
+let cancelPrevented = false;
+preventExportDialogCancel({preventDefault() { cancelPrevented = true; }});
+if (!cancelPrevented) throw new Error("Escape was allowed to close an in-progress export");
+if (!els.exportStatus.textContent.includes("still being prepared")) throw new Error("In-progress Escape was not announced");
+state.exporting = false;
+
+let fetchCall = null;
+let revokedUrl = null;
+let clicked = false;
+let appended = false;
+const anchor = {href: "", download: "", click() { clicked = true; }, remove() {}};
+global.FormData = class { get() { return "filtered"; } };
+global.fetch = async (url, options) => {
+  fetchCall = {url, options};
+  return {
+    ok: true,
+    status: 200,
+    headers: {get(name) { return name === "Content-Disposition" ? 'attachment; filename="llm-model-guide-20260715T050000Z.zip"' : null; }},
+    blob: async () => ({size: 42})
+  };
+};
+global.URL = {
+  createObjectURL() { return "blob:model-guide"; },
+  revokeObjectURL(value) { revokedUrl = value; }
+};
+global.document = {
+  createElement(tag) { if (tag !== "a") throw new Error("Unexpected download element"); return anchor; },
+  body: {appendChild(value) { if (value !== anchor) throw new Error("Unexpected download anchor"); appended = true; }}
+};
+
+(async () => {
+  await downloadModelGuide({preventDefault() {}});
+  if (fetchCall?.url !== "/api/review/exports/model-guide") throw new Error("Wrong export endpoint");
+  const payload = JSON.parse(fetchCall.options.body);
+  if (JSON.stringify(payload.model_ids) !== JSON.stringify(["visible-direct", "visible-provider-variant"])) throw new Error("Download request omitted complete filtered membership");
+  if (fetchCall.options.headers["Content-Type"] !== "application/json") throw new Error("Export request omitted JSON content type");
+  if (!appended || !clicked) throw new Error("ZIP download was not triggered");
+  if (anchor.download !== "llm-model-guide-20260715T050000Z.zip") throw new Error("Content-Disposition filename was not used");
+  if (revokedUrl !== "blob:model-guide") throw new Error("Blob URL was not revoked");
+  if (!els.exportDialog.closed) throw new Error("Export dialog did not close after download");
+  if (state.exporting) throw new Error("Export busy state was not cleared");
+})().catch((error) => { console.error(error); process.exitCode = 1; });
 """
         completed = subprocess.run(
             ["node", "-e", harness],
