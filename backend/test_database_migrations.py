@@ -17,9 +17,67 @@ from backend.database import (
     scores as scores_table,
     source_runs as source_runs_table,
 )
+from backend.seed_data import BENCHMARKS, seed_reference_data
 
 
 class DatabaseMigrationTests(unittest.TestCase):
+    def test_seed_benchmarks_are_authoritative_without_deleting_historical_scores(self) -> None:
+        engine = init_db(get_engine("sqlite:///:memory:"))
+        with engine.begin() as conn:
+            conn.execute(
+                benchmarks_table.insert(),
+                {
+                    "id": "retired_benchmark",
+                    "name": "Retired benchmark",
+                    "short": "Retired",
+                    "source": "Historical",
+                    "url": "https://example.test/retired",
+                    "category": "Historical",
+                    "metric": "Score",
+                    "higher_is_better": 1,
+                    "tier": 3,
+                    "active": 1,
+                },
+            )
+            conn.execute(
+                models_table.insert(),
+                {
+                    "id": "historical-model",
+                    "name": "Historical Model",
+                    "provider": "Historical Provider",
+                    "type": "proprietary",
+                    "active": 1,
+                },
+            )
+            conn.execute(
+                scores_table.insert(),
+                {
+                    "model_id": "historical-model",
+                    "benchmark_id": "retired_benchmark",
+                    "value": 140.0,
+                    "raw_value": "140",
+                    "collected_at": "2026-01-01T00:00:00Z",
+                    "source_type": "primary",
+                    "verified": 1,
+                },
+            )
+
+            seed_reference_data(conn, include_seed_scores=False)
+            retired = conn.execute(
+                benchmarks_table.select().where(benchmarks_table.c.id == "retired_benchmark")
+            ).mappings().one()
+            active_count = conn.execute(
+                benchmarks_table.select().where(benchmarks_table.c.active == 1)
+            ).mappings().all()
+            historical_scores = conn.execute(
+                scores_table.select().where(scores_table.c.benchmark_id == "retired_benchmark")
+            ).mappings().all()
+
+        self.assertEqual(retired["active"], 0)
+        self.assertEqual(len(active_count), len(BENCHMARKS))
+        self.assertEqual(len(historical_scores), 1)
+        self.assertEqual(historical_scores[0]["value"], 140.0)
+
     def test_fresh_bootstrap_records_schema_migrations(self) -> None:
         engine = init_db(get_engine("sqlite:///:memory:"))
 

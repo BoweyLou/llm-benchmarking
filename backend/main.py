@@ -7,6 +7,7 @@ from secrets import compare_digest
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse
 
 from .catalog_export import build_model_metadata_list
@@ -147,6 +148,7 @@ def require_local_admin(request: Request) -> None:
 
 
 app = FastAPI(title="LLM Benchmarking API", version="0.1.0")
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 
 @app.on_event("startup")

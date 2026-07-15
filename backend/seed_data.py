@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
 
@@ -2053,6 +2053,12 @@ def seed_reference_data(target: Connection | Engine, *, include_seed_scores: boo
 
     conn = target
     _upsert_rows(conn, benchmarks, BENCHMARKS)
+    authoritative_benchmark_ids = [str(row["id"]) for row in BENCHMARKS]
+    conn.execute(
+        update(benchmarks)
+        .where(benchmarks.c.id.not_in(authoritative_benchmark_ids))
+        .values(active=0)
+    )
     _insert_rows_if_missing(conn, providers, PROVIDERS)
     apply_provider_origin_baseline(conn)
     _upsert_rows(

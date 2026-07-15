@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 import threading
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import httpx
 from sqlalchemy import delete, func, insert, select, update
@@ -37,7 +38,16 @@ from .database import (
     use_case_benchmark_weights as use_case_benchmark_weights_table,
     utc_now_iso,
 )
-from . import model_card_refresh, model_discovery, openrouter_metadata, pricing, provider_catalogs, ranking_views, update_orchestration
+from . import (
+    benchmark_comparisons,
+    model_card_refresh,
+    model_discovery,
+    openrouter_metadata,
+    pricing,
+    provider_catalogs,
+    ranking_views,
+    update_orchestration,
+)
 from .audit_engine import get_audit_run, get_audit_summary, run_audit
 from .inference_catalog import (
     attach_inference_catalog,
@@ -666,7 +676,9 @@ def _set_update_progress(log_id: int, step: dict[str, Any], step_index: int, tot
 
 def list_benchmarks() -> list[dict[str, Any]]:
     bootstrap()
-    benchmark_stats = _benchmark_stats(_load_latest_scores())
+    latest_scores = _load_latest_scores()
+    score_configurations = _load_latest_score_configurations()
+    benchmark_stats = _benchmark_stats(latest_scores)
     with get_connection(ENGINE) as conn:
         rows = fetch_all(
             conn,
@@ -674,12 +686,64 @@ def list_benchmarks() -> list[dict[str, Any]]:
             .where(benchmarks_table.c.active == 1)
             .order_by(benchmarks_table.c.tier.asc(), benchmarks_table.c.name.asc()),
         )
+        model_rows = fetch_all(
+            conn,
+            select(
+                models_table.c.id,
+                models_table.c.name,
+                models_table.c.canonical_model_id,
+                models_table.c.model_roles_json,
+                models_table.c.active,
+            ).where(models_table.c.active == 1),
+        )
     payload: list[dict[str, Any]] = []
     for row in rows:
         benchmark = _serialize_benchmark(row)
         benchmark.update(benchmark_stats.get(benchmark["id"], {}))
         payload.append(benchmark)
+    benchmarks_by_id = {benchmark["id"]: benchmark for benchmark in payload}
+    benchmark_comparisons.validate_policy_registry(payload)
+    comparison_models = _comparison_context_models(
+        model_rows,
+        latest_scores,
+        score_configurations,
+        active_benchmark_ids=set(benchmarks_by_id),
+    )
+    comparison_index = benchmark_comparisons.get_comparison_index(comparison_models, benchmarks_by_id)
+    for benchmark in payload:
+        benchmark["presentation"] = comparison_index.presentation(benchmark["id"])
+        benchmark["comparison_summary"] = comparison_index.benchmark_summary(benchmark["id"])
     return payload
+
+
+def _comparison_context_models(
+    model_rows: list[dict[str, Any]],
+    latest_scores: dict[tuple[str, str], dict[str, Any]],
+    score_configurations: dict[tuple[str, str, str, str], dict[str, Any]],
+    *,
+    active_benchmark_ids: set[str],
+) -> list[dict[str, Any]]:
+    scores_by_model: dict[str, dict[str, dict[str, Any]]] = {}
+    for (model_id, benchmark_id), score in latest_scores.items():
+        if str(benchmark_id) not in active_benchmark_ids:
+            continue
+        scores_by_model.setdefault(str(model_id), {})[str(benchmark_id)] = _serialize_score(score)
+    return [
+        {
+            "id": str(row["id"]),
+            "name": str(row.get("name") or row["id"]),
+            "canonical_model_id": _clean_text(row.get("canonical_model_id")),
+            "model_roles": _normalise_model_roles(row.get("model_roles_json")),
+            "active": bool(row.get("active", 1)),
+            "scores": scores_by_model.get(str(row["id"]), {}),
+            "score_configurations": [
+                {"benchmark_id": benchmark_id, **_serialize_score(score)}
+                for (model_id, benchmark_id, _key, _value), score in score_configurations.items()
+                if model_id == str(row["id"]) and benchmark_id in active_benchmark_ids
+            ],
+        }
+        for row in model_rows
+    ]
 
 
 def list_use_cases() -> list[dict[str, Any]]:
@@ -1202,10 +1266,27 @@ def list_models(*, include_recommendation_proposals: bool = True) -> list[dict[s
         model["score_configurations"] = [
             {"benchmark_id": benchmark_id, **_serialize_score(score)}
             for (configuration_model_id, benchmark_id, _key, _value), score in score_configurations.items()
-            if configuration_model_id == model["id"]
+            if configuration_model_id == model["id"] and benchmark_id in benchmark_ids
         ]
         payload.append(model)
-    return payload
+    enriched = benchmark_comparisons.enrich_models(payload, benchmarks)
+    if not include_recommendation_proposals:
+        _suppress_invalid_scores_for_ranking(enriched)
+    return enriched
+
+
+def _suppress_invalid_scores_for_ranking(models: list[dict[str, Any]]) -> None:
+    """Keep transport placeholders out of recommendation ranking inputs."""
+    for model in models:
+        scores = model.get("scores")
+        if not isinstance(scores, dict):
+            continue
+        for benchmark_id, score in list(scores.items()):
+            if not isinstance(score, Mapping):
+                continue
+            comparison = score.get("comparison")
+            if isinstance(comparison, Mapping) and comparison.get("status") == "invalid":
+                scores[benchmark_id] = None
 
 
 def _benchmark_source_ids(benchmarks: list[dict[str, Any]]) -> dict[str, str]:
@@ -2514,6 +2595,7 @@ def update_manual_benchmark_score(
                 "variant_model_name": None,
             }
 
+    benchmark_comparisons.invalidate_comparison_cache()
     return {
         "model_id": model_id,
         "benchmark_id": benchmark_id,
@@ -2562,13 +2644,20 @@ def _build_canonical_models(
         }
         scores: dict[str, dict[str, Any] | None] = {}
         for benchmark_id in benchmark_ids:
-            benchmark = benchmarks_by_id.get(benchmark_id)
             best_entry: tuple[dict[str, Any], dict[str, Any]] | None = None
             for member in group["members"]:
                 score = (member.get("scores") or {}).get(benchmark_id)
                 if not score or score.get("value") is None:
                     continue
-                if best_entry is None or _is_better_benchmark_score(score, best_entry[1], benchmark):
+                comparison = score.get("comparison")
+                if isinstance(comparison, Mapping) and comparison.get("status") == "invalid":
+                    continue
+                if best_entry is None or benchmark_comparisons.prefer_score_candidate(
+                    score,
+                    best_entry[1],
+                    candidate_model_id=str(member["id"]),
+                    current_model_id=str(best_entry[0]["id"]),
+                ):
                     best_entry = (member, score)
 
             if best_entry is None:
@@ -2579,6 +2668,12 @@ def _build_canonical_models(
             aggregated = dict(score)
             aggregated["variant_model_id"] = member["id"]
             aggregated["variant_model_name"] = member["name"]
+            if isinstance(aggregated.get("comparison"), dict):
+                aggregated["comparison"] = {
+                    **aggregated["comparison"],
+                    "contributor_model_id": member["id"],
+                    "contributor_model_name": member["name"],
+                }
             scores[benchmark_id] = aggregated
 
         canonical_model = {
@@ -2589,6 +2684,14 @@ def _build_canonical_models(
             "family_name": group["family_name"] or representative.get("family_name"),
             "canonical_model_id": group["canonical_id"],
             "canonical_model_name": group["canonical_name"] or representative["name"],
+            "review_entity_id": group["canonical_id"],
+            "relevant_benchmark_ids": sorted(
+                {
+                    benchmark_id
+                    for member in group["members"]
+                    for benchmark_id in member.get("relevant_benchmark_ids", [])
+                }
+            ),
             "approved_for_use": approval_summary["approved_for_use"],
             "approval_use_case_count": approval_summary["approval_use_case_count"],
             "use_case_approvals": aggregated_use_case_approvals,
@@ -2775,19 +2878,6 @@ def _choose_group_representative(members: list[dict[str, Any]], display_name: st
         )
 
     return sorted(members, key=sort_key)[0]
-
-
-def _is_better_benchmark_score(
-    candidate: dict[str, Any],
-    current_best: dict[str, Any],
-    benchmark: dict[str, Any] | None,
-) -> bool:
-    candidate_value = float(candidate["value"])
-    current_value = float(current_best["value"])
-    higher_is_better = bool(benchmark["higher_is_better"]) if benchmark is not None else True
-    if candidate_value != current_value:
-        return candidate_value > current_value if higher_is_better else candidate_value < current_value
-    return str(candidate.get("collected_at") or "") > str(current_best.get("collected_at") or "")
 
 
 def _should_refresh_model_discovery(
@@ -3274,7 +3364,13 @@ def _run_update_job(
                     added, updated = _persist_source_result(source_run_id, result, discovered_update_log_id=log_id)
                     scores_added += added
                     scores_updated += updated
-                    _finish_source_run(source_run_id, status="completed", records_found=len(result.raw_records), error_message=None)
+                    _finish_source_run(
+                        source_run_id,
+                        status="completed",
+                        records_found=len(result.raw_records),
+                        error_message=None,
+                        details=getattr(result, "details", None),
+                    )
                 except Exception as exc:
                     errors.append(
                         {
@@ -3283,7 +3379,13 @@ def _run_update_job(
                             "error_message": str(exc),
                         }
                     )
-                    _finish_source_run(source_run_id, status="failed", records_found=0, error_message=str(exc))
+                    _finish_source_run(
+                        source_run_id,
+                        status="failed",
+                        records_found=0,
+                        error_message=str(exc),
+                        details=_adapter_fetch_details(adapter),
+                    )
 
             current_step_index = len(adapters)
 
@@ -4002,7 +4104,14 @@ def _start_source_run(log_id: int, adapter: BaseSourceAdapter) -> int:
         return int(result.inserted_primary_key[0])
 
 
-def _finish_source_run(source_run_id: int, *, status: str, records_found: int, error_message: str | None) -> None:
+def _finish_source_run(
+    source_run_id: int,
+    *,
+    status: str,
+    records_found: int,
+    error_message: str | None,
+    details: Mapping[str, Any] | None = None,
+) -> None:
     with ENGINE.begin() as conn:
         conn.execute(
             update(source_runs_table)
@@ -4012,8 +4121,20 @@ def _finish_source_run(source_run_id: int, *, status: str, records_found: int, e
                 status=status,
                 records_found=records_found,
                 error_message=error_message,
+                details_json=json.dumps(dict(details), ensure_ascii=True, sort_keys=True) if details else None,
             )
         )
+
+
+def _adapter_fetch_details(adapter: BaseSourceAdapter) -> dict[str, Any]:
+    snapshot = getattr(adapter, "_fetch_details_snapshot", None)
+    if not callable(snapshot):
+        return {}
+    try:
+        details = snapshot()
+    except Exception:
+        return {}
+    return dict(details) if isinstance(details, Mapping) else {}
 
 
 def _persist_source_result(
@@ -4026,20 +4147,10 @@ def _persist_source_result(
     scores_updated = 0
     model_ids_by_identity: dict[str, str] = {}
     source_meta_by_identity: dict[str, tuple[str, bool]] = {}
-    benchmark_ids = sorted({candidate.benchmark_id for candidate in result.candidates})
-    with get_connection(ENGINE) as conn:
-        benchmarks_by_id = {
-            str(row["id"]): dict(row)
-            for row in fetch_all(
-                conn,
-                select(
-                    benchmarks_table.c.id,
-                    benchmarks_table.c.higher_is_better,
-                ).where(benchmarks_table.c.id.in_(benchmark_ids)),
-            )
-        }
-
-    resolved_candidates: dict[tuple[str, str, str, str], tuple[str, ScoreCandidate]] = {}
+    resolved_candidates: dict[
+        tuple[str, str, str, str, tuple[tuple[str, Any], ...]],
+        tuple[str, ScoreCandidate],
+    ] = {}
     for candidate in result.candidates:
         gpt56 = _gpt56_identity_and_configuration(candidate.raw_model_name)
         if gpt56 is not None:
@@ -4068,19 +4179,22 @@ def _persist_source_result(
         model_ids_by_identity[identity] = model_id
         source_meta_by_identity[identity] = (candidate.source_type, candidate.verified)
 
+        candidate_payload = _score_candidate_comparison_payload(candidate)
         candidate_key = (
             model_id,
             candidate.benchmark_id,
             candidate.configuration_key or "",
             candidate.configuration_value or "",
+            benchmark_comparisons.evaluation_signature(candidate.benchmark_id, candidate_payload),
         )
-        current_best = resolved_candidates.get(candidate_key)
-        if current_best is not None:
-            benchmark = benchmarks_by_id.get(candidate.benchmark_id)
-            if not _is_better_benchmark_score(
-                {"value": candidate.value, "collected_at": candidate.collected_at},
-                {"value": current_best[1].value, "collected_at": current_best[1].collected_at},
-                benchmark,
+        current_selected = resolved_candidates.get(candidate_key)
+        if current_selected is not None:
+            current_payload = _score_candidate_comparison_payload(current_selected[1])
+            if not benchmark_comparisons.prefer_score_candidate(
+                candidate_payload,
+                current_payload,
+                candidate_model_id=model_id,
+                current_model_id=current_selected[0],
             ):
                 continue
         resolved_candidates[candidate_key] = (model_id, candidate)
@@ -4136,6 +4250,26 @@ def _persist_source_result(
     _mark_missing_source_listings(result)
 
     return scores_added, scores_updated
+
+
+def _score_candidate_comparison_payload(candidate: ScoreCandidate) -> dict[str, Any]:
+    """Expose the persistence candidate fields used by policy-owned arbitration."""
+    return {
+        "value": candidate.value,
+        "raw_value": candidate.raw_value,
+        "collected_at": candidate.collected_at,
+        "source_type": candidate.source_type,
+        "verified": candidate.verified,
+        "observation_count": candidate.observation_count,
+        "vote_count": candidate.vote_count,
+        "session_count": candidate.session_count,
+        "configuration_key": candidate.configuration_key,
+        "configuration_value": candidate.configuration_value,
+        "category": candidate.category,
+        "style_control": candidate.style_control,
+        "methodology": candidate.methodology,
+        "source_metadata": dict(candidate.source_metadata),
+    }
 
 
 def _promote_score_candidate_metadata(model_id: str, candidate: ScoreCandidate) -> bool:
@@ -4502,6 +4636,125 @@ def _mark_missing_source_listings(result: SourceFetchResult) -> None:
             conn.execute(statement.values(listing_status="no_longer_listed"))
 
 
+def _score_trust_key(score: Mapping[str, Any]) -> tuple[int, int]:
+    source_rank = {"primary": 3, "secondary": 2, "manual": 1}
+    verified = bool(score.get("verified", False))
+    return (
+        1 if verified else 0,
+        source_rank.get(str(score.get("source_type") or "").strip().lower(), 0) if verified else 0,
+    )
+
+
+def _score_timestamp(value: Any) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        timestamp = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.timestamp()
+
+
+def _candidate_can_replace_score(candidate: ScoreCandidate, latest: Mapping[str, Any]) -> bool:
+    candidate_timestamp = _score_timestamp(candidate.collected_at)
+    latest_timestamp = _score_timestamp(latest.get("collected_at"))
+    if candidate_timestamp is None or latest_timestamp is None:
+        if str(candidate.collected_at or "") != str(latest.get("collected_at") or ""):
+            return False
+    elif candidate_timestamp < latest_timestamp:
+        return False
+    return _score_trust_key(
+        {"verified": candidate.verified, "source_type": candidate.source_type}
+    ) >= _score_trust_key(latest)
+
+
+def _has_information(value: Any) -> bool:
+    return value is not None and value != "" and value != [] and value != {}
+
+
+def _metadata_adds_information(candidate: Mapping[str, Any], current: Mapping[str, Any]) -> bool:
+    for key, value in candidate.items():
+        if not _has_information(value):
+            continue
+        current_value = current.get(key)
+        if not _has_information(current_value):
+            return True
+        if isinstance(value, Mapping) and isinstance(current_value, Mapping):
+            if _metadata_adds_information(value, current_value):
+                return True
+    return False
+
+
+def _metadata_changes_information(candidate: Mapping[str, Any], current: Mapping[str, Any]) -> bool:
+    if _metadata_adds_information(candidate, current):
+        return True
+    return any(
+        _has_information(value) and value != current.get(key)
+        for key, value in candidate.items()
+    )
+
+
+def _candidate_enriches_score(candidate: ScoreCandidate, latest: Mapping[str, Any]) -> bool:
+    if not _candidate_can_replace_score(candidate, latest):
+        return False
+    for field in ("observation_count", "vote_count", "session_count"):
+        candidate_count = getattr(candidate, field)
+        current_count = latest.get(field)
+        if candidate_count is not None and (current_count is None or int(candidate_count) > int(current_count)):
+            return True
+    return _metadata_changes_information(
+        candidate.source_metadata,
+        _decode_json_object(latest.get("source_metadata_json")),
+    )
+
+
+def _score_candidate_update_values(
+    candidate: ScoreCandidate,
+    latest: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    current_metadata = _decode_json_object((latest or {}).get("source_metadata_json"))
+    merged_metadata = {**current_metadata, **candidate.source_metadata}
+    current = latest or {}
+
+    def preserve(field: str, value: Any) -> Any:
+        return value if value is not None else current.get(field)
+
+    return {
+        "value": candidate.value,
+        "raw_value": preserve("raw_value", candidate.raw_value),
+        "collected_at": candidate.collected_at,
+        "source_url": preserve("source_url", candidate.source_url),
+        "source_type": candidate.source_type,
+        "verified": 1 if candidate.verified else 0,
+        "notes": preserve("notes", candidate.notes),
+        "confidence_lower": preserve("confidence_lower", candidate.confidence_lower),
+        "confidence_upper": preserve("confidence_upper", candidate.confidence_upper),
+        "variance": preserve("variance", candidate.variance),
+        "vote_count": preserve("vote_count", candidate.vote_count),
+        "observation_count": preserve("observation_count", candidate.observation_count),
+        "session_count": preserve("session_count", candidate.session_count),
+        "rank": preserve("rank", candidate.rank),
+        "category": preserve("category", candidate.category),
+        "publication_date": preserve("publication_date", candidate.publication_date),
+        "methodology": preserve("methodology", candidate.methodology),
+        "source_listing_status": preserve("source_listing_status", candidate.source_listing_status),
+        "style_control": preserve(
+            "style_control",
+            None if candidate.style_control is None else (1 if candidate.style_control else 0),
+        ),
+        "preliminary": preserve(
+            "preliminary",
+            None if candidate.preliminary is None else (1 if candidate.preliminary else 0),
+        ),
+        "source_metadata_json": json.dumps(merged_metadata, ensure_ascii=True, sort_keys=True),
+        "configuration_key": preserve("configuration_key", candidate.configuration_key),
+        "configuration_value": preserve("configuration_value", candidate.configuration_value),
+    }
+
+
 def _persist_score_candidate(
     candidate: ScoreCandidate,
     resolved_model_id: str | None = None,
@@ -4521,11 +4774,28 @@ def _persist_score_candidate(
             select(
                 scores_table.c.id,
                 scores_table.c.value,
+                scores_table.c.raw_value,
                 scores_table.c.collected_at,
+                scores_table.c.source_url,
                 scores_table.c.source_type,
                 scores_table.c.verified,
+                scores_table.c.notes,
+                scores_table.c.confidence_lower,
+                scores_table.c.confidence_upper,
+                scores_table.c.variance,
                 scores_table.c.source_listing_status,
                 scores_table.c.source_metadata_json,
+                scores_table.c.observation_count,
+                scores_table.c.vote_count,
+                scores_table.c.session_count,
+                scores_table.c.rank,
+                scores_table.c.category,
+                scores_table.c.publication_date,
+                scores_table.c.methodology,
+                scores_table.c.style_control,
+                scores_table.c.preliminary,
+                scores_table.c.configuration_key,
+                scores_table.c.configuration_value,
             )
             .where(scores_table.c.model_id == model_id)
             .where(scores_table.c.benchmark_id == candidate.benchmark_id)
@@ -4544,21 +4814,6 @@ def _persist_score_candidate(
         )
 
         if latest is not None and str(latest.get("collected_at") or "") == candidate.collected_at:
-            benchmark = fetch_one(
-                conn,
-                select(
-                    benchmarks_table.c.id,
-                    benchmarks_table.c.higher_is_better,
-                ).where(benchmarks_table.c.id == candidate.benchmark_id),
-            )
-            latest_score = {
-                "value": float(latest["value"]),
-                "collected_at": str(latest.get("collected_at") or ""),
-            }
-            candidate_score = {
-                "value": float(candidate.value),
-                "collected_at": candidate.collected_at,
-            }
             latest_source_revision = _score_source_revision(
                 _decode_json_object(latest.get("source_metadata_json"))
             )
@@ -4568,39 +4823,21 @@ def _persist_score_candidate(
                 and candidate_source_revision
                 and latest_source_revision != candidate_source_revision
             )
-            if source_revision_changed or _is_better_benchmark_score(candidate_score, latest_score, benchmark) or (
-                candidate.source_listing_status
-                and not latest.get("source_listing_status")
+            replacement_allowed = _candidate_can_replace_score(candidate, latest)
+            if replacement_allowed and (
+                source_revision_changed
+                or _candidate_enriches_score(candidate, latest)
+                or (
+                    candidate.source_listing_status
+                    and not latest.get("source_listing_status")
+                )
             ):
                 conn.execute(
                     update(scores_table)
                     .where(scores_table.c.id == latest["id"])
-                    .values(
-                        value=candidate.value,
-                        raw_value=candidate.raw_value,
-                        collected_at=candidate.collected_at,
-                        source_url=candidate.source_url,
-                        source_type=candidate.source_type,
-                        verified=1 if candidate.verified else 0,
-                        notes=candidate.notes,
-                        confidence_lower=candidate.confidence_lower,
-                        confidence_upper=candidate.confidence_upper,
-                        variance=candidate.variance,
-                        vote_count=candidate.vote_count,
-                        observation_count=candidate.observation_count,
-                        session_count=candidate.session_count,
-                        rank=candidate.rank,
-                        category=candidate.category,
-                        publication_date=candidate.publication_date,
-                        methodology=candidate.methodology,
-                        source_listing_status=candidate.source_listing_status,
-                        style_control=None if candidate.style_control is None else (1 if candidate.style_control else 0),
-                        preliminary=None if candidate.preliminary is None else (1 if candidate.preliminary else 0),
-                        source_metadata_json=json.dumps(candidate.source_metadata, ensure_ascii=True, sort_keys=True),
-                        configuration_key=candidate.configuration_key,
-                        configuration_value=candidate.configuration_value,
-                    )
+                    .values(**_score_candidate_update_values(candidate, latest))
                 )
+                benchmark_comparisons.invalidate_comparison_cache()
                 return model_id, "updated"
             return model_id, "skipped"
 
@@ -4609,6 +4846,14 @@ def _persist_score_candidate(
             and abs(float(latest["value"]) - candidate.value) <= 0.1
             and not candidate.source_listing_status
         ):
+            if _candidate_enriches_score(candidate, latest):
+                conn.execute(
+                    update(scores_table)
+                    .where(scores_table.c.id == latest["id"])
+                    .values(**_score_candidate_update_values(candidate, latest))
+                )
+                benchmark_comparisons.invalidate_comparison_cache()
+                return model_id, "updated"
             return model_id, "skipped"
 
         conn.execute(
@@ -4641,6 +4886,7 @@ def _persist_score_candidate(
             )
         )
 
+    benchmark_comparisons.invalidate_comparison_cache()
     return model_id, "updated" if latest is not None else "added"
 
 
@@ -7852,7 +8098,17 @@ def _benchmark_stats(latest_scores: dict[tuple[str, str], dict[str, Any]]) -> di
     stats: dict[str, dict[str, Any]] = {}
     for row in latest_scores.values():
         benchmark_id = row["benchmark_id"]
-        numeric_value = float(row["value"])
+        try:
+            numeric_value = float(row["value"])
+        except (TypeError, ValueError):
+            continue
+        policy = benchmark_comparisons.BENCHMARK_POLICIES.get(str(benchmark_id))
+        if (
+            not math.isfinite(numeric_value)
+            or (policy is not None and policy.valid_min is not None and numeric_value < policy.valid_min)
+            or (policy is not None and policy.valid_max is not None and numeric_value > policy.valid_max)
+        ):
+            continue
         current = stats.setdefault(
             benchmark_id,
             {
@@ -7954,6 +8210,8 @@ def _model_summary(model: dict[str, Any]) -> dict[str, Any]:
         "family_name": model.get("family_name"),
         "canonical_model_id": model.get("canonical_model_id"),
         "canonical_model_name": model.get("canonical_model_name"),
+        "review_entity_id": model.get("review_entity_id") or model.get("canonical_model_id") or model.get("id"),
+        "relevant_benchmark_ids": list(model.get("relevant_benchmark_ids", []) or []),
         "variant_label": model.get("variant_label"),
         "discovered_at": model.get("discovered_at"),
         "discovered_update_log_id": model.get("discovered_update_log_id"),

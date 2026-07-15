@@ -32,6 +32,7 @@ from .database import (
 )
 from .model_evidence import enrich_models_with_selection_evidence
 
+CATALOG_SCHEMA_VERSION = 4
 SNAPSHOT_SCHEMA_VERSION = 3
 GENERAL_RECOMMENDATION_STATUSES = ("unrated", "recommended", "restricted", "not_recommended")
 
@@ -39,6 +40,7 @@ GENERAL_RECOMMENDATION_STATUSES = ("unrated", "recommended", "restricted", "not_
 def build_review_catalog() -> dict[str, Any]:
     """Return the model catalog plus review-oriented facets for the workbench."""
     models = build_model_metadata_list()
+    _attach_review_entity_ids(models)
     for model in models:
         model["general_approval_status"] = _general_approval_status(model)
         model["general_recommendation_status"] = _normalize_general_recommendation_status(
@@ -52,11 +54,12 @@ def build_review_catalog() -> dict[str, Any]:
     facets = _build_facets(models, providers, families)
     sync_metadata = _latest_sync_metadata()
     return {
-        "schema_version": 3,
+        "schema_version": CATALOG_SCHEMA_VERSION,
         "generated_at": utc_now_iso(),
         "database_updated_at": sqlite_database_updated_at(update_engine.ENGINE),
         **sync_metadata,
         "models": models,
+        "benchmarks": benchmarks,
         "use_cases": use_cases,
         "providers": providers,
         "families": families,
@@ -69,6 +72,32 @@ def build_review_catalog() -> dict[str, Any]:
             "needs_decision_count": sum(1 for model in models if _model_needs_decision(model)),
         },
     }
+
+
+def _attach_review_entity_ids(models: list[dict[str, Any]]) -> None:
+    """Give the workbench a stable, server-owned grouping identity.
+
+    The catalog comparison layer may already have assigned the identity. The
+    fallback preserves the workbench's conservative grouping rule for older
+    databases: canonical identity alone is not enough when source records use
+    an overly broad canonical family.
+    """
+    for model in models:
+        if str(model.get("review_entity_id") or "").strip():
+            continue
+        model_id = str(model.get("id") or "").strip()
+        canonical_id = str(model.get("canonical_model_id") or "").strip().lower()
+        name = " ".join(
+            str(model.get("name") or model.get("canonical_model_name") or "")
+            .strip()
+            .lower()
+            .split()
+        )
+        roles = "|".join(sorted(str(role).strip().lower() for role in model.get("model_roles") or [] if role))
+        if canonical_id and name:
+            model["review_entity_id"] = f"canonical:{canonical_id}:{name}:{roles or 'model'}"
+        else:
+            model["review_entity_id"] = f"model:{model_id}"
 
 
 def _latest_sync_metadata() -> dict[str, Any]:
@@ -835,6 +864,7 @@ def _normalize_general_approval_status(
 
 
 __all__ = [
+    "CATALOG_SCHEMA_VERSION",
     "CATALOG_STATUS_DEPRECATED",
     "CATALOG_STATUS_PROVISIONAL",
     "CATALOG_STATUS_TRACKED",

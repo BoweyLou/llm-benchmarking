@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0 - 2026-07-15
+
+- Added a server-owned registry for all 92 code-owned benchmark definitions and a role-aware comparison contract with formatted values, strict and broad cohorts, competition ranks, tie-aware percentiles, distributions, database coverage, evidence depth, warnings, and `as_of` timestamps. Retired database definitions are deactivated without deleting historical scores.
+- Added benchmark position to the model, benchmark, review-catalog, and ranking APIs; the LLM Model Tool now presents four relevance-selected Key benchmarks, expandable complete evidence, active-use-case missing-evidence states, and explicit in-database and source-verification caveats. Rank and tie calculations use stored normalized numeric values before display rounding.
+- Extended JSON, JSONL, clean CSV, normalized score sidecars, raw CSV, and banking exports with the appropriate nested or flattened comparison context while keeping benchmark position separate from weighted use-case ranking. Review cards, summary counts, and normalized score rows suppress the duplicate compatibility copy of a latest configured observation while retaining genuinely distinct configurations and signatures.
+- Fixed SWE-bench percentage-point normalization so an upstream `1.4` remains `1.4%`, and restored deterministic complete MTEB enumeration with no per-model or global task cap, coherent accessible-revision selection, explicit stale-path coverage, split/subset signatures, bounded concurrent fetching with retry/backoff, a pinned and bounded RTEB Parquet fallback, and fail-closed partial refreshes that preserve prior scores.
+- Added gzip transport for large public catalog responses and hardened score persistence against flattering-value duplicate selection, older/lower-trust evidence replacement, and non-finite JSON output.
+
 ## 0.8.1 - 2026-07-15
 
 - Added `GOOGLE_CLOUD_BILLING_API_KEY` authentication for Google Vertex AI Cloud Billing SKU pricing while retaining OAuth access-token authentication for publisher-model discovery.

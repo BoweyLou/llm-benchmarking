@@ -147,6 +147,10 @@ MODEL_CSV_SUMMARY_FIELDS = [
     "score_count",
     "verified_score_count",
     "benchmark_ids_with_scores",
+    "comparable_score_count",
+    "limited_score_count",
+    "leading_score_count",
+    "missing_relevant_benchmark_count",
     "suggested_use_case_count",
     "suggested_use_case_ids",
     "use_case_approval_count",
@@ -208,6 +212,50 @@ SCORE_CSV_FIELDS = [
     "variant_model_name",
     "configuration_key",
     "configuration_value",
+    "display_value",
+    "display_formatted",
+    "display_unit",
+    "display_precision",
+    "display_direction",
+    "display_direction_label",
+    "comparison_status",
+    "strict_rank",
+    "strict_tie_count",
+    "strict_cohort_size",
+    "strict_percentile",
+    "strict_cohort_label",
+    "strict_position_band",
+    "strict_min",
+    "strict_p10",
+    "strict_p25",
+    "strict_median",
+    "strict_p75",
+    "strict_p90",
+    "strict_max",
+    "broad_rank",
+    "broad_tie_count",
+    "broad_cohort_size",
+    "broad_percentile",
+    "broad_cohort_label",
+    "broad_position_band",
+    "broad_min",
+    "broad_p10",
+    "broad_p25",
+    "broad_median",
+    "broad_p75",
+    "broad_p90",
+    "broad_max",
+    "coverage_scored_count",
+    "coverage_eligible_count",
+    "coverage_percent",
+    "coverage_label",
+    "evidence_count",
+    "evidence_unit",
+    "evidence_label",
+    "comparison_warnings",
+    "comparison_as_of",
+    "contributor_model_id",
+    "contributor_model_name",
 ]
 
 SOURCE_LISTING_CSV_FIELDS = [
@@ -448,6 +496,53 @@ def _clean_model_csv_row(model: dict[str, Any], fieldnames: list[str]) -> dict[s
     return row
 
 
+_DERIVED_SCORE_FIELDS = {
+    "benchmark_id",
+    "display",
+    "evidence",
+    "comparison",
+    "variant_model_id",
+    "variant_model_name",
+}
+
+
+def _score_observation_key(benchmark_id: str, score: dict[str, Any]) -> tuple[str, str]:
+    """Identify one stored observation while ignoring its additive presentation."""
+    source_payload = {
+        key: value
+        for key, value in score.items()
+        if key not in _DERIVED_SCORE_FIELDS
+    }
+    return (
+        benchmark_id,
+        json.dumps(source_payload, ensure_ascii=True, sort_keys=True, default=str),
+    )
+
+
+def _deduplicated_score_entries(model: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Return base and configured observations once, preserving distinct signatures."""
+    entries: list[tuple[str, dict[str, Any]]] = []
+    seen: set[tuple[str, str]] = set()
+    scores = model.get("scores") if isinstance(model.get("scores"), dict) else {}
+    candidates: list[tuple[str, dict[str, Any]]] = [
+        (str(benchmark_id), score)
+        for benchmark_id, score in sorted(scores.items(), key=lambda item: str(item[0]))
+        if isinstance(score, dict)
+    ]
+    candidates.extend(
+        (str(score.get("benchmark_id") or ""), score)
+        for score in _as_list(model.get("score_configurations"))
+        if isinstance(score, dict) and str(score.get("benchmark_id") or "").strip()
+    )
+    for benchmark_id, score in candidates:
+        key = _score_observation_key(benchmark_id, score)
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append((benchmark_id, score))
+    return entries
+
+
 def _model_summary_columns(model: dict[str, Any]) -> dict[str, Any]:
     provider_origins = _as_list(model.get("provider_origin_countries"))
     base_models = _as_list(model.get("base_models"))
@@ -456,16 +551,23 @@ def _model_summary_columns(model: dict[str, Any]) -> dict[str, Any]:
     provenance_gap_fields = _as_list(model.get("provenance_gap_fields"))
     inference_destinations = _as_list(model.get("inference_destinations"))
     inference_summary = model.get("inference_summary") if isinstance(model.get("inference_summary"), dict) else {}
-    scores = model.get("scores") if isinstance(model.get("scores"), dict) else {}
     use_case_approvals = model.get("use_case_approvals") if isinstance(model.get("use_case_approvals"), dict) else {}
     suggested_use_cases = _as_list(model.get("suggested_use_cases"))
     source_freshness = _as_list(model.get("source_freshness"))
 
-    populated_scores = {
-        str(benchmark_id): score
-        for benchmark_id, score in scores.items()
-        if isinstance(score, dict)
+    score_entries = _deduplicated_score_entries(model)
+    comparison_scores = [score for _, score in score_entries]
+    comparison_statuses = [
+        str((score.get("comparison") or {}).get("status") or "").strip().lower()
+        for score in comparison_scores
+        if isinstance(score.get("comparison"), dict)
+    ]
+    relevant_benchmark_ids = {
+        str(benchmark_id)
+        for benchmark_id in _as_list(model.get("relevant_benchmark_ids"))
+        if str(benchmark_id).strip()
     }
+    present_benchmark_ids = {benchmark_id for benchmark_id, _ in score_entries}
 
     return {
         "model_roles": _join_values(model.get("model_roles")),
@@ -493,9 +595,24 @@ def _model_summary_columns(model: dict[str, Any]) -> dict[str, Any]:
             if inference_summary
             else _flatten_item_values(inference_destinations, "deployment_modes")
         ),
-        "score_count": len(populated_scores),
-        "verified_score_count": sum(1 for score in populated_scores.values() if bool(score.get("verified"))),
-        "benchmark_ids_with_scores": _join_values(sorted(populated_scores)),
+        "score_count": len(score_entries),
+        "verified_score_count": sum(1 for score in comparison_scores if bool(score.get("verified"))),
+        "benchmark_ids_with_scores": _join_values(sorted(present_benchmark_ids)),
+        "comparable_score_count": comparison_statuses.count("comparable"),
+        "limited_score_count": comparison_statuses.count("limited"),
+        "leading_score_count": sum(
+            1
+            for score in comparison_scores
+            if str(
+                (((score.get("comparison") or {}).get("strict") or {}).get("band")
+                or ((score.get("comparison") or {}).get("strict") or {}).get("position_band")
+                or "")
+            ).strip().lower()
+            == "leading"
+        ),
+        "missing_relevant_benchmark_count": sum(
+            1 for benchmark_id in relevant_benchmark_ids if benchmark_id not in present_benchmark_ids
+        ),
         "suggested_use_case_count": len(suggested_use_cases),
         "suggested_use_case_ids": _join_values(
             [suggestion.get("use_case_id")
@@ -523,33 +640,90 @@ def _model_summary_columns(model: dict[str, Any]) -> dict[str, Any]:
 def _score_rows(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for model in models:
-        scores = model.get("scores") if isinstance(model.get("scores"), dict) else {}
-        for benchmark_id, score in sorted(scores.items(), key=lambda item: str(item[0])):
-            if not isinstance(score, dict):
-                continue
-            score_row = {
-                    "model_id": model.get("id"),
-                    "model_name": model.get("name"),
-                    "provider": model.get("provider"),
-                    "benchmark_id": benchmark_id,
-                    **score,
-                }
-            score_row["source_metadata"] = json.dumps(
-                score.get("source_metadata") or {}, sort_keys=True
-            )
-            rows.append(score_row)
-        for score in _as_list(model.get("score_configurations")):
-            if not isinstance(score, dict):
-                continue
+        for benchmark_id, score in _deduplicated_score_entries(model):
             score_row = {
                 "model_id": model.get("id"),
                 "model_name": model.get("name"),
                 "provider": model.get("provider"),
+                "benchmark_id": benchmark_id,
                 **score,
+                **_score_comparison_columns(score),
             }
             score_row["source_metadata"] = json.dumps(score.get("source_metadata") or {}, sort_keys=True)
             rows.append(score_row)
     return rows
+
+
+def _score_comparison_columns(score: dict[str, Any]) -> dict[str, Any]:
+    """Flatten the additive display/comparison contract for score sidecars."""
+    display = score.get("display") if isinstance(score.get("display"), dict) else {}
+    comparison = score.get("comparison") if isinstance(score.get("comparison"), dict) else {}
+    strict = comparison.get("strict") if isinstance(comparison.get("strict"), dict) else {}
+    broad = comparison.get("broad") if isinstance(comparison.get("broad"), dict) else {}
+    coverage = comparison.get("coverage") if isinstance(comparison.get("coverage"), dict) else {}
+    evidence = comparison.get("evidence") if isinstance(comparison.get("evidence"), dict) else {}
+    if not evidence and isinstance(score.get("evidence"), dict):
+        evidence = score["evidence"]
+
+    scored_count = _first_present(coverage, "scored_count", "scored_model_count", "valid_scored_count")
+    eligible_count = _first_present(coverage, "eligible_count", "eligible_model_count", "active_model_count")
+    coverage_percent = _first_present(coverage, "percent", "coverage_percent")
+    if coverage_percent is None and scored_count is not None and eligible_count:
+        coverage_percent = round(float(scored_count) / float(eligible_count) * 100.0, 1)
+
+    evidence_count = _first_present(evidence, "count", "observation_count")
+    if evidence_count is None:
+        evidence_count = score.get("observation_count")
+    evidence_unit = _first_present(evidence, "unit", "count_unit")
+    evidence_label = evidence.get("label")
+
+    return {
+        "display_value": display.get("value"),
+        "display_formatted": display.get("formatted") or display.get("label"),
+        "display_unit": display.get("unit"),
+        "display_precision": display.get("precision"),
+        "display_direction": display.get("direction"),
+        "display_direction_label": display.get("direction_label"),
+        "comparison_status": comparison.get("status"),
+        **_position_columns("strict", strict),
+        **_position_columns("broad", broad),
+        "coverage_scored_count": scored_count,
+        "coverage_eligible_count": eligible_count,
+        "coverage_percent": coverage_percent,
+        "coverage_label": coverage.get("label"),
+        "evidence_count": evidence_count,
+        "evidence_unit": evidence_unit,
+        "evidence_label": evidence_label,
+        "comparison_warnings": _join_values(comparison.get("warnings")),
+        "comparison_as_of": comparison.get("as_of"),
+        "contributor_model_id": comparison.get("contributor_model_id")
+        or comparison.get("selected_contributor_model_id"),
+        "contributor_model_name": comparison.get("contributor_model_name")
+        or comparison.get("selected_contributor_model_name"),
+    }
+
+
+def _position_columns(prefix: str, position: dict[str, Any]) -> dict[str, Any]:
+    distribution = position.get("distribution") if isinstance(position.get("distribution"), dict) else {}
+    return {
+        f"{prefix}_rank": position.get("rank"),
+        f"{prefix}_tie_count": position.get("tie_count"),
+        f"{prefix}_cohort_size": position.get("cohort_size"),
+        f"{prefix}_percentile": position.get("percentile"),
+        f"{prefix}_cohort_label": position.get("cohort_label") or position.get("label"),
+        f"{prefix}_position_band": position.get("position_band") or position.get("band"),
+        **{
+            f"{prefix}_{quantile}": _first_present(distribution, quantile, f"{quantile}_value")
+            for quantile in ("min", "p10", "p25", "median", "p75", "p90", "max")
+        },
+    }
+
+
+def _first_present(payload: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in payload and payload[key] is not None:
+            return payload[key]
+    return None
 
 
 def _suggested_use_case_rows(models: list[dict[str, Any]]) -> list[dict[str, Any]]:

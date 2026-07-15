@@ -32,6 +32,84 @@ class APIModel(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
 
+class BenchmarkDistributionOut(APIModel):
+    min: float
+    p10: float
+    p25: float
+    median: float
+    p75: float
+    p90: float
+    max: float
+
+
+class BenchmarkPresentationOut(APIModel):
+    value_kind: str
+    unit: str | None = None
+    precision: int = 2
+    direction: Literal["higher", "lower"]
+    direction_label: str
+    valid_min: float | None = None
+    valid_max: float | None = None
+    roles: list[ModelRole] = Field(default_factory=list)
+    evidence_unit: str
+    comparison_dimensions: list[str] = Field(default_factory=list)
+    comparison_enabled: bool = True
+
+
+class BenchmarkComparisonSummaryOut(APIModel):
+    status: Literal["available", "unavailable"] = "unavailable"
+    scored_count: int = 0
+    eligible_count: int = 0
+    coverage_percent: float | None = None
+    distribution: BenchmarkDistributionOut | None = None
+    as_of: datetime | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ScoreDisplayOut(APIModel):
+    value: float | None
+    formatted: str
+    unit: str | None = None
+    precision: int
+    direction: Literal["higher", "lower"]
+    direction_label: str
+
+
+class ScoreEvidenceOut(APIModel):
+    count: int | None = None
+    unit: str
+    label: str
+
+
+class BenchmarkPositionOut(APIModel):
+    rank: int
+    tie_count: int = 1
+    cohort_size: int
+    percentile: float | None = None
+    distribution: BenchmarkDistributionOut
+    cohort_label: str
+    position_band: str | None = None
+
+
+class BenchmarkCoverageOut(APIModel):
+    scored_count: int = 0
+    eligible_count: int = 0
+    percent: float | None = None
+    label: str
+
+
+class ScoreComparisonOut(APIModel):
+    status: Literal["comparable", "limited", "unavailable", "invalid"] = "unavailable"
+    strict: BenchmarkPositionOut | None = None
+    broad: BenchmarkPositionOut | None = None
+    coverage: BenchmarkCoverageOut
+    warnings: list[str] = Field(default_factory=list)
+    as_of: datetime | None = None
+    contributor_model_id: str | None = None
+    contributor_model_name: str | None = None
+    selected_for_entity: bool = True
+
+
 class BenchmarkOut(APIModel):
     id: str
     name: str
@@ -49,10 +127,12 @@ class BenchmarkOut(APIModel):
     range_max: float | None = None
     data_points: int = 0
     latest_updated_at: datetime | None = None
+    presentation: BenchmarkPresentationOut | None = None
+    comparison_summary: BenchmarkComparisonSummaryOut | None = None
 
 
 class ScoreOut(APIModel):
-    value: float
+    value: float | None
     raw_value: str | None = None
     collected_at: datetime
     source_url: str | None = None
@@ -77,6 +157,13 @@ class ScoreOut(APIModel):
     variant_model_name: str | None = None
     configuration_key: str | None = None
     configuration_value: str | None = None
+    display: ScoreDisplayOut | None = None
+    evidence: ScoreEvidenceOut | None = None
+    comparison: ScoreComparisonOut | None = None
+
+
+class ConfiguredScoreOut(ScoreOut):
+    benchmark_id: str
 
 
 class InferenceSourceOut(APIModel):
@@ -427,6 +514,8 @@ class ModelOut(APIModel):
     family_name: str | None = None
     canonical_model_id: str | None = None
     canonical_model_name: str | None = None
+    review_entity_id: str | None = None
+    relevant_benchmark_ids: list[str] = Field(default_factory=list)
     variant_label: str | None = None
     discovered_at: datetime | None = None
     discovered_update_log_id: int | None = None
@@ -440,7 +529,7 @@ class ModelOut(APIModel):
     restricted_modes: list[RestrictedMode] = Field(default_factory=list)
     usage_policy_notes: str | None = None
     usage_policy_updated_at: datetime | None = None
-    score_configurations: list[dict[str, Any]] = Field(default_factory=list)
+    score_configurations: list[ConfiguredScoreOut] = Field(default_factory=list)
     suggested_use_cases: list[SuggestedUseCaseOut] = Field(default_factory=list)
     approved_for_use: bool = False
     approval_use_case_count: int = 0
@@ -534,6 +623,8 @@ class ModelSummaryOut(APIModel):
     family_name: str | None = None
     canonical_model_id: str | None = None
     canonical_model_name: str | None = None
+    review_entity_id: str | None = None
+    relevant_benchmark_ids: list[str] = Field(default_factory=list)
     variant_label: str | None = None
     discovered_at: datetime | None = None
     discovered_update_log_id: int | None = None
@@ -670,6 +761,9 @@ class RankingBreakdownOut(APIModel):
     notes: str | None = None
     variant_model_id: str | None = None
     variant_model_name: str | None = None
+    display: ScoreDisplayOut | None = None
+    evidence: ScoreEvidenceOut | None = None
+    comparison: ScoreComparisonOut | None = None
 
 
 class RankingOut(APIModel):
@@ -889,8 +983,14 @@ __all__ = [
     "AuditStatus",
     "AuditSeverity",
     "AuditSummaryOut",
+    "BenchmarkComparisonSummaryOut",
+    "BenchmarkCoverageOut",
+    "BenchmarkDistributionOut",
     "BenchmarkWeightUpdateIn",
     "BenchmarkOut",
+    "BenchmarkPositionOut",
+    "BenchmarkPresentationOut",
+    "ConfiguredScoreOut",
     "FamilyApprovalBulkIn",
     "FamilyApprovalBulkOut",
     "FamilyApprovalBulkUseCaseOut",
@@ -917,6 +1017,9 @@ __all__ = [
     "RankingOut",
     "RankingsResponseOut",
     "ScoreOut",
+    "ScoreComparisonOut",
+    "ScoreDisplayOut",
+    "ScoreEvidenceOut",
     "SourceFreshnessOut",
     "SourceRunOut",
     "UpdateLogOut",

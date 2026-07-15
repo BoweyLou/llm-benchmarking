@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -103,6 +105,16 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("pricing_offers", app_response.text)
         self.assertIn("visibleLimit: 200", app_response.text)
         self.assertIn("Show next", app_response.text)
+        self.assertIn("Benchmark position", app_response.text)
+        self.assertIn("How this model compares with similar scored models in this database.", app_response.text)
+        self.assertIn("Show all", app_response.text)
+        self.assertIn("mergeBenchmarkEvidence", app_response.text)
+        self.assertIn("evaluationSignatureKey", app_response.text)
+        self.assertIn("benchmark_evidence", app_response.text)
+        self.assertIn("scoreDisplayUnit", app_response.text)
+        self.assertIn("safeHttpUrl", app_response.text)
+        self.assertIn("review_entity_id", app_response.text)
+        self.assertIn("Source verification confirms the record", app_response.text)
         self.assertIn('/api/review/model-decisions', app_response.text)
         self.assertNotIn('/api/review/decisions', app_response.text)
         self.assertNotIn("Manual recommendation", app_response.text)
@@ -117,13 +129,15 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Unreviewed", app_response.text)
         self.assertEqual(catalog_response.status_code, 200)
         payload = catalog_response.json()
-        self.assertEqual(payload["schema_version"], 3)
+        self.assertEqual(payload["schema_version"], 4)
         self.assertIsNotNone(payload["database_updated_at"])
         self.assertIsNone(payload["last_sync_at"])
         self.assertIsNone(payload["last_sync_status"])
         self.assertIsNone(payload["last_sync_log_id"])
         self.assertGreaterEqual(payload["summary"]["model_count"], 1)
         self.assertIn("models", payload)
+        self.assertIn("benchmarks", payload)
+        self.assertTrue(payload["benchmarks"])
         self.assertIn("families", payload)
         self.assertIn("facets", payload)
         self.assertNotIn("recommendations", payload["facets"])
@@ -148,6 +162,7 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Azure AI Foundry", hyperscaler_names)
         self.assertIn("No hyperscaler route", hyperscaler_names)
         model = next(model for model in payload["models"] if model["id"] == "catalog-model")
+        self.assertTrue(model["review_entity_id"])
         self.assertFalse(model["general_approved_for_use"])
         self.assertEqual(model["general_approval_status"], "unreviewed")
         self.assertIn("Azure AI Foundry", model["inference_summary"]["platform_names"])
@@ -165,6 +180,61 @@ class ReviewWorkbenchTests(unittest.TestCase):
         tts_model = next(model for model in payload["models"] if model["id"] == "tts-catalog-model")
         self.assertEqual(tts_model["model_type_primary"], "text_to_speech")
         self.assertEqual(tts_model["evidence_context_use_case_id"], "text_to_speech")
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required for the review UI behavior contract")
+    def test_review_benchmark_helpers_preserve_signatures_and_enforce_display_rules(self) -> None:
+        script = main.REVIEW_APP_PATH.read_text(encoding="utf-8")
+        harness = r"""
+const source = process.env.REVIEW_SOURCE;
+function section(start, end) {
+  const from = source.indexOf(start);
+  const to = source.indexOf(end, from);
+  if (from < 0 || to < 0) throw new Error(`Missing section: ${start}`);
+  return source.slice(from, to);
+}
+const benchmark = {presentation: {comparison_dimensions: ["source_metadata.task_names"], value_kind: "elo", unit: "Elo"}};
+function benchmarkLookup() { return {mteb_retrieval: benchmark}; }
+eval(section("    function scoreSelectionRank", "    function reviewGroups"));
+const score = (value, task, id) => ({
+  value, verified: true, source_type: "primary", collected_at: "2026-07-15T00:00:00Z",
+  source_metadata: {task_names: [task]}, display: {formatted: String(value), unit: "Elo", direction_label: "Higher is better"},
+  comparison: {selected_for_entity: true, contributor_model_id: id}
+});
+const merged = mergeBenchmarkEvidence([
+  {id: "alias-a", name: "Alias A", scores: {mteb_retrieval: score(70, "Task A", "alias-a")}},
+  {id: "alias-b", name: "Alias B", scores: {mteb_retrieval: score(71, "Task B", "alias-b")}}
+]);
+if (merged.benchmarkEvidence.length !== 2) throw new Error("Distinct evaluation signatures were collapsed");
+const configuredScore = {...score(70, "Task A", "alias-a"), configuration_key: "reasoning_effort", configuration_value: "high"};
+const duplicate = mergeBenchmarkEvidence([{
+  id: "alias-a", name: "Alias A", scores: {mteb_retrieval: configuredScore},
+  score_configurations: [{benchmark_id: "mteb_retrieval", ...configuredScore}]
+}]);
+if (duplicate.benchmarkEvidence.length !== 1) throw new Error("Latest configured observation was rendered twice");
+function escapeHtml(value) { return String(value ?? ""); }
+function percentileLabel(value) { return `${Math.round(Number(value))}th percentile`; }
+eval(section("    function formatBenchmarkValue", "    function renderBenchmarkCard"));
+if (percentileTrack({percentile: 80, cohort_size: 19}) !== "") throw new Error("Small cohort rendered a percentile track");
+if (!percentileTrack({percentile: 80, cohort_size: 20})) throw new Error("Large cohort omitted its percentile track");
+if (scoreDisplayUnit({display: {unit: "Elo"}}, benchmark) !== "Elo") throw new Error("Elo unit was omitted");
+if (scoreDisplayUnit({display: {unit: "%"}}, {presentation: {value_kind: "percentage", unit: "%"}}) !== "") throw new Error("Percentage unit was duplicated");
+if (safeHttpUrl("javascript:alert(1)") !== null) throw new Error("Unsafe source URL was accepted");
+if (!safeHttpUrl("https://example.com/source")) throw new Error("HTTPS source URL was rejected");
+function benchmarkRecords() { return []; }
+function relevantUseCase() { return {weights: {context_metric: 1}, required_benchmarks: ["required_metric"]}; }
+function label(value) { return String(value); }
+eval(section("    function benchmarkEvidence", "    function formatBenchmarkValue"));
+const missing = benchmarkEvidence({relevant_benchmark_ids: ["role_metric"]}).missing.map((item) => item.id).sort();
+if (JSON.stringify(missing) !== JSON.stringify(["context_metric", "required_metric"])) throw new Error("Missing evidence ignored active use-case relevance");
+"""
+        completed = subprocess.run(
+            ["node", "-e", harness],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "REVIEW_SOURCE": script},
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_review_catalog_adds_ranked_benchmark_selection_evidence(self) -> None:
         self._insert_review_model("ranked-generator")

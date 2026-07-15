@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Sequence
@@ -101,6 +102,7 @@ class SourceFetchResult:
     raw_records: list[RawSourceRecord]
     candidates: list[ScoreCandidate]
     listing_benchmark_ids: tuple[str, ...] = ()
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 class BaseSourceAdapter(ABC):
@@ -116,7 +118,16 @@ class BaseSourceAdapter(ABC):
     def normalize(self, raw_records: Sequence[RawSourceRecord]) -> list[ScoreCandidate]:
         raise NotImplementedError
 
+    def _set_fetch_details(self, details: dict[str, Any] | None) -> None:
+        """Store JSON-shaped details for the current fetch without sharing caller state."""
+        self._latest_fetch_details = deepcopy(details) if isinstance(details, dict) else {}
+
+    def _fetch_details_snapshot(self) -> dict[str, Any]:
+        details = getattr(self, "_latest_fetch_details", None)
+        return deepcopy(details) if isinstance(details, dict) else {}
+
     async def collect(self, client: httpx.AsyncClient) -> SourceFetchResult:
+        self._set_fetch_details({})
         fetched_at = utc_now_iso()
         raw_records = await self.fetch_raw(client)
         candidates = self.normalize(raw_records)
@@ -127,4 +138,5 @@ class BaseSourceAdapter(ABC):
             raw_records=raw_records,
             candidates=candidates,
             listing_benchmark_ids=self.benchmark_ids,
+            details=self._fetch_details_snapshot(),
         )

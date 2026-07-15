@@ -33,6 +33,54 @@ class CatalogExportTests(unittest.TestCase):
                     "style_control": True,
                     "preliminary": False,
                     "source_metadata": {"dataset_revision": "a" * 40},
+                    "display": {
+                        "value": 95.0,
+                        "unit": "%",
+                        "formatted": "95%",
+                        "precision": 2,
+                        "direction": "higher",
+                        "direction_label": "Higher is better",
+                    },
+                    "evidence": {"count": 2, "unit": "task files", "label": "2 task files"},
+                    "comparison": {
+                        "status": "comparable",
+                        "strict": {
+                            "rank": 2,
+                            "tie_count": 1,
+                            "cohort_size": 20,
+                            "percentile": 94.7,
+                            "position_band": "Leading",
+                            "cohort_label": "Comparable models",
+                            "distribution": {
+                                "min": 40.0,
+                                "p10": 55.0,
+                                "p25": 70.0,
+                                "median": 82.0,
+                                "p75": 91.0,
+                                "p90": 96.0,
+                                "max": 98.0,
+                            },
+                        },
+                        "broad": {
+                            "rank": 4,
+                            "tie_count": 1,
+                            "cohort_size": 169,
+                            "percentile": 98.2,
+                            "position_band": "Leading",
+                            "cohort_label": "All scored embedding models",
+                            "distribution": {"median": 28.4, "p25": 12.0, "p75": 47.14},
+                        },
+                        "coverage": {
+                            "scored_count": 169,
+                            "eligible_count": 233,
+                            "percent": 72.5,
+                            "label": "169 of 233 embedding models",
+                        },
+                        "warnings": ["Broad cohort mixes task sets."],
+                        "as_of": "2026-07-14T00:00:00Z",
+                        "contributor_model_id": "model-a",
+                        "contributor_model_name": "Model A",
+                    },
                 }},
                 "inference_destinations": [{"id": "aws-bedrock", "regions": ["us-east-1"]}],
             },
@@ -50,6 +98,56 @@ class CatalogExportTests(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertEqual(json.loads(lines[0]), models[0])
         self.assertEqual(json.loads(lines[1]), models[1])
+
+    def test_invalid_non_finite_score_exports_as_null_with_raw_text_and_status(self) -> None:
+        score = {
+            "value": None,
+            "raw_value": "Infinity",
+            "collected_at": "2026-07-15T00:00:00Z",
+            "source_type": "primary",
+            "verified": True,
+            "display": {
+                "value": None,
+                "formatted": "Data check needed",
+                "unit": "%",
+                "precision": 2,
+                "direction": "higher",
+                "direction_label": "Higher is better",
+            },
+            "evidence": {"count": None, "unit": "observation", "label": "Evidence count unavailable"},
+            "comparison": {
+                "status": "invalid",
+                "strict": None,
+                "broad": None,
+                "coverage": {
+                    "scored_count": 0,
+                    "eligible_count": 1,
+                    "percent": 0.0,
+                    "label": "0 of 1 compatible models scored",
+                },
+                "warnings": ["Data check needed: score is missing, non-numeric, or non-finite"],
+                "as_of": "2026-07-15T00:00:00Z",
+            },
+        }
+        models = [{
+            "id": "invalid-model",
+            "name": "Invalid Model",
+            "provider": "Provider",
+            "scores": {"benchmark": score},
+        }]
+
+        json_payload = json.loads(render_model_metadata_list(models, output_format="json"))
+        jsonl_payload = json.loads(render_model_metadata_list(models, output_format="jsonl"))
+        self.assertIsNone(json_payload[0]["scores"]["benchmark"]["value"])
+        self.assertIsNone(jsonl_payload["scores"]["benchmark"]["value"])
+        self.assertEqual(json_payload[0]["scores"]["benchmark"]["raw_value"], "Infinity")
+
+        score_row = next(csv.DictReader(io.StringIO(render_model_metadata_csv_bundle(models)["scores"])))
+        self.assertEqual(score_row["value"], "")
+        self.assertEqual(score_row["raw_value"], "Infinity")
+        self.assertEqual(score_row["display_value"], "")
+        self.assertEqual(score_row["display_formatted"], "Data check needed")
+        self.assertEqual(score_row["comparison_status"], "invalid")
 
     def test_render_csv_summarizes_nested_metadata_without_json_cells(self) -> None:
         models = [
@@ -79,6 +177,7 @@ class CatalogExportTests(unittest.TestCase):
                 "huggingface_created_at": "2026-06-16T12:00:00Z",
                 "huggingface_last_modified_at": "2026-06-25T18:30:00Z",
                 "model_roles": ["embedding", "reranker"],
+                "relevant_benchmark_ids": ["benchmark", "missing-benchmark"],
                 "general_recommendation_status": "restricted",
                 "suggested_use_cases": [
                     {
@@ -105,6 +204,10 @@ class CatalogExportTests(unittest.TestCase):
                     "style_control": True,
                     "preliminary": False,
                     "source_metadata": {"dataset_revision": "a" * 40},
+                    "comparison": {
+                        "status": "comparable",
+                        "strict": {"position_band": "Leading"},
+                    },
                 }},
                 "use_case_approvals": {
                     "customer_support": {
@@ -149,6 +252,10 @@ class CatalogExportTests(unittest.TestCase):
         self.assertEqual(rows[0]["score_count"], "1")
         self.assertEqual(rows[0]["verified_score_count"], "1")
         self.assertEqual(rows[0]["benchmark_ids_with_scores"], "benchmark")
+        self.assertEqual(rows[0]["comparable_score_count"], "1")
+        self.assertEqual(rows[0]["limited_score_count"], "0")
+        self.assertEqual(rows[0]["leading_score_count"], "1")
+        self.assertEqual(rows[0]["missing_relevant_benchmark_count"], "1")
         self.assertEqual(rows[0]["general_recommendation_status"], "restricted")
         self.assertEqual(rows[0]["suggested_use_case_count"], "1")
         self.assertEqual(rows[0]["suggested_use_case_ids"], "customer_support")
@@ -182,6 +289,100 @@ class CatalogExportTests(unittest.TestCase):
         self.assertEqual(json.loads(rows[0]["scores"]), models[0]["scores"])
         self.assertEqual(json.loads(rows[0]["inference_destinations"]), models[0]["inference_destinations"])
 
+    def test_configured_score_comparison_is_flattened_and_counted(self) -> None:
+        models = [{
+            "id": "configured-model",
+            "name": "Configured Model",
+            "provider": "Provider",
+            "scores": {},
+            "relevant_benchmark_ids": ["benchmark"],
+            "score_configurations": [{
+                "benchmark_id": "benchmark",
+                "configuration_key": "reasoning_effort",
+                "configuration_value": "high",
+                "value": 90.0,
+                "display": {
+                    "value": 90.0,
+                    "formatted": "90%",
+                    "unit": "%",
+                    "precision": 1,
+                    "direction": "higher",
+                    "direction_label": "Higher is better",
+                },
+                "evidence": {"count": 3, "unit": "runs", "label": "3 runs"},
+                "comparison": {
+                    "status": "limited",
+                    "strict": None,
+                    "broad": {
+                        "rank": 1,
+                        "tie_count": 1,
+                        "cohort_size": 3,
+                        "percentile": None,
+                        "distribution": {"median": 80.0},
+                        "cohort_label": "Matching high-effort configurations",
+                        "position_band": None,
+                    },
+                    "coverage": {"scored_count": 3, "eligible_count": 5, "percent": 60.0, "label": "3 of 5 models"},
+                    "warnings": ["Very small cohort"],
+                    "as_of": "2026-07-15T00:00:00Z",
+                    "contributor_model_id": "configured-model",
+                    "contributor_model_name": "Configured Model",
+                },
+            }],
+        }]
+
+        clean_row = next(csv.DictReader(io.StringIO(render_model_metadata_list(models, output_format="csv"))))
+        score_row = next(csv.DictReader(io.StringIO(render_model_metadata_csv_bundle(models)["scores"])))
+
+        self.assertEqual(clean_row["limited_score_count"], "1")
+        self.assertEqual(clean_row["score_count"], "1")
+        self.assertEqual(clean_row["missing_relevant_benchmark_count"], "0")
+        self.assertEqual(score_row["configuration_value"], "high")
+        self.assertEqual(score_row["comparison_status"], "limited")
+        self.assertEqual(score_row["broad_cohort_label"], "Matching high-effort configurations")
+        self.assertEqual(score_row["evidence_label"], "3 runs")
+
+    def test_duplicate_latest_configured_observation_is_exported_and_counted_once(self) -> None:
+        observation = {
+            "value": 90.0,
+            "raw_value": "90.0",
+            "collected_at": "2026-07-15T00:00:00Z",
+            "source_url": "https://example.com/result",
+            "source_type": "primary",
+            "verified": True,
+            "configuration_key": "reasoning_effort",
+            "configuration_value": "high",
+            "source_metadata": {"dataset_revision": "revision-a"},
+            "comparison": {"status": "comparable"},
+        }
+        distinct_signature = {
+            **observation,
+            "value": 89.0,
+            "raw_value": "89.0",
+            "source_metadata": {"dataset_revision": "revision-b"},
+        }
+        models = [{
+            "id": "configured-model",
+            "name": "Configured Model",
+            "provider": "Provider",
+            "scores": {"benchmark": dict(observation)},
+            "score_configurations": [
+                {"benchmark_id": "benchmark", **observation},
+                {"benchmark_id": "benchmark", **distinct_signature},
+            ],
+        }]
+
+        clean_row = next(csv.DictReader(io.StringIO(render_model_metadata_list(models, output_format="csv"))))
+        score_rows = list(csv.DictReader(io.StringIO(render_model_metadata_csv_bundle(models)["scores"])))
+
+        self.assertEqual(clean_row["score_count"], "2")
+        self.assertEqual(clean_row["comparable_score_count"], "2")
+        self.assertEqual(len(score_rows), 2)
+        self.assertEqual(
+            {json.loads(row["source_metadata"])["dataset_revision"] for row in score_rows},
+            {"revision-a", "revision-b"},
+        )
+
     def test_render_csv_bundle_normalizes_nested_tables(self) -> None:
         models = [
             {
@@ -202,6 +403,46 @@ class CatalogExportTests(unittest.TestCase):
                     "style_control": True,
                     "preliminary": False,
                     "source_metadata": {"dataset_revision": "a" * 40},
+                    "display": {
+                        "value": 95.0,
+                        "unit": "%",
+                        "formatted": "95%",
+                        "precision": 2,
+                        "direction": "higher",
+                        "direction_label": "Higher is better",
+                    },
+                    "evidence": {"count": 2, "unit": "task files", "label": "2 task files"},
+                    "comparison": {
+                        "status": "comparable",
+                        "strict": {
+                            "rank": 2,
+                            "tie_count": 1,
+                            "cohort_size": 20,
+                            "percentile": 94.7,
+                            "position_band": "Leading",
+                            "cohort_label": "Comparable models",
+                            "distribution": {"median": 82.0, "p25": 70.0, "p75": 91.0},
+                        },
+                        "broad": {
+                            "rank": 4,
+                            "tie_count": 1,
+                            "cohort_size": 169,
+                            "percentile": 98.2,
+                            "position_band": "Leading",
+                            "cohort_label": "All scored embedding models",
+                            "distribution": {"median": 28.4, "p25": 12.0, "p75": 47.14},
+                        },
+                        "coverage": {
+                            "scored_count": 169,
+                            "eligible_count": 233,
+                            "percent": 72.5,
+                            "label": "169 of 233 embedding models",
+                        },
+                        "warnings": ["Broad cohort mixes task sets."],
+                        "as_of": "2026-07-14T00:00:00Z",
+                        "contributor_model_id": "model-a",
+                        "contributor_model_name": "Model A",
+                    },
                 }},
                 "use_case_approvals": {
                     "customer_support": {
@@ -263,6 +504,21 @@ class CatalogExportTests(unittest.TestCase):
         self.assertEqual(score_rows[0]["confidence_lower"], "94.0")
         self.assertEqual(score_rows[0]["style_control"], "true")
         self.assertEqual(json.loads(score_rows[0]["source_metadata"])["dataset_revision"], "a" * 40)
+        self.assertEqual(score_rows[0]["display_formatted"], "95%")
+        self.assertEqual(score_rows[0]["display_direction"], "higher")
+        self.assertEqual(score_rows[0]["comparison_status"], "comparable")
+        self.assertEqual(score_rows[0]["strict_rank"], "2")
+        self.assertEqual(score_rows[0]["strict_cohort_size"], "20")
+        self.assertEqual(score_rows[0]["strict_median"], "82.0")
+        self.assertEqual(score_rows[0]["strict_cohort_label"], "Comparable models")
+        self.assertEqual(score_rows[0]["strict_position_band"], "Leading")
+        self.assertEqual(score_rows[0]["broad_rank"], "4")
+        self.assertEqual(score_rows[0]["broad_percentile"], "98.2")
+        self.assertEqual(score_rows[0]["coverage_scored_count"], "169")
+        self.assertEqual(score_rows[0]["coverage_eligible_count"], "233")
+        self.assertEqual(score_rows[0]["evidence_label"], "2 task files")
+        self.assertEqual(score_rows[0]["comparison_warnings"], "Broad cohort mixes task sets.")
+        self.assertEqual(score_rows[0]["contributor_model_id"], "model-a")
 
         approval_rows = list(csv.DictReader(io.StringIO(bundle["use-case-approvals"])))
         self.assertEqual(approval_rows[0]["use_case_id"], "customer_support")

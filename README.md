@@ -60,6 +60,23 @@ python -m backend list-models
 
 By default this also writes `output/model-list.csv` and companion files named `model-list-scores.csv`, `model-list-source-listings.csv`, `model-list-use-case-approvals.csv`, `model-list-inference-destinations.csv`, `model-list-pricing-offers.csv`, `model-list-provider-origin-countries.csv`, and `model-list-source-freshness.csv`. The main CSV keeps model-level columns readable and replaces nested JSON blobs with summary columns. Use `--csv-output <path>` to choose another CSV path, `--no-csv-sidecars` to suppress companion files, or `--no-csv` to suppress the CSV bundle when a script needs stdout only.
 
+Benchmark comparisons follow the same server-owned contract in every output.
+JSON and JSONL retain each score's nested `display` and `comparison` objects;
+the raw CSV retains them inside its score JSON. The clean model CSV adds concise
+counts for comparable, limited, leading, and missing relevant results, while
+the normalized scores sidecar flattens strict and broad rank, cohort,
+percentile, distributions, database coverage, evidence depth, status, and
+warnings. When the compatibility `scores` view and `score_configurations`
+contain the same latest configured observation, review cards, model-level
+counts, and normalized score rows include it once; genuinely different
+configurations or evaluation signatures remain separate. Banking exports
+inherit the clean model-level summary fields.
+
+The 92 current benchmark definitions are code-owned. Startup upserts that
+authoritative set and deactivates database definitions that have been retired
+from code without deleting their historical score rows. Presentation policy
+coverage is contract-tested against the active code-owned definitions.
+
 LM Arena ingestion reads the official `lmarena-ai/leaderboard-dataset` Parquet
 files. Each run resolves one dataset commit SHA and uses it for all selected
 subsets, so mixed snapshots cannot enter a run. `chatbot_arena` remains the
@@ -67,6 +84,18 @@ backward-compatible style-controlled Text Overall signal; raw Text, selected
 Text categories, WebDev, Agent, Vision, Document, and Search have distinct
 benchmark IDs and no default ranking weights. Arena listings are evidence only:
 they never create or change global model availability.
+
+MTEB ingestion probes every listed model and every eligible retrieval and
+reranking task file without a per-model or global task cap. Confirmed upstream
+`404`/`410` inventory entries are reported as stale rather than treated as
+scores; every transient, parse, or other unresolved failure still fails the run.
+The adapter selects a coherent accessible revision deterministically, carries
+revision, split, and subset metadata into evaluation signatures, and fetches
+through bounded batches with retry and backoff. If the RTEB dataset viewer is
+temporarily unavailable, a bounded fallback reads all seven finance tasks from
+one revision-pinned official Parquet snapshot. A partial run fails closed before
+replacing score evidence, so previously imported MTEB scores remain available
+for the next clean refresh.
 
 Write the list to a file:
 
@@ -123,13 +152,41 @@ team members. Store the audience or access condition in recommendation notes.
 For interactive model review, run the FastAPI app locally and open `/review`.
 The LLM Model Tool presents a focused queue with provider, general approval,
 general recommendation, and needs-decision filters. Selecting a model puts its
-benchmark evidence, one general decision, read-only suggested use cases, and
-reference facts in one detail view. The queue combines duplicate source records
-only when normalized name, non-empty canonical model ID, and model role all
-agree; ambiguous same-name records remain separate.
-trusted source release date first, then proxy dates such as Hugging Face
-repository creation, OpenRouter addition, or local catalog discovery when an
-official release date is not available.
+benchmark position, one general decision, read-only suggested use cases, and
+reference facts in one detail view. The section is labelled **Benchmark
+position — How this model compares with similar scored models in this
+database.** It leads with four Key benchmarks selected by active use-case
+relevance or role defaults, then tier and provenance, rather than by the most
+flattering percentile. An expandable complete list groups all benchmark results
+by category. Missing relevant evidence follows the active use case's positively
+weighted and required benchmarks, falling back to role defaults only when that
+context declares none.
+
+Each benchmark card shows the formatted value and direction, its position among
+strictly comparable models, broader same-role database context when available,
+distribution and coverage context, evidence depth, provenance, and warnings.
+Strict cohorts require a compatible role, evaluation configuration, and the
+benchmark's available evaluation signature; broad cohorts relax the latter
+constraints and explicitly warn when configurations or task sets are mixed.
+Ranks, percentiles, and position labels describe only evidence currently
+imported into this database. They are not universal quality ratings or
+production-approval decisions, and a Verified source is not a claim of
+independent reproduction. Competition ranks and ties use the stored normalized
+numeric values before presentation rounding or unit conversion, so two values
+that merely render the same are not treated as tied.
+
+The queue combines duplicate source records only when normalized name,
+non-empty canonical model ID, and model role all agree; ambiguous same-name
+records remain separate. Combined rows merge complementary benchmark evidence.
+When duplicate observations compete for the same canonical evaluation, the
+server chooses by provenance, recency, evidence depth, and stable identity—not
+by whichever score is numerically most favorable. Exact compatibility
+duplicates of the latest configured observation are suppressed in review and
+flat exports, while distinct configuration or evaluation-signature evidence is
+preserved.
+Release-date ordering uses the trusted source release date first, then proxy
+dates such as Hugging Face repository creation, OpenRouter addition, or local
+catalog discovery when an official release date is not available.
 Provider filters use canonical parent providers: for example, Amazon Nova,
 AWS, and Amazon Bedrock are shown under Amazon, while Azure, Microsoft Azure,
 and Azure AI Foundry are shown under Microsoft. Qwen rows are shown under
@@ -181,11 +238,12 @@ Saved decisions write to SQLite:
   compatibility table. The current review UI does not read or write it as a
   decision surface.
 
-Select a model, review its strongest benchmark evidence and metric-derived
-suggested use cases, then save one general approval and one general
-recommendation. Use `Needs a decision` to find models whose approval is still
-`Unreviewed` or recommendation is still `Unrated`. `Restricted` applies to the
-model generally; record the access boundary in the shared decision rationale.
+Select a model, review its Key benchmark position, expandable evidence, and
+metric-derived suggested use cases, then save one general approval and one
+general recommendation. Use `Needs a decision` to find models whose approval is
+still `Unreviewed` or recommendation is still `Unrated`. `Restricted` applies
+to the model generally; record the access boundary in the shared decision
+rationale.
 
 For bulk review, choose `Select`, optionally narrow the queue with filters, and
 use `Select all filtered`. The fixed action bar shows both the number of visible
@@ -199,13 +257,17 @@ rows not yet rendered.
 
 The workbench can export and import a JSON review snapshot. Use that snapshot
 when rebuilding a database so manual listings, deprecation markers, and
-general model decisions can be restored. Version 2 snapshots also include the
-general recommendation fields; version 1 snapshots remain importable.
+general model decisions can be restored. Version 3 snapshots also include model
+usage-policy fields, version 2 snapshots include the general recommendation
+fields, and version 1 snapshots remain importable. Benchmark comparisons are
+generated from current score evidence and are not stored as review decisions.
 
-Clean CSV exports include general approval, general recommendation, and
-`suggested_use_case_count` / `suggested_use_case_ids`. The normalized CSV bundle
-adds `suggested-use-cases.csv` with the metric fit evidence. The legacy
-`use-case-approvals.csv` sidecar remains available for audit compatibility.
+Clean CSV exports include general approval, general recommendation,
+`suggested_use_case_count` / `suggested_use_case_ids`, and model-level benchmark
+comparison counts. The normalized CSV bundle adds `suggested-use-cases.csv`
+with the metric fit evidence and expands `scores.csv` with strict and broad
+comparison fields. The legacy `use-case-approvals.csv` sidecar remains
+available for audit compatibility.
 
 To run the workbench on the Proxmox tailnet host, use the deploy script:
 
@@ -456,6 +518,17 @@ Notes:
 ## API Surface
 
 The core API is in [backend/main.py](backend/main.py). High-level groups:
+
+Benchmark meaning is defined by the backend registry and returned by
+`/api/benchmarks` as presentation metadata plus aggregate distributions. Every
+non-null score exposed by the root catalog, `/api/models`,
+`/api/review/catalog`, and ranking breakdowns carries a formatted `display`
+object and a compact `comparison` object with strict and broad cohorts,
+coverage, evidence depth, warnings, and an `as_of` timestamp. Comparison status
+is one of `comparable`, `limited`, `unavailable`, or `invalid`. Review catalog
+schema version 4 adds this data without changing stored review decisions or the
+version 3 review-snapshot schema. Benchmark position remains contextual
+evidence and is not folded into the weighted use-case ranking score.
 
 - model list: `/` and `/api/models`
 - catalog metadata: `/api/providers`, `/api/benchmarks`, `/api/use-cases`

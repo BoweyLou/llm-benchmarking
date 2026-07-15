@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 
-from backend import update_engine
+from backend import benchmark_comparisons, update_engine
 from backend.database import (
     fetch_all,
     get_connection,
@@ -876,7 +877,7 @@ class RankingTests(unittest.TestCase):
         refreshed_target = next(model for model in refreshed_models if model["id"] == "clear-target")
         self.assertIsNone(refreshed_target["scores"]["internal_view"])
 
-    def test_canonical_models_use_best_variant_per_benchmark(self) -> None:
+    def test_canonical_models_use_provenance_first_variant_per_benchmark(self) -> None:
         self.add_model(
             "suite-a",
             "Suite A",
@@ -895,9 +896,30 @@ class RankingTests(unittest.TestCase):
         self.add_score("suite-a", "aa_intelligence", 60.0)
         self.add_score("suite-a", "terminal_bench", 45.0)
 
-        self.add_score("suite-b", "swebench_verified", 75.0)
-        self.add_score("suite-b", "aa_intelligence", 55.0, collected_at="2026-04-02T00:01:00Z")
-        self.add_score("suite-b", "terminal_bench", 85.0)
+        self.add_score(
+            "suite-b",
+            "swebench_verified",
+            95.0,
+            collected_at="2026-04-02T00:01:00Z",
+            source_type="secondary",
+            verified=False,
+        )
+        self.add_score(
+            "suite-b",
+            "aa_intelligence",
+            95.0,
+            collected_at="2026-04-02T00:01:00Z",
+            source_type="secondary",
+            verified=False,
+        )
+        self.add_score(
+            "suite-b",
+            "terminal_bench",
+            95.0,
+            collected_at="2026-04-02T00:01:00Z",
+            source_type="secondary",
+            verified=False,
+        )
 
         self.add_score("competitor", "swebench_verified", 70.0)
         self.add_score("competitor", "aa_intelligence", 50.0)
@@ -908,7 +930,307 @@ class RankingTests(unittest.TestCase):
 
         self.assertEqual(suite["model"]["id"], "suite")
         self.assertEqual(breakdown["swebench_verified"]["variant_model_name"], "Suite A")
-        self.assertEqual(breakdown["terminal_bench"]["variant_model_name"], "Suite B")
+        self.assertEqual(breakdown["terminal_bench"]["variant_model_name"], "Suite A")
+        self.assertEqual(breakdown["aa_intelligence"]["variant_model_name"], "Suite A")
+        self.assertIn("display", breakdown["swebench_verified"])
+        self.assertIn("comparison", breakdown["swebench_verified"])
+        self.assertIn("evidence", breakdown["swebench_verified"])
+
+    def test_list_models_reuses_one_full_comparison_context_and_has_constant_query_count(self) -> None:
+        self.add_model("cache-one", "Cache One")
+        self.add_score("cache-one", "gpqa_diamond", 70.0)
+        with self.engine.begin() as conn:
+            conn.execute(
+                scores_table.insert(),
+                {
+                    "model_id": "cache-one",
+                    "benchmark_id": "gpqa_diamond",
+                    "value": 71.0,
+                    "raw_value": "71.0",
+                    "collected_at": "2026-04-03T00:00:00Z",
+                    "source_type": "primary",
+                    "verified": 1,
+                    "configuration_key": "reasoning_effort",
+                    "configuration_value": "high",
+                },
+            )
+
+        benchmark_comparisons.invalidate_comparison_cache()
+        builds_before = benchmark_comparisons.comparison_cache_info()["builds"]
+        update_engine.list_models()
+        after_first = benchmark_comparisons.comparison_cache_info()
+        update_engine.list_models()
+        after_second = benchmark_comparisons.comparison_cache_info()
+
+        self.assertEqual(after_first["builds"], builds_before + 1)
+        self.assertEqual(after_second["builds"], after_first["builds"])
+        self.assertEqual(after_second["cohort_stats"], after_first["cohort_stats"])
+        self.assertEqual(after_second["positions"], after_first["positions"])
+
+        def select_count() -> int:
+            statements: list[str] = []
+
+            def before_cursor_execute(_conn, _cursor, statement, _parameters, _context, _executemany) -> None:
+                if str(statement).lstrip().upper().startswith("SELECT"):
+                    statements.append(str(statement))
+
+            event.listen(self.engine, "before_cursor_execute", before_cursor_execute)
+            try:
+                update_engine.list_models()
+            finally:
+                event.remove(self.engine, "before_cursor_execute", before_cursor_execute)
+            return len(statements)
+
+        one_model_queries = select_count()
+        for index in range(12):
+            model_id = f"cache-extra-{index}"
+            self.add_model(model_id, f"Cache Extra {index}")
+            self.add_score(model_id, "gpqa_diamond", 40.0 + index)
+        benchmark_comparisons.invalidate_comparison_cache()
+        many_model_queries = select_count()
+        self.assertEqual(many_model_queries, one_model_queries)
+
+    def test_equal_value_refresh_enriches_evidence_without_lowering_source_trust(self) -> None:
+        self.add_model("mteb-refresh", "MTEB Refresh", model_roles=["embedding"])
+        self.add_score(
+            "mteb-refresh",
+            "mteb_retrieval",
+            73.14,
+            collected_at="2026-01-01T00:00:00Z",
+        )
+        with self.engine.begin() as conn:
+            conn.execute(
+                update(scores_table)
+                .where(scores_table.c.model_id == "mteb-refresh")
+                .values(
+                    observation_count=12,
+                    confidence_lower=70.0,
+                    rank=4,
+                    methodology="preserve me",
+                    style_control=0,
+                    source_metadata_json=json.dumps(
+                        {"task_names": ["NFCorpus"], "dataset_revision": "dataset-a"},
+                        sort_keys=True,
+                    ),
+                )
+            )
+        candidate = ScoreCandidate(
+            source_id="mteb",
+            benchmark_id="mteb_retrieval",
+            raw_model_name="MTEB Refresh",
+            raw_model_key="MTEB Refresh",
+            value=73.14,
+            raw_value="73.14",
+            source_url="https://example.test/mteb",
+            collected_at="2026-07-15T00:00:00Z",
+            source_type="primary",
+            verified=True,
+            observation_count=12,
+            source_metadata={
+                "task_names": ["NFCorpus", "SciFact"],
+                "dataset_revision": "dataset-a",
+            },
+            metadata={"model_roles": ["embedding"]},
+        )
+
+        result = update_engine._persist_score_candidate(candidate, resolved_model_id="mteb-refresh")
+        self.assertEqual(result, ("mteb-refresh", "updated"))
+        with get_connection(self.engine) as conn:
+            refreshed = fetch_all(
+                conn,
+                select(scores_table)
+                .where(scores_table.c.model_id == "mteb-refresh")
+                .where(scores_table.c.benchmark_id == "mteb_retrieval"),
+            )
+        self.assertEqual(len(refreshed), 1)
+        self.assertEqual(refreshed[0]["observation_count"], 12)
+        source_metadata = json.loads(str(refreshed[0]["source_metadata_json"]))
+        self.assertEqual(source_metadata["dataset_revision"], "dataset-a")
+        self.assertEqual(source_metadata["task_names"], ["NFCorpus", "SciFact"])
+        self.assertEqual(refreshed[0]["collected_at"], "2026-07-15T00:00:00Z")
+        self.assertEqual(refreshed[0]["confidence_lower"], 70.0)
+        self.assertEqual(refreshed[0]["rank"], 4)
+        self.assertEqual(refreshed[0]["methodology"], "preserve me")
+        self.assertEqual(refreshed[0]["style_control"], 0)
+
+        lower_trust = replace(
+            candidate,
+            collected_at="2026-07-16T00:00:00Z",
+            source_type="secondary",
+            verified=False,
+            observation_count=99,
+        )
+        self.assertEqual(
+            update_engine._persist_score_candidate(lower_trust, resolved_model_id="mteb-refresh"),
+            ("mteb-refresh", "skipped"),
+        )
+
+    def test_source_result_duplicate_candidates_use_provenance_not_numeric_value(self) -> None:
+        self.add_model("batch-probe", "Batch Probe")
+        source_run_id = self.add_source_run("probe", "gpqa_diamond")
+
+        def candidate(*, value: float, source_type: str, verified: bool) -> ScoreCandidate:
+            return ScoreCandidate(
+                source_id="probe",
+                benchmark_id="gpqa_diamond",
+                raw_model_name="Batch Probe",
+                raw_model_key="batch-probe",
+                value=value,
+                raw_value=str(value),
+                source_url="https://example.test/probe",
+                collected_at="2026-07-15T00:00:00Z",
+                source_type=source_type,
+                verified=verified,
+                metadata={"existing_models_only": True, "model_roles": ["generator"]},
+            )
+
+        result = SourceFetchResult(
+            source_id="probe",
+            source_url="https://example.test/probe",
+            fetched_at="2026-07-15T00:00:00Z",
+            raw_records=[],
+            candidates=[
+                candidate(value=90.0, source_type="secondary", verified=False),
+                candidate(value=70.0, source_type="primary", verified=True),
+            ],
+        )
+
+        self.assertEqual(update_engine._persist_source_result(source_run_id, result), (1, 0))
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(scores_table)
+                .where(scores_table.c.model_id == "batch-probe")
+                .where(scores_table.c.benchmark_id == "gpqa_diamond")
+            ).mappings().all()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(float(rows[0]["value"]), 70.0)
+        self.assertEqual(rows[0]["source_type"], "primary")
+        self.assertEqual(int(rows[0]["verified"]), 1)
+
+    def test_source_result_dedup_keeps_distinct_evaluation_signatures(self) -> None:
+        self.add_model("signature-probe", "Signature Probe", model_roles=["embedding"])
+        source_run_id = self.add_source_run("mteb", "mteb_retrieval")
+
+        def candidate(task_name: str, value: float) -> ScoreCandidate:
+            return ScoreCandidate(
+                source_id="mteb",
+                benchmark_id="mteb_retrieval",
+                raw_model_name="Signature Probe",
+                raw_model_key="signature-probe",
+                value=value,
+                raw_value=str(value),
+                source_url="https://example.test/mteb",
+                collected_at="2026-07-15T00:00:00Z",
+                source_type="primary",
+                verified=True,
+                source_metadata={"task_names": [task_name], "dataset_revision": "rev-a"},
+                metadata={"existing_models_only": True, "model_roles": ["embedding"]},
+            )
+
+        result = SourceFetchResult(
+            source_id="mteb",
+            source_url="https://example.test/mteb",
+            fetched_at="2026-07-15T00:00:00Z",
+            raw_records=[],
+            candidates=[candidate("NFCorpus", 70.0), candidate("SciFact", 90.0)],
+        )
+        persisted: list[ScoreCandidate] = []
+
+        def capture(candidate: ScoreCandidate, resolved_model_id: str | None = None, **_kwargs) -> tuple[str, str]:
+            persisted.append(candidate)
+            return resolved_model_id or "signature-probe", "added"
+
+        with patch.object(update_engine, "_persist_score_candidate", side_effect=capture):
+            self.assertEqual(update_engine._persist_source_result(source_run_id, result), (2, 0))
+
+        self.assertEqual(len(persisted), 2)
+        self.assertEqual(
+            {tuple(item.source_metadata["task_names"]) for item in persisted},
+            {("NFCorpus",), ("SciFact",)},
+        )
+
+    def test_score_refresh_cannot_rewind_downgrade_or_choose_a_flattering_value(self) -> None:
+        self.add_model("refresh-guard", "Refresh Guard", model_roles=["embedding"])
+        trusted = ScoreCandidate(
+            source_id="mteb",
+            benchmark_id="mteb_retrieval",
+            raw_model_name="Refresh Guard",
+            raw_model_key="refresh-guard",
+            value=73.14,
+            raw_value="73.14",
+            source_url="https://example.test/mteb",
+            collected_at="2026-07-15T00:00:00Z",
+            source_type="primary",
+            verified=True,
+            observation_count=12,
+            source_metadata={"task_names": ["NFCorpus"], "dataset_revision": "rev-a"},
+            metadata={"model_roles": ["embedding"]},
+        )
+        self.assertEqual(
+            update_engine._persist_score_candidate(trusted, resolved_model_id="refresh-guard"),
+            ("refresh-guard", "added"),
+        )
+
+        older = replace(
+            trusted,
+            collected_at="2026-01-01T00:00:00Z",
+            observation_count=99,
+            source_metadata={"task_names": ["NFCorpus", "SciFact"], "dataset_revision": "rev-old"},
+        )
+        lower_trust_revision = replace(
+            trusted,
+            source_type="secondary",
+            verified=False,
+            observation_count=99,
+            source_metadata={"task_names": ["NFCorpus"], "dataset_revision": "rev-b"},
+        )
+        flattering_same_signature = replace(trusted, value=99.0, raw_value="99.0")
+
+        for rejected in (older, lower_trust_revision, flattering_same_signature):
+            self.assertEqual(
+                update_engine._persist_score_candidate(rejected, resolved_model_id="refresh-guard"),
+                ("refresh-guard", "skipped"),
+            )
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(scores_table)
+                .where(scores_table.c.model_id == "refresh-guard")
+                .where(scores_table.c.benchmark_id == "mteb_retrieval")
+            ).mappings().all()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(float(rows[0]["value"]), 73.14)
+        self.assertEqual(rows[0]["collected_at"], "2026-07-15T00:00:00Z")
+        self.assertEqual(rows[0]["source_type"], "primary")
+        self.assertEqual(int(rows[0]["verified"]), 1)
+        self.assertEqual(
+            json.loads(str(rows[0]["source_metadata_json"]))["dataset_revision"],
+            "rev-a",
+        )
+
+    def test_non_finite_public_score_is_null_invalid_and_excluded_from_rankings(self) -> None:
+        self.add_model("non-finite", "Non-finite")
+        self.add_score("non-finite", "gpqa_diamond", float("inf"))
+
+        public_models = update_engine.list_models()
+        public = next(model for model in public_models if model["id"] == "non-finite")
+        score = public["scores"]["gpqa_diamond"]
+        self.assertIsNone(score["value"])
+        self.assertEqual(score["raw_value"], "inf")
+        self.assertEqual(score["display"]["formatted"], "Data check needed")
+        self.assertEqual(score["comparison"]["status"], "invalid")
+        json.dumps(public_models, allow_nan=False)
+
+        benchmarks = {item["id"]: item for item in update_engine.list_benchmarks()}
+        self.assertIsNone(benchmarks["gpqa_diamond"]["range_min"])
+        self.assertIsNone(benchmarks["gpqa_diamond"]["range_max"])
+        canonical = update_engine._build_canonical_models(public_models, benchmarks)
+        canonical_model = next(model for model in canonical if model["id"] == "non-finite")
+        self.assertIsNone(canonical_model["scores"]["gpqa_diamond"])
+
+        recommendation_models = update_engine.list_models(include_recommendation_proposals=False)
+        recommendation = next(model for model in recommendation_models if model["id"] == "non-finite")
+        self.assertIsNone(recommendation["scores"]["gpqa_diamond"])
 
     def test_list_models_enriches_seeded_provider_origin(self) -> None:
         models = update_engine.list_models()

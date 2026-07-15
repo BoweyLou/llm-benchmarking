@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+import httpx
 from sqlalchemy import select, update
 
 from backend import audit_engine
 from backend import update_engine
+from backend.sources import mteb as mteb_source
 from backend.database import (
     benchmarks as benchmarks_table,
     fetch_all,
@@ -66,6 +69,24 @@ class SourceSpotCheckTests(unittest.TestCase):
             self.engine.dispose()
             self.tempdir.cleanup()
 
+    @staticmethod
+    def _complete_rteb_fetch(
+        records: list[RawSourceRecord] | None = None,
+    ) -> tuple[list[RawSourceRecord], dict, list[dict]]:
+        fetched_records = list(records or [])
+        coverage = mteb_source._empty_rteb_coverage()
+        coverage.update(
+            {
+                "requested_task_count": len(mteb_source.RTEB_FINANCE_TASKS),
+                "completed_task_count": len(mteb_source.RTEB_FINANCE_TASKS),
+                "requested_page_count": len(mteb_source.RTEB_FINANCE_TASKS),
+                "fetched_page_count": len(mteb_source.RTEB_FINANCE_TASKS),
+                "fetched_record_count": len(fetched_records),
+                "tasks_with_records_count": 1 if fetched_records else 0,
+            }
+        )
+        return fetched_records, coverage, []
+
     def _persist_records(self, adapter, raw_records: list[RawSourceRecord]) -> tuple[int, int, list, tuple[int, int]]:
             result = SourceFetchResult(
                 source_id=adapter.source_id,
@@ -116,6 +137,11 @@ class SourceSpotCheckTests(unittest.TestCase):
                     "task_category": "retrieval",
                     "task_name": "NFCorpus",
                     "languages": ["eng-Latn"],
+                    "model_revision": "rev-a",
+                    "dataset_revision": "dataset-a",
+                    "mteb_version": "1.20.0",
+                    "splits": ["test"],
+                    "subsets": ["default"],
                 },
             ),
             RawSourceRecord(
@@ -133,6 +159,11 @@ class SourceSpotCheckTests(unittest.TestCase):
                     "task_category": "reranking",
                     "task_name": "VoyageMMarcoReranking",
                     "languages": ["jpn-Jpan"],
+                    "model_revision": "rev-a",
+                    "dataset_revision": "dataset-a",
+                    "mteb_version": "1.20.0",
+                    "splits": ["test"],
+                    "subsets": ["default"],
                 },
             ),
         ]
@@ -144,6 +175,22 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertAlmostEqual(candidate_values["mteb_retrieval"], 38.061)
         self.assertAlmostEqual(candidate_values["mteb_reranking"], 32.4653)
         self.assertAlmostEqual(candidate_values["mteb_retrieval_reranking"], 35.2631)
+        candidate_by_benchmark = {candidate.benchmark_id: candidate for candidate in candidates}
+        self.assertEqual(candidate_by_benchmark["mteb_retrieval"].observation_count, 1)
+        self.assertEqual(candidate_by_benchmark["mteb_reranking"].observation_count, 1)
+        self.assertEqual(candidate_by_benchmark["mteb_retrieval_reranking"].observation_count, 2)
+        self.assertEqual(candidate_by_benchmark["mteb_retrieval"].source_metadata["task_names"], ["NFCorpus"])
+        self.assertEqual(
+            candidate_by_benchmark["mteb_retrieval_reranking"].source_metadata["languages"],
+            ["eng-Latn", "jpn-Jpan"],
+        )
+        self.assertEqual(candidate_by_benchmark["mteb_retrieval"].source_metadata["model_revision"], "rev-a")
+        self.assertEqual(
+            candidate_by_benchmark["mteb_retrieval"].source_metadata["dataset_revision"],
+            "dataset-a",
+        )
+        self.assertEqual(candidate_by_benchmark["mteb_retrieval"].source_metadata["splits"], ["test"])
+        self.assertEqual(candidate_by_benchmark["mteb_retrieval"].source_metadata["subsets"], ["default"])
 
         with get_connection(self.engine) as conn:
             model_row = fetch_one(
@@ -162,10 +209,745 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertAlmostEqual(float(reranking["value"]), 32.4653)
         self.assertAlmostEqual(float(blended["value"]), 35.2631)
         self.assertIn("Official MTEB retrieval", str(retrieval["notes"]))
+        self.assertEqual(retrieval["observation_count"], 1)
+        self.assertEqual(blended["observation_count"], 2)
+        retrieval_source_metadata = json.loads(str(retrieval["source_metadata_json"]))
+        self.assertEqual(retrieval_source_metadata["task_names"], ["NFCorpus"])
+        self.assertEqual(retrieval_source_metadata["model_revision"], "rev-a")
 
         raw_rows = update_engine.list_raw_source_records(source_run_id)
         self.assertEqual(len(raw_rows), 2)
         self.assertTrue(all(row["resolution_status"] == "resolved" for row in raw_rows))
+
+    def test_mteb_fetch_enumerates_late_models_deterministically_and_retries_transient_failures(self) -> None:
+        adapter = MtebAdapter()
+        model_names = [f"Provider__Model-{index:03d}" for index in range(82)]
+        paths_payload = {
+            model_name: [f"results/{model_name}/rev/NFCorpus.json"]
+            for model_name in reversed(model_names)
+        }
+        paths_payload[model_names[0]].append(
+            f"results/{model_names[0]}/rev/SciDocs.json"
+        )
+        paths_payload["Provider__No-Eligible-Tasks"] = ["README.md"]
+        attempts_by_path: dict[str, int] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/paths.json"):
+                return httpx.Response(200, json=paths_payload)
+            path = request.url.path
+            attempts_by_path[path] = attempts_by_path.get(path, 0) + 1
+            if "Model-081" in path and attempts_by_path[path] == 1:
+                return httpx.Response(503, json={"error": "temporary"})
+            task_name = Path(path).stem
+            return httpx.Response(
+                200,
+                json={
+                    "task_name": task_name,
+                    "mteb_version": "1.20.0",
+                    "dataset_revision": "dataset-a",
+                    "scores": {
+                        "test": [
+                            {
+                                "main_score": 0.5,
+                                "hf_subset": "default",
+                                "languages": ["eng-Latn"],
+                            }
+                        ]
+                    },
+                },
+            )
+
+        rteb_finance_record = RawSourceRecord(
+            source_id=adapter.source_id,
+            benchmark_id="rteb_finance",
+            raw_model_name="Provider/Finance-Model",
+            raw_model_key="Provider/Finance-Model",
+            raw_value="55",
+            source_url="https://huggingface.co/spaces/mteb/leaderboard",
+            collected_at=FUTURE_COLLECTED_AT,
+            metadata={
+                "model_roles": ["embedding"],
+                "task_category": "retrieval",
+                "task_name": "FinanceBenchRetrieval",
+                "languages": ["eng-Latn"],
+                "is_public": True,
+            },
+        )
+
+        async def collect_result() -> SourceFetchResult:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                with (
+                    patch(
+                        "backend.sources.mteb._fetch_rteb_finance_records",
+                        return_value=self._complete_rteb_fetch([rteb_finance_record]),
+                    ),
+                    patch("backend.sources.mteb.asyncio.sleep", new=AsyncMock()) as sleep_mock,
+                ):
+                    result = await adapter.collect(client)
+                    self.assertEqual([call.args[0] for call in sleep_mock.await_args_list], [0.25])
+                    return result
+
+        result = asyncio.run(collect_result())
+        records = [record for record in result.raw_records if record.benchmark_id != "rteb_finance"]
+
+        self.assertEqual(len(records), 83)
+        self.assertEqual(
+            [record.raw_model_name for record in records],
+            [model_names[0].replace("__", "/"), *[model_name.replace("__", "/") for model_name in model_names]],
+        )
+        self.assertIn("Provider/Model-081", {record.raw_model_name for record in records})
+        retry_path = next(path for path in attempts_by_path if "Model-081" in path)
+        self.assertEqual(attempts_by_path[retry_path], 2)
+        self.assertEqual(result.details["paths_model_count"], 83)
+        self.assertEqual(result.details["eligible_model_count"], 82)
+        self.assertEqual(result.details["discovered_eligible_task_file_count"], 83)
+        self.assertEqual(result.details["requested_task_file_count"], 83)
+        self.assertEqual(result.details["fetched_task_record_count"], 83)
+        self.assertEqual(result.details["failed_task_file_count"], 0)
+        self.assertEqual(result.details["skipped_task_file_count"], 0)
+        self.assertEqual(result.details["skipped_or_failed_task_count"], 0)
+        self.assertIsNone(result.details["per_model_task_file_cap"])
+        self.assertFalse(result.details["global_truncation"])
+        self.assertIn("greatest unique eligible task coverage", result.details["selection_policy"])
+        self.assertEqual(result.details["rteb_finance_coverage"]["completed_task_count"], 7)
+        self.assertEqual(result.details["rteb_finance_fetched_record_count"], 1)
+        self.assertEqual(result.details["total_fetched_record_count"], 84)
+        result.details["paths_model_count"] = 0
+        self.assertEqual(adapter._fetch_details_snapshot()["paths_model_count"], 83)
+
+    def test_mteb_result_fetch_concurrency_is_bounded_by_batch_size(self) -> None:
+        adapter = MtebAdapter()
+        model_names = [f"Provider__Concurrent-{index:02d}" for index in range(7)]
+        paths_payload = {
+            model_name: [f"results/{model_name}/rev/NFCorpus.json"]
+            for model_name in model_names
+        }
+        active_fetches = 0
+        maximum_active_fetches = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertTrue(request.url.path.endswith("/paths.json"))
+            return httpx.Response(200, json=paths_payload)
+
+        async def fake_fetch_result_record(
+            _client: httpx.AsyncClient,
+            model_dir: str,
+            result_path: str,
+            fetched_at: str,
+        ) -> mteb_source._RecordFetchResult:
+            nonlocal active_fetches, maximum_active_fetches
+            active_fetches += 1
+            maximum_active_fetches = max(maximum_active_fetches, active_fetches)
+            await asyncio.sleep(0.001)
+            active_fetches -= 1
+            return mteb_source._RecordFetchResult(
+                record=RawSourceRecord(
+                    source_id=adapter.source_id,
+                    benchmark_id="mteb_retrieval",
+                    raw_model_name=model_dir.replace("__", "/"),
+                    raw_model_key=model_dir.replace("__", "/"),
+                    raw_value="50",
+                    source_url=result_path,
+                    collected_at=fetched_at,
+                    metadata={"task_category": "retrieval", "task_name": "NFCorpus"},
+                ),
+                failure=None,
+            )
+
+        async def fetch_records() -> list[RawSourceRecord]:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                with (
+                    patch("backend.sources.mteb.MTEB_RESULT_FETCH_BATCH_SIZE", 3),
+                    patch("backend.sources.mteb._fetch_result_record", side_effect=fake_fetch_result_record),
+                    patch(
+                        "backend.sources.mteb._fetch_rteb_finance_records",
+                        return_value=self._complete_rteb_fetch(),
+                    ),
+                ):
+                    return await adapter.fetch_raw(client)
+
+        records = asyncio.run(fetch_records())
+
+        self.assertEqual(len(records), 7)
+        self.assertEqual(maximum_active_fetches, 3)
+
+    def test_mteb_fetch_imports_more_than_twelve_tasks_and_captures_strict_signature_metadata(self) -> None:
+        adapter = MtebAdapter()
+        model_dir = "Provider__Complete-Model"
+        task_names = [f"Task-{index:02d}Retrieval" for index in range(13)]
+        paths_payload = {
+            model_dir: [f"results/{model_dir}/revision-a/{task_name}.json" for task_name in reversed(task_names)]
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/paths.json"):
+                return httpx.Response(200, json=paths_payload)
+            return httpx.Response(
+                200,
+                json={
+                    "task_name": Path(request.url.path).stem,
+                    "mteb_version": "1.20.0",
+                    "dataset_revision": {"en": "dataset-en", "fr": "dataset-fr"},
+                    "scores": {
+                        "test": [
+                            {
+                                "main_score": 0.6,
+                                "hf_subset": "english",
+                                "languages": ["eng-Latn"],
+                            }
+                        ],
+                        "validation": [
+                            {
+                                "main_score": 0.5,
+                                "subset": "french",
+                                "languages": ["fra-Latn"],
+                            }
+                        ],
+                    },
+                },
+            )
+
+        async def fetch_records() -> list[RawSourceRecord]:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                with patch(
+                    "backend.sources.mteb._fetch_rteb_finance_records",
+                    return_value=self._complete_rteb_fetch(),
+                ):
+                    return await adapter.fetch_raw(client)
+
+        records = asyncio.run(fetch_records())
+        candidates = adapter.normalize(records)
+        retrieval = next(candidate for candidate in candidates if candidate.benchmark_id == "mteb_retrieval")
+
+        self.assertEqual(len(records), 13)
+        self.assertEqual(adapter._fetch_details_snapshot()["discovered_eligible_task_file_count"], 13)
+        self.assertEqual(adapter._fetch_details_snapshot()["requested_task_file_count"], 13)
+        self.assertEqual(adapter._fetch_details_snapshot()["fetched_task_record_count"], 13)
+        self.assertIsNone(adapter._fetch_details_snapshot()["per_model_task_file_cap"])
+        self.assertEqual(records[0].metadata["model_revision"], "revision-a")
+        self.assertEqual(records[0].metadata["splits"], ["test", "validation"])
+        self.assertEqual(records[0].metadata["subsets"], ["english", "french"])
+        self.assertEqual(retrieval.observation_count, 13)
+        self.assertEqual(len(retrieval.source_metadata["task_names"]), 13)
+        self.assertEqual(retrieval.source_metadata["dataset_revisions"], ["dataset-en", "dataset-fr"])
+        self.assertEqual(retrieval.source_metadata["mteb_versions"], ["1.20.0"])
+        self.assertEqual(retrieval.source_metadata["languages"], ["eng-Latn", "fra-Latn"])
+        self.assertEqual(retrieval.source_metadata["splits"], ["test", "validation"])
+        self.assertEqual(retrieval.source_metadata["subsets"], ["english", "french"])
+
+    def test_mteb_task_selection_uses_one_highest_coverage_revision_with_stable_tie_break(self) -> None:
+        paths = [
+            "results/Provider__Model/revision-c/GammaRetrieval.json",
+            "results/Provider__Model/revision-a/BetaRetrieval.json",
+            "results/Provider__Model/revision-b/BetaRetrieval.json",
+            "results/Provider__Model/revision-c/AlphaRetrieval.json",
+            "results/Provider__Model/revision-a/AlphaRetrieval.json",
+            "results/Provider__Model/revision-b/GammaRetrieval.json",
+            "results/Provider__Model/revision-c/BetaRetrieval.json",
+            "results/Provider__Model/revision-b/AlphaRetrieval.json",
+            "results/Provider__Model/revision-b/AlphaRetrieval.json",
+        ]
+
+        selection = mteb_source._select_task_paths(paths)
+
+        self.assertEqual(selection.selected_revision, "revision-b")
+        self.assertEqual(selection.discovered_eligible_file_count, 8)
+        self.assertEqual(
+            list(selection.paths),
+            [
+                "results/Provider__Model/revision-b/AlphaRetrieval.json",
+                "results/Provider__Model/revision-b/BetaRetrieval.json",
+                "results/Provider__Model/revision-b/GammaRetrieval.json",
+            ],
+        )
+
+    def test_mteb_stale_paths_are_excluded_before_accessible_revision_selection(self) -> None:
+        adapter = MtebAdapter()
+        model_dir = "Provider__Stale-Inventory"
+        paths = [
+            f"results/{model_dir}/revision-a/AlphaRetrieval.json",
+            f"results/{model_dir}/revision-a/BetaRetrieval.json",
+            f"results/{model_dir}/revision-a/GammaRetrieval.json",
+            f"results/{model_dir}/revision-b/AlphaRetrieval.json",
+            f"results/{model_dir}/revision-b/BetaRetrieval.json",
+        ]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/paths.json"):
+                return httpx.Response(200, json={model_dir: list(reversed(paths))})
+            if "/revision-a/BetaRetrieval.json" in request.url.path or "/revision-a/GammaRetrieval.json" in request.url.path:
+                return httpx.Response(404, json={"error": "deleted upstream"})
+            return httpx.Response(
+                200,
+                json={
+                    "task_name": Path(request.url.path).stem,
+                    "scores": {"test": [{"main_score": 0.5}]},
+                },
+            )
+
+        async def fetch_records() -> list[RawSourceRecord]:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                with (
+                    patch(
+                        "backend.sources.mteb._fetch_rteb_finance_records",
+                        return_value=self._complete_rteb_fetch(),
+                    ),
+                    patch("backend.sources.mteb.asyncio.sleep", new=AsyncMock()) as sleep_mock,
+                ):
+                    records = await adapter.fetch_raw(client)
+                    self.assertEqual(sleep_mock.await_count, 0)
+                    return records
+
+        records = asyncio.run(fetch_records())
+        details = adapter._fetch_details_snapshot()
+
+        self.assertEqual(len(records), 2)
+        self.assertTrue(all(record.metadata["model_revision"] == "revision-b" for record in records))
+        self.assertEqual(details["discovered_eligible_task_file_count"], 5)
+        self.assertEqual(details["probed_task_file_count"], 5)
+        self.assertEqual(details["accessible_task_file_count"], 3)
+        self.assertEqual(details["stale_task_file_count"], 2)
+        self.assertEqual(details["failed_task_file_count"], 0)
+        self.assertEqual(details["skipped_task_file_count"], 1)
+        self.assertEqual(details["requested_task_file_count"], 2)
+        self.assertEqual(details["fetched_task_record_count"], 2)
+        self.assertEqual(details["selected_model_revisions"], {model_dir: "revision-b"})
+        self.assertTrue(details["probe_complete"])
+        self.assertEqual(
+            {item["task_name"] for item in details["stale_task_files"]},
+            {"BetaRetrieval", "GammaRetrieval"},
+        )
+
+    def test_mteb_exhausted_task_failure_raises_with_identity_and_backoff_details(self) -> None:
+        adapter = MtebAdapter()
+        model_dir = "Provider__Failing-Model"
+        result_path = f"results/{model_dir}/revision-a/NFCorpus.json"
+        attempts = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            if request.url.path.endswith("/paths.json"):
+                return httpx.Response(200, json={model_dir: [result_path]})
+            attempts += 1
+            return httpx.Response(503, json={"error": "still unavailable"})
+
+        async def fetch_records() -> None:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                with (
+                    patch(
+                        "backend.sources.mteb._fetch_rteb_finance_records",
+                        return_value=self._complete_rteb_fetch(),
+                    ),
+                    patch("backend.sources.mteb.asyncio.sleep", new=AsyncMock()) as sleep_mock,
+                ):
+                    with self.assertRaises(mteb_source.MtebCoverageError) as caught:
+                        await adapter.fetch_raw(client)
+                    self.assertEqual([call.args[0] for call in sleep_mock.await_args_list], [0.25, 0.5])
+                    details = caught.exception.details
+                    self.assertEqual(details["failed_task_file_count"], 1)
+                    self.assertEqual(details["failed_task_files"][0]["model_name"], "Provider/Failing-Model")
+                    self.assertEqual(details["failed_task_files"][0]["task_name"], "NFCorpus")
+                    self.assertEqual(details["failed_task_files"][0]["attempts"], 3)
+                    self.assertEqual(details["fetched_task_record_count"], 0)
+
+        asyncio.run(fetch_records())
+        self.assertEqual(attempts, 3)
+
+    def test_mteb_retry_after_header_is_honoured_before_success(self) -> None:
+        attempts = 0
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                return httpx.Response(429, headers={"Retry-After": "1.75"})
+            return httpx.Response(
+                200,
+                json={
+                    "task_name": "NFCorpus",
+                    "scores": {"test": [{"main_score": 0.5}]},
+                },
+            )
+
+        async def fetch_record() -> mteb_source._RecordFetchResult:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                with patch("backend.sources.mteb.asyncio.sleep", new=AsyncMock()) as sleep_mock:
+                    result = await mteb_source._fetch_result_record(
+                        client,
+                        "Provider__Model",
+                        "results/Provider__Model/revision-a/NFCorpus.json",
+                        FUTURE_COLLECTED_AT,
+                    )
+                    self.assertEqual([call.args[0] for call in sleep_mock.await_args_list], [1.75])
+                    return result
+
+        result = asyncio.run(fetch_record())
+        self.assertIsNotNone(result.record)
+        self.assertIsNone(result.failure)
+        self.assertEqual(attempts, 2)
+
+    def test_mteb_legacy_top_level_retrieval_scores_preserve_language_and_reject_scoreless_shapes(self) -> None:
+        payloads = {
+            "Core17InstructionRetrieval": {
+                "task_name": "Core17InstructionRetrieval",
+                "test": {"evaluation_time": 1.25, "p-MRR": 0.3125},
+            },
+            "MintakaRetrieval": {
+                "task_name": "MintakaRetrieval",
+                "test": {
+                    "evaluation_time": 2.5,
+                    "fr": {"ndcg_at_10": 0.428},
+                },
+            },
+            "ScorelessRetrieval": {
+                "task_name": "ScorelessRetrieval",
+                "test": {
+                    "evaluation_time": 3.75,
+                    "fr": {"recall_at_10": 0.7},
+                },
+            },
+            "MalformedMetricsRetrieval": {
+                "task_name": "MalformedMetricsRetrieval",
+                "test": {
+                    "evaluation_time": 4.0,
+                    "metrics": {"ndcg_at_10": 0.9},
+                },
+            },
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=payloads[Path(request.url.path).stem])
+
+        async def fetch_records() -> dict[str, mteb_source._RecordFetchResult]:
+            results: dict[str, mteb_source._RecordFetchResult] = {}
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                for task_name in payloads:
+                    results[task_name] = await mteb_source._fetch_result_record(
+                        client,
+                        "Provider__Legacy-Model",
+                        f"results/Provider__Legacy-Model/revision-a/{task_name}.json",
+                        FUTURE_COLLECTED_AT,
+                    )
+            return results
+
+        results = asyncio.run(fetch_records())
+        p_mrr = results["Core17InstructionRetrieval"]
+        self.assertIsNotNone(p_mrr.record)
+        self.assertIsNone(p_mrr.failure)
+        self.assertEqual(p_mrr.record.raw_value, "31.25")
+        self.assertEqual(p_mrr.record.metadata["splits"], ["test"])
+        self.assertEqual(p_mrr.record.metadata["score_count"], 1)
+
+        nested_language = results["MintakaRetrieval"]
+        self.assertIsNotNone(nested_language.record)
+        self.assertIsNone(nested_language.failure)
+        self.assertEqual(nested_language.record.raw_value, "42.8")
+        self.assertEqual(nested_language.record.metadata["languages"], ["fr"])
+        self.assertEqual(nested_language.record.metadata["splits"], ["test"])
+        self.assertEqual(nested_language.record.metadata["score_count"], 1)
+
+        for task_name in ("ScorelessRetrieval", "MalformedMetricsRetrieval"):
+            self.assertIsNone(results[task_name].record)
+            self.assertEqual(
+                results[task_name].failure["error"],
+                "result payload contained no parseable main scores",
+            )
+
+    def test_rteb_transient_dataset_server_failure_uses_only_complete_parquet_fallback(self) -> None:
+        partial_server_record = RawSourceRecord(
+            source_id="mteb",
+            benchmark_id="rteb_finance",
+            raw_model_name="Provider/Partial",
+            raw_model_key="Provider/Partial",
+            raw_value="10",
+            source_url="https://example.test/server",
+            collected_at=FUTURE_COLLECTED_AT,
+        )
+        complete_fallback_record = RawSourceRecord(
+            source_id="mteb",
+            benchmark_id="rteb_finance",
+            raw_model_name="Provider/Complete",
+            raw_model_key="Provider/Complete",
+            raw_value="50",
+            source_url="https://example.test/parquet",
+            collected_at=FUTURE_COLLECTED_AT,
+        )
+        server_coverage = mteb_source._empty_rteb_coverage()
+        server_coverage.update(
+            {
+                "requested_task_count": 1,
+                "failed_task_count": 1,
+                "requested_page_count": 1,
+                "failed_page_count": 1,
+            }
+        )
+        server_failure = {
+            "kind": "rteb_page",
+            "task_name": "FinanceBenchRetrieval",
+            "error": "HTTP 503",
+            "status_code": 503,
+            "attempts": 3,
+            "retryable": True,
+        }
+        fallback_coverage = mteb_source._empty_rteb_coverage()
+        fallback_coverage.update(
+            {
+                "requested_task_count": 7,
+                "completed_task_count": 7,
+                "tasks_with_records_count": 7,
+                "fetched_record_count": 1,
+            }
+        )
+
+        async def fetch_records() -> tuple[list[RawSourceRecord], dict, list[dict]]:
+            async with httpx.AsyncClient() as client:
+                with (
+                    patch(
+                        "backend.sources.mteb._fetch_rteb_finance_dataset_server_records",
+                        new=AsyncMock(return_value=([partial_server_record], server_coverage, [server_failure])),
+                    ),
+                    patch(
+                        "backend.sources.mteb._fetch_rteb_finance_parquet_records",
+                        new=AsyncMock(return_value=([complete_fallback_record], fallback_coverage, [])),
+                    ),
+                ):
+                    return await mteb_source._fetch_rteb_finance_records(client, FUTURE_COLLECTED_AT)
+
+        records, coverage, failures = asyncio.run(fetch_records())
+
+        self.assertEqual([record.raw_model_name for record in records], ["Provider/Complete"])
+        self.assertEqual(failures, [])
+        self.assertEqual(coverage["mode"], "parquet_fallback")
+        self.assertEqual(coverage["dataset_server"]["mode"], "dataset_server")
+        self.assertEqual(coverage["dataset_server"]["failed_page_count"], 1)
+
+    def test_rteb_parquet_fallback_requires_all_configured_tasks_from_bounded_manifest(self) -> None:
+        dataset_revision = "c207f557966f122d808738c8334ee4c4b4d8b834"
+        dataset_info = mteb_source._PageFetchResult(payload={"sha": dataset_revision}, failure=None)
+        manifest = mteb_source._PageFetchResult(
+            payload=[{"type": "file", "path": "data/train-00000.parquet", "size": 1024}],
+            failure=None,
+        )
+        rows = [
+            {
+                "model_name": f"Provider/{task_name}",
+                "model_revision": "model-revision",
+                "task_name": task_name,
+                "split": "test",
+                "language": ["eng-Latn"],
+                "subset": "default",
+                "score": 0.5,
+                "is_public": bool(metadata["is_public"]),
+                "trained_on": False,
+            }
+            for task_name, metadata in mteb_source.RTEB_FINANCE_TASKS.items()
+        ]
+        shard_details = {
+            "path": "data/train-00000.parquet",
+            "expected_bytes": 1024,
+            "downloaded_bytes": 1024,
+            "filtered_row_count": len(rows),
+        }
+
+        async def fetch_records() -> tuple[list[RawSourceRecord], dict, list[dict]]:
+            async with httpx.AsyncClient() as client:
+                with (
+                    patch(
+                        "backend.sources.mteb._request_json_object",
+                        new=AsyncMock(side_effect=[dataset_info, manifest]),
+                    ),
+                    patch(
+                        "backend.sources.mteb._fetch_rteb_parquet_shard_rows",
+                        new=AsyncMock(return_value=(rows, shard_details, None)),
+                    ),
+                ):
+                    return await mteb_source._fetch_rteb_finance_parquet_records(client, FUTURE_COLLECTED_AT)
+
+        records, coverage, failures = asyncio.run(fetch_records())
+
+        self.assertEqual(len(records), 7)
+        self.assertTrue(all(record.raw_value == "50" for record in records))
+        self.assertEqual(failures, [])
+        self.assertEqual(coverage["dataset_revision"], dataset_revision)
+        self.assertEqual(coverage["selected_shard_count"], 1)
+        self.assertEqual(coverage["requested_shard_count"], 1)
+        self.assertEqual(coverage["fetched_shard_count"], 1)
+        self.assertEqual(coverage["downloaded_bytes"], 1024)
+        self.assertEqual(coverage["completed_task_count"], 7)
+        self.assertEqual(coverage["failed_task_count"], 0)
+        self.assertEqual(coverage["fetched_record_count"], 7)
+
+        missing_task_rows = rows[:-1]
+
+        async def fetch_incomplete() -> tuple[list[RawSourceRecord], dict, list[dict]]:
+            async with httpx.AsyncClient() as client:
+                with (
+                    patch(
+                        "backend.sources.mteb._request_json_object",
+                        new=AsyncMock(side_effect=[dataset_info, manifest]),
+                    ),
+                    patch(
+                        "backend.sources.mteb._fetch_rteb_parquet_shard_rows",
+                        new=AsyncMock(return_value=(missing_task_rows, shard_details, None)),
+                    ),
+                ):
+                    return await mteb_source._fetch_rteb_finance_parquet_records(client, FUTURE_COLLECTED_AT)
+
+        incomplete_records, incomplete_coverage, incomplete_failures = asyncio.run(fetch_incomplete())
+        self.assertEqual(incomplete_records, [])
+        self.assertEqual(incomplete_coverage["failed_task_count"], 1)
+        self.assertEqual(incomplete_failures[0]["kind"], "rteb_parquet_coverage")
+
+    def test_mteb_rteb_empty_wrong_task_or_partial_page_fails_closed(self) -> None:
+        task_config = {"FinanceBenchRetrieval": {"is_public": True, "description": "test"}}
+        empty_page = mteb_source._PageFetchResult(
+            payload={"rows": [], "num_rows_total": 0},
+            failure=None,
+        )
+
+        async def fetch_empty() -> tuple[list[RawSourceRecord], dict, list[dict]]:
+            async with httpx.AsyncClient() as client:
+                with (
+                    patch("backend.sources.mteb.RTEB_FINANCE_TASKS", task_config),
+                    patch("backend.sources.mteb._fetch_results_dataset_page", new=AsyncMock(return_value=empty_page)),
+                ):
+                    return await mteb_source._fetch_rteb_finance_records(client, FUTURE_COLLECTED_AT)
+
+        empty_records, empty_coverage, empty_failures = asyncio.run(fetch_empty())
+        self.assertEqual(empty_records, [])
+        self.assertEqual(empty_failures[0]["kind"], "rteb_task_coverage")
+        self.assertEqual(empty_failures[0]["task_name"], "FinanceBenchRetrieval")
+        self.assertEqual(empty_coverage["completed_task_count"], 0)
+        self.assertEqual(empty_coverage["failed_task_count"], 1)
+        self.assertEqual(empty_coverage["failed_page_count"], 0)
+
+        missing_task = next(reversed(mteb_source.RTEB_FINANCE_TASKS))
+
+        async def fetch_six_of_seven() -> tuple[list[RawSourceRecord], dict, list[dict]]:
+            async def page_for_task(
+                _client: httpx.AsyncClient,
+                task_name: str,
+                _offset: int,
+            ) -> mteb_source._PageFetchResult:
+                if task_name == missing_task:
+                    return empty_page
+                return mteb_source._PageFetchResult(
+                    payload={
+                        "rows": [
+                            {
+                                "row": {
+                                    "model_name": "Provider/Finance",
+                                    "task_name": task_name,
+                                    "score": 0.5,
+                                }
+                            }
+                        ],
+                        "num_rows_total": 1,
+                    },
+                    failure=None,
+                )
+
+            async with httpx.AsyncClient() as client:
+                with patch(
+                    "backend.sources.mteb._fetch_results_dataset_page",
+                    new=AsyncMock(side_effect=page_for_task),
+                ):
+                    return await mteb_source._fetch_rteb_finance_records(client, FUTURE_COLLECTED_AT)
+
+        partial_records, partial_coverage, partial_failures = asyncio.run(fetch_six_of_seven())
+        self.assertEqual(partial_records, [])
+        self.assertEqual(partial_coverage["requested_task_count"], 7)
+        self.assertEqual(partial_coverage["completed_task_count"], 6)
+        self.assertEqual(partial_coverage["failed_task_count"], 1)
+        self.assertEqual(partial_coverage["tasks_with_records_count"], 6)
+        self.assertEqual(partial_coverage["fetched_record_count"], 6)
+        self.assertEqual(partial_failures[0]["kind"], "rteb_task_coverage")
+        self.assertEqual(partial_failures[0]["task_name"], missing_task)
+
+        wrong_task_page = mteb_source._PageFetchResult(
+            payload={
+                "rows": [
+                    {
+                        "row": {
+                            "model_name": "Provider/Finance",
+                            "task_name": "WrongFinanceTask",
+                            "score": 0.5,
+                        }
+                    }
+                ],
+                "num_rows_total": 1,
+            },
+            failure=None,
+        )
+
+        async def fetch_wrong_task() -> tuple[list[RawSourceRecord], dict, list[dict]]:
+            async with httpx.AsyncClient() as client:
+                with (
+                    patch("backend.sources.mteb.RTEB_FINANCE_TASKS", task_config),
+                    patch(
+                        "backend.sources.mteb._fetch_results_dataset_page",
+                        new=AsyncMock(return_value=wrong_task_page),
+                    ),
+                ):
+                    return await mteb_source._fetch_rteb_finance_records(client, FUTURE_COLLECTED_AT)
+
+        wrong_records, wrong_coverage, wrong_failures = asyncio.run(fetch_wrong_task())
+        self.assertEqual(wrong_records, [])
+        self.assertEqual(wrong_failures[0]["kind"], "rteb_row")
+        self.assertEqual(wrong_failures[0]["task_name"], "FinanceBenchRetrieval")
+        self.assertEqual(wrong_failures[0]["actual_task_name"], "WrongFinanceTask")
+        self.assertEqual(wrong_coverage["completed_task_count"], 0)
+        self.assertEqual(wrong_coverage["failed_task_count"], 1)
+        self.assertEqual(wrong_coverage["tasks_with_records_count"], 0)
+        self.assertEqual(wrong_coverage["invalid_row_count"], 1)
+
+        first_page = mteb_source._PageFetchResult(
+            payload={
+                "rows": [
+                    {
+                        "row": {
+                            "model_name": "Provider/Finance",
+                            "task_name": "FinanceBenchRetrieval",
+                            "score": 0.5,
+                            "split": "test",
+                            "hf_subset": "default",
+                        }
+                    }
+                ],
+                "num_rows_total": 2,
+            },
+            failure=None,
+        )
+        failed_page = mteb_source._PageFetchResult(
+            payload=None,
+            failure={"error": "HTTP 503", "status_code": 503, "attempts": 3},
+        )
+
+        def paths_handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={})
+
+        async def fetch_partial() -> None:
+            adapter = MtebAdapter()
+            async with httpx.AsyncClient(transport=httpx.MockTransport(paths_handler)) as client:
+                with (
+                    patch("backend.sources.mteb.RTEB_FINANCE_TASKS", task_config),
+                    patch(
+                        "backend.sources.mteb._fetch_results_dataset_page",
+                        new=AsyncMock(side_effect=[first_page, failed_page]),
+                    ),
+                ):
+                    with self.assertRaises(mteb_source.MtebCoverageError) as caught:
+                        await adapter.fetch_raw(client)
+                    coverage = caught.exception.details["rteb_finance_coverage"]
+                    self.assertEqual(coverage["requested_task_count"], 1)
+                    self.assertEqual(coverage["requested_page_count"], 2)
+                    self.assertEqual(coverage["fetched_page_count"], 1)
+                    self.assertEqual(coverage["failed_page_count"], 1)
+                    self.assertEqual(coverage["fetched_record_count"], 1)
+                    self.assertEqual(coverage["failed_pages"][0]["offset"], 1)
+
+        asyncio.run(fetch_partial())
 
     def test_open_asr_spot_check_persists_speech_to_text_scores(self) -> None:
         adapter = OpenAsrLeaderboardAdapter()
@@ -362,6 +1144,10 @@ class SourceSpotCheckTests(unittest.TestCase):
                     "benchmark_name": "RTEB Finance",
                     "task_name": "FinanceBenchRetrieval",
                     "languages": ["eng-Latn"],
+                    "model_revision": "rev-finance",
+                    "dataset_revision": "dataset-finance",
+                    "split": "test",
+                    "subset": "default",
                     "is_public": True,
                     "trained_on": False,
                 },
@@ -388,6 +1174,10 @@ class SourceSpotCheckTests(unittest.TestCase):
                     "benchmark_name": "RTEB Finance",
                     "task_name": "EnglishFinance1Retrieval",
                     "languages": ["eng-Latn"],
+                    "model_revision": "rev-finance",
+                    "dataset_revision": "dataset-finance",
+                    "split": "test",
+                    "subset": "closed",
                     "is_public": False,
                     "trained_on": False,
                 },
@@ -399,6 +1189,14 @@ class SourceSpotCheckTests(unittest.TestCase):
         self.assertEqual([candidate.benchmark_id for candidate in candidates], ["rteb_finance"])
         self.assertAlmostEqual(candidates[0].value, 69.281)
         self.assertEqual(candidates[0].metadata["private_row_count"], 1)
+        self.assertEqual(candidates[0].observation_count, 2)
+        self.assertEqual(
+            candidates[0].source_metadata["task_names"],
+            ["EnglishFinance1Retrieval", "FinanceBenchRetrieval"],
+        )
+        self.assertEqual(candidates[0].source_metadata["model_revision"], "rev-finance")
+        self.assertEqual(candidates[0].source_metadata["dataset_revision"], "dataset-finance")
+        self.assertEqual(candidates[0].source_metadata["subsets"], ["closed", "default"])
         self.assertIn("RTEB Finance", str(candidates[0].notes))
 
         with get_connection(self.engine) as conn:
@@ -412,6 +1210,10 @@ class SourceSpotCheckTests(unittest.TestCase):
 
         finance = self._latest_score(model_id, "rteb_finance")
         self.assertAlmostEqual(float(finance["value"]), 69.281)
+        self.assertEqual(finance["observation_count"], 2)
+        finance_source_metadata = json.loads(str(finance["source_metadata_json"]))
+        self.assertEqual(finance_source_metadata["model_revision"], "rev-finance")
+        self.assertEqual(finance_source_metadata["dataset_revision"], "dataset-finance")
         self.assertIn("closed/private", str(finance["notes"]))
 
         raw_rows = update_engine.list_raw_source_records(source_run_id)
@@ -776,11 +1578,11 @@ class SourceSpotCheckTests(unittest.TestCase):
                     source_id=adapter.source_id,
                     benchmark_id="swebench_verified",
                     raw_model_name="Claude Opus 4.6",
-                    raw_value="0.54",
+                    raw_value="54",
                     source_url=adapter.page_url,
                     collected_at=FUTURE_COLLECTED_AT,
                     raw_model_key="Claude Opus 4.6",
-                    payload={"resolved": 0.54},
+                    payload={"resolved": 54},
                     metadata={
                         "verified": True,
                         "leaderboard_name": "Verified",
@@ -794,11 +1596,11 @@ class SourceSpotCheckTests(unittest.TestCase):
                     source_id=adapter.source_id,
                     benchmark_id="swebench_verified",
                     raw_model_name="Claude Opus 4.6",
-                    raw_value="0.61",
+                    raw_value="61",
                     source_url=adapter.page_url,
                     collected_at=FUTURE_COLLECTED_AT,
                     raw_model_key="Claude Opus 4.6",
-                    payload={"resolved": 0.61},
+                    payload={"resolved": 61},
                     metadata={
                         "verified": True,
                         "leaderboard_name": "Verified",
@@ -812,11 +1614,11 @@ class SourceSpotCheckTests(unittest.TestCase):
                     source_id=adapter.source_id,
                     benchmark_id="swebench_verified",
                     raw_model_name="GPT-5.4 (xhigh)",
-                    raw_value="0.58",
+                    raw_value="58",
                     source_url=adapter.page_url,
                     collected_at=FUTURE_COLLECTED_AT,
                     raw_model_key="GPT-5.4 (xhigh)",
-                    payload={"resolved": 0.58},
+                    payload={"resolved": 58},
                     metadata={
                         "verified": True,
                         "leaderboard_name": "Verified",
@@ -849,6 +1651,60 @@ class SourceSpotCheckTests(unittest.TestCase):
             self.assertEqual(raw_rows[0]["normalized_model_id"], "claude-opus-4-6")
             self.assertEqual(raw_rows[-1]["normalized_model_id"], "gpt-5-4")
             self.assertTrue(all(row["source_type"] == "secondary" for row in raw_rows))
+
+    def test_swebench_treats_resolved_as_percentage_points_and_rejects_invalid_values(self) -> None:
+            adapter = SwebenchAdapter()
+
+            def record(model_name: str, raw_value: str) -> RawSourceRecord:
+                return RawSourceRecord(
+                    source_id=adapter.source_id,
+                    benchmark_id="swebench_verified",
+                    raw_model_name=model_name,
+                    raw_value=raw_value,
+                    source_url=adapter.page_url,
+                    collected_at=FUTURE_COLLECTED_AT,
+                    raw_model_key=model_name,
+                    payload={"resolved": raw_value},
+                    metadata={
+                        "verified": True,
+                        "leaderboard_name": "Verified",
+                        "source_leaderboard_name": "Verified",
+                        "leaderboard_date": "2026-02-17",
+                        "submission_name": f"mini-SWE-agent + {model_name}",
+                        "submission_organization": "Test Lab",
+                        "system_attempts": "Attempts - 1",
+                        "os_model": False,
+                        "os_system": True,
+                        "single_model_submission": True,
+                        "tags": [f"Model: {model_name}"],
+                    },
+                )
+
+            raw_records = [
+                record("Claude Opus 4.6", "1.4"),
+                record("Invalid Negative", "-0.1"),
+                record("Invalid High", "100.1"),
+                record("Invalid NaN", "nan"),
+                record("Invalid Infinity", "inf"),
+            ]
+
+            _, _, candidates, _ = self._persist_records(adapter, raw_records)
+
+            self.assertEqual(len(candidates), 1)
+            candidate = candidates[0]
+            self.assertEqual(candidate.raw_model_name, "Claude Opus 4.6")
+            self.assertAlmostEqual(candidate.value, 1.4)
+            self.assertEqual(candidate.raw_value, "1.4")
+            self.assertEqual(candidate.source_metadata["split"], "Verified")
+            self.assertEqual(candidate.source_metadata["submission_organization"], "Test Lab")
+            self.assertEqual(candidate.source_metadata["system_attempts"], "Attempts - 1")
+            self.assertTrue(candidate.source_metadata["os_system"])
+
+            score = self._latest_score("claude-opus-4-6", "swebench_verified")
+            self.assertAlmostEqual(float(score["value"]), 1.4)
+            source_metadata = json.loads(str(score["source_metadata_json"]))
+            self.assertEqual(source_metadata["split"], "Verified")
+            self.assertEqual(source_metadata["system_attempts"], "Attempts - 1")
 
     def test_terminal_bench_spot_check_preserves_agent_harness_evidence(self) -> None:
             adapter = TerminalBenchAdapter()
@@ -942,11 +1798,11 @@ class SourceSpotCheckTests(unittest.TestCase):
                     source_id=adapter.source_id,
                     benchmark_id="swebench_verified",
                     raw_model_name="Claude Opus 4.6",
-                    raw_value="0.61",
+                    raw_value="61",
                     source_url=adapter.page_url,
                     collected_at=FUTURE_COLLECTED_AT,
                     raw_model_key="Claude Opus 4.6",
-                    payload={"resolved": 0.61},
+                    payload={"resolved": 61},
                     metadata={
                         "verified": True,
                         "leaderboard_name": "Verified",
@@ -960,11 +1816,11 @@ class SourceSpotCheckTests(unittest.TestCase):
                     source_id=adapter.source_id,
                     benchmark_id="swebench_lite",
                     raw_model_name="Claude Opus 4.6",
-                    raw_value="0.44",
+                    raw_value="44",
                     source_url="https://www.swebench.com/#lite",
                     collected_at=FUTURE_COLLECTED_AT,
                     raw_model_key="Claude Opus 4.6",
-                    payload={"resolved": 0.44},
+                    payload={"resolved": 44},
                     metadata={
                         "verified": True,
                         "leaderboard_name": "Lite",
@@ -978,11 +1834,11 @@ class SourceSpotCheckTests(unittest.TestCase):
                     source_id=adapter.source_id,
                     benchmark_id="swebench_lite",
                     raw_model_name="Claude Opus 4.6",
-                    raw_value="0.48",
+                    raw_value="48",
                     source_url="https://www.swebench.com/#lite",
                     collected_at=FUTURE_COLLECTED_AT,
                     raw_model_key="Claude Opus 4.6",
-                    payload={"resolved": 0.48},
+                    payload={"resolved": 48},
                     metadata={
                         "verified": True,
                         "leaderboard_name": "Lite",
@@ -996,11 +1852,11 @@ class SourceSpotCheckTests(unittest.TestCase):
                     source_id=adapter.source_id,
                     benchmark_id="swebench_multilingual",
                     raw_model_name="Claude Opus 4.6",
-                    raw_value="0.72",
+                    raw_value="72",
                     source_url="https://www.swebench.com/#multilingual",
                     collected_at=FUTURE_COLLECTED_AT,
                     raw_model_key="Claude Opus 4.6",
-                    payload={"resolved": 0.72},
+                    payload={"resolved": 72},
                     metadata={
                         "verified": True,
                         "leaderboard_name": "Multilingual",
@@ -1014,11 +1870,11 @@ class SourceSpotCheckTests(unittest.TestCase):
                     source_id=adapter.source_id,
                     benchmark_id="swebench_full",
                     raw_model_name="GPT-5.4 (xhigh)",
-                    raw_value="0.52",
+                    raw_value="52",
                     source_url="https://www.swebench.com/#full",
                     collected_at=FUTURE_COLLECTED_AT,
                     raw_model_key="GPT-5.4 (xhigh)",
-                    payload={"resolved": 0.52},
+                    payload={"resolved": 52},
                     metadata={
                         "verified": True,
                         "leaderboard_name": "Full",
@@ -1032,11 +1888,11 @@ class SourceSpotCheckTests(unittest.TestCase):
                     source_id=adapter.source_id,
                     benchmark_id="swebench_multimodal",
                     raw_model_name="GPT-5.4 (xhigh)",
-                    raw_value="0.35",
+                    raw_value="35",
                     source_url="https://www.swebench.com/#multimodal",
                     collected_at=FUTURE_COLLECTED_AT,
                     raw_model_key="GPT-5.4 (xhigh)",
-                    payload={"resolved": 0.35},
+                    payload={"resolved": 35},
                     metadata={
                         "verified": True,
                         "leaderboard_name": "Multimodal",
@@ -2245,11 +3101,11 @@ class SourceSpotCheckTests(unittest.TestCase):
                 source_id=adapter.source_id,
                 benchmark_id="swebench_verified",
                 raw_model_name="Claude Opus 4.6",
-                raw_value="0.61",
+                raw_value="61",
                 source_url=adapter.page_url,
                 collected_at=FUTURE_COLLECTED_AT,
                 raw_model_key="Claude Opus 4.6",
-                payload={"resolved": 0.61},
+                payload={"resolved": 61},
                 metadata={
                     "verified": True,
                     "leaderboard_name": "Verified",

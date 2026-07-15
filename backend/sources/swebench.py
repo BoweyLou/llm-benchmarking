@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Sequence
 
 import httpx
 
-from .base import BaseSourceAdapter, RawSourceRecord, ScoreCandidate, percent_score, utc_now_iso
+from .base import BaseSourceAdapter, RawSourceRecord, ScoreCandidate, safe_float, utc_now_iso
 
 
 SPLIT_CONFIGS = (
@@ -105,13 +106,13 @@ class SwebenchAdapter(BaseSourceAdapter):
 
         for record in raw_records:
             model_key = record.raw_model_key or record.raw_model_name
-            current_value = percent_score(record.raw_value)
+            current_value = _resolved_percentage_points(record.raw_value)
             if current_value is None:
                 continue
 
             candidate_key = (model_key, record.benchmark_id)
             best = best_by_model_and_benchmark.get(candidate_key)
-            best_value = percent_score(best.raw_value) if best else None
+            best_value = _resolved_percentage_points(best.raw_value) if best else None
             if best is None or best_value is None or current_value > best_value:
                 best_by_model_and_benchmark[candidate_key] = record
 
@@ -120,7 +121,7 @@ class SwebenchAdapter(BaseSourceAdapter):
             best_by_model_and_benchmark.items(),
             key=lambda item: (item[0][0].lower(), item[0][1]),
         ):
-            value = percent_score(record.raw_value)
+            value = _resolved_percentage_points(record.raw_value)
             if value is None:
                 continue
 
@@ -142,6 +143,7 @@ class SwebenchAdapter(BaseSourceAdapter):
                         f'{record.metadata.get("submission_name") or "Unknown submission"} '
                         f'on {record.metadata.get("leaderboard_date") or "unknown date"}.'
                     ),
+                    source_metadata=_comparison_source_metadata(record),
                     metadata=dict(record.metadata),
                 )
             )
@@ -175,3 +177,29 @@ class SwebenchAdapter(BaseSourceAdapter):
             if isinstance(tag, str) and tag.startswith(prefix):
                 return tag.split(prefix, 1)[1].strip()
         return ""
+
+
+def _resolved_percentage_points(value: Any) -> float | None:
+    """Return an official SWE-bench resolved percentage without fraction rescaling."""
+    score = safe_float(value)
+    if score is None or not math.isfinite(score) or score < 0.0 or score > 100.0:
+        return None
+    return score
+
+
+def _comparison_source_metadata(record: RawSourceRecord) -> dict[str, Any]:
+    metadata = record.metadata
+    payload = {
+        "split": metadata.get("leaderboard_name"),
+        "submission_name": metadata.get("submission_name"),
+        "submission_organization": metadata.get("submission_organization"),
+        "system_attempts": metadata.get("system_attempts"),
+        "os_model": metadata.get("os_model"),
+        "os_system": metadata.get("os_system"),
+        "single_model_submission": metadata.get("single_model_submission"),
+    }
+    return {
+        key: value
+        for key, value in payload.items()
+        if value is not None and value != ""
+    }

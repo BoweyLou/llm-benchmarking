@@ -10,6 +10,12 @@ from backend import main
 
 
 class ApiAdminGuardTests(unittest.TestCase):
+    def test_large_public_responses_are_gzip_compressed(self) -> None:
+        response = TestClient(main.app).get("/review", headers={"Accept-Encoding": "gzip"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("content-encoding"), "gzip")
+
     def setUp(self) -> None:
         self.original_token = os.environ.get(main.ADMIN_TOKEN_ENV_VAR)
         self.original_trusted_tailnet_writes = os.environ.get(main.TRUSTED_TAILNET_WRITES_ENV_VAR)

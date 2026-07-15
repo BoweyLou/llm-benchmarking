@@ -89,10 +89,33 @@
     .section { margin-bottom: 18px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: 0 1px 2px rgba(20,32,51,.03); }
     .section-head { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; margin-bottom: 14px; }
     .section-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
-    .metrics { display: grid; grid-template-columns: repeat(4, minmax(105px, 1fr)); gap: 9px; }
-    .metric { min-width: 0; padding: 12px; border-radius: 8px; background: var(--panel-soft); }
-    .metric strong { display: block; margin-top: 7px; font-size: 18px; }
-    .metric span { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .benchmark-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 11px; }
+    .benchmark-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-soft); }
+    .benchmark-card[data-status="invalid"] { border-color: #edc0bc; background: var(--red-soft); }
+    .benchmark-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 9px; }
+    .benchmark-name { font-size: 12px; font-weight: 730; line-height: 1.35; }
+    .benchmark-source { margin-top: 3px; color: var(--muted); font-size: 10px; }
+    .metric-value { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+    .metric-value strong { font-size: 23px; line-height: 1; }
+    .metric-value span { color: var(--muted); font-size: 10px; }
+    .position-primary { margin-top: 12px; font-size: 12px; font-weight: 720; line-height: 1.4; }
+    .position-secondary { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .percentile-track { position: relative; height: 7px; margin-top: 10px; overflow: hidden; border-radius: 99px; background: #dfe6ef; }
+    .percentile-track > span { display: block; height: 100%; border-radius: inherit; background: var(--blue); }
+    .benchmark-context { display: grid; gap: 5px; margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; line-height: 1.35; }
+    .benchmark-context strong { color: var(--text); font-weight: 650; }
+    .benchmark-warning { color: var(--amber); }
+    .metric-details { margin-top: 10px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+    .metric-details summary, .benchmark-all > summary, .missing-evidence > summary { cursor: pointer; color: var(--blue); font-weight: 690; }
+    .metric-details dl { display: grid; grid-template-columns: minmax(85px, auto) 1fr; gap: 5px 10px; margin: 9px 0 0; }
+    .metric-details dt { color: var(--muted); }
+    .metric-details dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+    .metric-details a { color: var(--blue); }
+    .benchmark-category { margin-top: 14px; }
+    .benchmark-category h4 { margin: 0 0 8px; color: var(--muted); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+    .benchmark-all, .missing-evidence { margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .missing-evidence ul { margin: 9px 0 0; padding-left: 20px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .verification-note { margin: 12px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
     .suggestions { display: grid; gap: 9px; }
     .suggestion { display: grid; grid-template-columns: minmax(150px, .8fr) 90px minmax(220px, 1.5fr); gap: 14px; align-items: start; padding: 13px; border: 1px solid var(--line); border-radius: 8px; }
     .suggestion-title { font-weight: 720; }
@@ -155,7 +178,7 @@
     .error { color: var(--red); }
     @media (max-width: 1180px) {
       .layout { grid-template-columns: 220px 360px minmax(440px, 1fr); }
-      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .benchmark-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
       .decision-grid { grid-template-columns: 1fr; }
       .suggestion { grid-template-columns: 1fr 90px; }
       .suggestion .reason { grid-column: 1 / -1; }
@@ -174,7 +197,9 @@
       .bulk-dialog { width: 100%; max-width: none; margin: auto 0 0; border-radius: 16px 16px 0 0; }
       .bulk-form-grid { grid-template-columns: 1fr; gap: 0; }
       .bulk-bar { bottom: 10px; }
+      .benchmark-grid { grid-template-columns: 1fr; }
     }
+    button:focus-visible, summary:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid rgba(11,99,206,.3); outline-offset: 2px; }
   </style>
 </head>
 <body>
@@ -318,15 +343,120 @@
       const values = [...new Set(models.map(getter))];
       return values.length === 1 ? values[0] : (values.length ? "mixed" : fallback);
     }
+    function scoreSelectionRank(score, contributor) {
+      const comparison = score.comparison || {};
+      const contributorSelected = comparison.contributor_model_id && comparison.contributor_model_id === contributor.id;
+      const selected = comparison.selected_for_entity === true || contributorSelected ? 2 : (comparison.selected_for_entity === false ? 0 : 1);
+      const sourceRank = { primary: 3, secondary: 2, manual: 1 }[score.source_type] || 0;
+      const timestamp = Date.parse(score.collected_at || "") || 0;
+      const evidence = Number(score.evidence?.count ?? comparison.evidence?.count ?? score.observation_count ?? score.vote_count ?? score.session_count ?? 0) || 0;
+      return [selected, score.verified ? 1 : 0, sourceRank, timestamp, evidence, String(contributor.id || "")];
+    }
+    function candidateWins(candidate, current) {
+      if (!current) return true;
+      const left = scoreSelectionRank(candidate.score, candidate.contributor);
+      const right = scoreSelectionRank(current.score, current.contributor);
+      for (let index = 0; index < left.length - 1; index += 1) {
+        if (left[index] !== right[index]) return left[index] > right[index];
+      }
+      return left[left.length - 1].localeCompare(right[right.length - 1]) < 0;
+    }
+    function valueAtPath(payload, path) {
+      return String(path || "").split(".").reduce(
+        (current, part) => current && typeof current === "object" && Object.prototype.hasOwnProperty.call(current, part) ? current[part] : undefined,
+        payload
+      );
+    }
+    function normalizedSignatureValue(value) {
+      if (value === null || value === undefined || value === "") return null;
+      if (Array.isArray(value)) {
+        const items = value.map(normalizedSignatureValue).filter((item) => item !== null);
+        if (!items.length) return null;
+        return items.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+      }
+      if (typeof value === "object") {
+        const items = Object.keys(value).sort().map((key) => [key, normalizedSignatureValue(value[key])]);
+        return items.length ? items : null;
+      }
+      if (typeof value === "string") return value.trim() || null;
+      return value;
+    }
+    function evaluationSignatureKey(score, benchmark) {
+      const dimensions = benchmark?.presentation?.comparison_dimensions || [];
+      const values = dimensions.map((dimension) => {
+        const value = normalizedSignatureValue(valueAtPath(score, dimension));
+        return value === null ? null : [dimension, value];
+      }).filter(Boolean);
+      return JSON.stringify(values);
+    }
+    function scoreWithContributor(score, contributor) {
+      return {
+        ...score,
+        variant_model_id: score.variant_model_id || contributor.id,
+        variant_model_name: score.variant_model_name || contributor.name
+      };
+    }
+    function mergeBenchmarkEvidence(members) {
+      const candidates = new Map();
+      const lookup = benchmarkLookup();
+      const addCandidate = (benchmarkId, score, contributor, primary) => {
+        if (!score || score.value === undefined || score.value === null) return;
+        const configurationKey = String(score.configuration_key || "").trim();
+        const configurationValue = String(score.configuration_value || "").trim();
+        const signature = evaluationSignatureKey(score, lookup[benchmarkId]);
+        const key = JSON.stringify([benchmarkId, configurationKey, configurationValue, signature]);
+        const current = candidates.get(key);
+        const candidate = {
+          benchmarkId, score, contributor, signature,
+          configured: Boolean(configurationKey || configurationValue),
+          primary: Boolean(primary || current?.primary)
+        };
+        if (candidateWins(candidate, current)) candidates.set(key, candidate);
+        else if (current && primary) current.primary = true;
+      };
+      members.forEach((member) => {
+        Object.entries(member.scores || {}).forEach(([benchmarkId, score]) =>
+          addCandidate(benchmarkId, score, member, true));
+        (member.score_configurations || []).forEach((score) => {
+          const benchmarkId = String(score.benchmark_id || "");
+          if (!benchmarkId) return;
+          addCandidate(benchmarkId, score, member, false);
+        });
+      });
+      const benchmarkEvidence = [...candidates.values()].map((candidate) => ({
+        benchmark_id: candidate.benchmarkId,
+        configured: candidate.configured,
+        evaluation_signature: candidate.signature,
+        primary: candidate.primary,
+        score: scoreWithContributor(candidate.score, candidate.contributor)
+      }));
+      const primaryCandidates = new Map();
+      candidates.forEach((candidate) => {
+        if (!candidate.primary) return;
+        if (candidateWins(candidate, primaryCandidates.get(candidate.benchmarkId))) {
+          primaryCandidates.set(candidate.benchmarkId, candidate);
+        }
+      });
+      const scores = {};
+      primaryCandidates.forEach(({ score, contributor }, benchmarkId) => {
+        scores[benchmarkId] = scoreWithContributor(score, contributor);
+      });
+      const scoreConfigurations = benchmarkEvidence.filter((record) => record.configured).map((record) => ({
+        benchmark_id: record.benchmark_id,
+        ...record.score
+      }));
+      return { scores, scoreConfigurations, benchmarkEvidence };
+    }
     function reviewGroups() {
       if (!state.catalog) return [];
       if (state.groupCacheCatalog === state.catalog) return state.groupCache;
       const buckets = new Map();
       state.catalog.models.forEach((model) => {
+        const serverEntityId = String(model.review_entity_id || "").trim();
         const canonicalId = String(model.canonical_model_id || "").trim().toLowerCase();
-        const safeKey = canonicalId && normalizedName(model)
+        const safeKey = serverEntityId || (canonicalId && normalizedName(model)
           ? `canonical:${canonicalId}:${normalizedName(model)}:${roleKey(model)}`
-          : `model:${model.id}`;
+          : `model:${model.id}`);
         if (!buckets.has(safeKey)) buckets.set(safeKey, []);
         buckets.get(safeKey).push(model);
       });
@@ -353,6 +483,7 @@
         const groupedFreshOffers = groupedDestinations.flatMap((destination) =>
           (destination.pricing_offers || []).filter((offer) => !offer.provenance?.stale)
         );
+        const mergedEvidence = mergeBenchmarkEvidence(members);
         return {
           ...representative,
           group_id: groupId,
@@ -363,6 +494,9 @@
           general_approval_status: unanimous(members, approvalStatus, "unreviewed"),
           general_recommendation_status: unanimous(members, recommendationStatus, "unrated"),
           suggested_use_cases: [...suggestions.values()].sort((left, right) => Number(right.fit_score || 0) - Number(left.fit_score || 0)),
+          scores: mergedEvidence.scores,
+          score_configurations: mergedEvidence.scoreConfigurations,
+          benchmark_evidence: mergedEvidence.benchmarkEvidence,
           inference_destinations: groupedDestinations,
           pricing_summary: {
             priced_route_count: new Set(groupedFreshOffers.map((offer) => offer.destination_id)).size,
@@ -435,17 +569,240 @@
         </div>`).join("") + (visibleModels.length < models.length ? `<button class="btn load-more" id="loadMoreModels">Show next ${Math.min(200, models.length - visibleModels.length)} of ${models.length}</button>` : "");
     }
 
-    function topMetrics(model) {
-      const benchmarkLookup = Object.fromEntries((state.catalog?.benchmarks || []).map((item) => [item.id, item]));
-      return Object.entries(model.scores || {}).filter(([, score]) => score && score.value !== undefined).slice(0, 4).map(([id, score]) => ({
-        id, name: benchmarkLookup[id]?.short || benchmarkLookup[id]?.name || label(id), value: score.value, verified: score.verified
-      }));
+    function benchmarkLookup() {
+      return Object.fromEntries((state.catalog?.benchmarks || []).map((item) => [item.id, item]));
     }
-
-    function formatMetric(value) {
+    function benchmarkRoles(benchmark) {
+      const presentation = benchmark?.presentation || {};
+      return presentation.roles || presentation.applicable_roles || [];
+    }
+    function relevantUseCase(model) {
+      const useCases = state.catalog?.use_cases || [];
+      const preferredIds = [
+        model.evidence_context_use_case_id,
+        ...(model.suggested_use_cases || []).map((item) => item.use_case_id || item.id)
+      ].filter(Boolean);
+      for (const id of preferredIds) {
+        const match = useCases.find((item) => item.id === id);
+        if (match) return match;
+      }
+      const roles = new Set(model.model_roles || []);
+      return useCases.find((item) => (item.model_roles || []).some((role) => roles.has(role))) || null;
+    }
+    function benchmarkRecords(model) {
+      const lookup = benchmarkLookup();
+      const context = relevantUseCase(model);
+      const weights = context?.weights || {};
+      const roles = new Set(model.model_roles || []);
+      const records = new Map();
+      const add = (benchmarkId, score, configured = false, evaluationSignature = null) => {
+        if (!benchmarkId || !score || score.value === undefined || score.value === null || benchmarkId === "internal_view") return;
+        const benchmark = lookup[benchmarkId] || { id: benchmarkId, name: label(benchmarkId), short: label(benchmarkId), category: "other", tier: 9 };
+        const applicable = benchmarkRoles(benchmark);
+        const roleRelevant = !applicable.length || applicable.some((role) => roles.has(role));
+        const signature = evaluationSignature ?? evaluationSignatureKey(score, benchmark);
+        const record = {
+          id: benchmarkId,
+          key: JSON.stringify([benchmarkId, score.configuration_key || "", score.configuration_value || "", signature]),
+          benchmark,
+          score,
+          configured,
+          relevance: Number(weights[benchmarkId] || 0) + (roleRelevant ? 0.0001 : 0)
+        };
+        const current = records.get(record.key);
+        const contributor = {id: score.variant_model_id || model.id || ""};
+        const currentContributor = {id: current?.score?.variant_model_id || model.id || ""};
+        if (!current || candidateWins({score, contributor}, {score: current.score, contributor: currentContributor})) {
+          records.set(record.key, record);
+        }
+      };
+      if (Array.isArray(model.benchmark_evidence)) {
+        model.benchmark_evidence.forEach((record) => add(
+          String(record.benchmark_id || ""), record.score, Boolean(record.configured), record.evaluation_signature
+        ));
+      } else {
+        Object.entries(model.scores || {}).forEach(([benchmarkId, score]) => add(benchmarkId, score));
+        (model.score_configurations || []).forEach((score) => add(String(score.benchmark_id || ""), score, true));
+      }
+      return [...records.values()].sort((left, right) =>
+        right.relevance - left.relevance
+        || Number(left.benchmark.tier || 9) - Number(right.benchmark.tier || 9)
+        || Number(Boolean(right.score.verified)) - Number(Boolean(left.score.verified))
+        || String(left.benchmark.name || left.id).localeCompare(String(right.benchmark.name || right.id))
+        || left.key.localeCompare(right.key));
+    }
+    function benchmarkEvidence(model) {
+      const all = benchmarkRecords(model);
+      const seen = new Set();
+      const key = [];
+      for (const record of all) {
+        if (seen.has(record.id)) continue;
+        seen.add(record.id); key.push(record);
+        if (key.length === 4) break;
+      }
+      const lookup = benchmarkLookup();
+      const context = relevantUseCase(model);
+      const declaredRelevantIds = model.relevant_benchmark_ids || [];
+      const contextRelevantIds = [
+        ...Object.entries(context?.weights || {}).filter(([, weight]) => Number(weight) > 0).map(([id]) => id),
+        ...(context?.required_benchmarks || [])
+      ].filter((id) => id && id !== "internal_view");
+      const relevantIds = new Set((contextRelevantIds.length ? contextRelevantIds : declaredRelevantIds)
+        .filter((id) => id && id !== "internal_view"));
+      const presentIds = new Set(all.map((record) => record.id));
+      const missing = [...relevantIds].filter((id) => !presentIds.has(id)).map((id) => lookup[id] || { id, name: label(id) });
+      return { all, key, missing, context };
+    }
+    function formatBenchmarkValue(value, benchmark, appendScalarUnit = true) {
       const number = Number(value);
       if (!Number.isFinite(number)) return String(value ?? "—");
-      return Number.isInteger(number) ? String(number) : number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+      const presentation = benchmark?.presentation || {};
+      const policyScale = presentation.value_kind === "fraction" ? 100 : 1;
+      const scale = Number(presentation.display_scale ?? presentation.scale ?? policyScale);
+      const displayed = number * (Number.isFinite(scale) ? scale : 1);
+      const precision = Math.max(0, Math.min(6, Number(presentation.precision ?? 2)));
+      const formatted = displayed.toLocaleString(undefined, { maximumFractionDigits: precision });
+      const unit = String(presentation.unit || "");
+      if (["percentage", "fraction", "word_error_rate"].includes(presentation.value_kind)) return `${formatted}%`;
+      if (presentation.value_kind === "currency") {
+        const basis = unit.replace(/^USD\s*/, "");
+        return `$${formatted}${basis ? ` ${basis}` : ""}`;
+      }
+      if (presentation.value_kind === "realtime_factor") return `${formatted}×`;
+      if (["duration", "throughput", "count"].includes(presentation.value_kind)) return `${formatted}${unit ? ` ${unit}` : ""}`;
+      if (appendScalarUnit && ["elo", "grade", "index", "score"].includes(presentation.value_kind)) return `${formatted}${unit ? ` ${unit}` : ""}`;
+      return formatted;
+    }
+    function scoreDisplay(score, benchmark) {
+      if (score.display?.label || score.display?.formatted) return String(score.display.label || score.display.formatted);
+      return formatBenchmarkValue(score.display?.value ?? score.value, benchmark, false);
+    }
+    function scoreDisplayUnit(score, benchmark) {
+      const valueKind = benchmark?.presentation?.value_kind;
+      if (!["elo", "grade", "index", "score"].includes(valueKind)) return "";
+      return String(score.display?.unit || benchmark?.presentation?.unit || "");
+    }
+    function percentileLabel(value) {
+      const rounded = Math.round(Number(value));
+      if (!Number.isFinite(rounded)) return "";
+      const mod100 = rounded % 100;
+      const suffix = mod100 >= 11 && mod100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[rounded % 10] || "th");
+      return `${rounded}${suffix} percentile`;
+    }
+    function positionText(position) {
+      if (!position) return "";
+      let text = String(position.label || "").trim();
+      if (!text && Number(position.cohort_size) === 1) return "Only scored comparable model";
+      if (!text && position.rank != null && position.cohort_size != null) {
+        text = `${Number(position.tie_count || 1) > 1 ? "Tied " : ""}#${position.rank} of ${position.cohort_size}`;
+      }
+      const percentile = percentileLabel(position.percentile);
+      if (percentile && !text.toLowerCase().includes("percentile")) text = `${text}${text ? " · " : ""}${percentile}`;
+      return text;
+    }
+    function provenanceLabel(score) {
+      if (!score.verified) return "Source not verified";
+      if (score.source_type === "primary") return "Verified primary source";
+      if (score.source_type === "secondary") return "Verified secondary source";
+      if (score.source_type === "manual") return "Verified manual entry";
+      return "Verified source";
+    }
+    function coverageLabel(comparison) {
+      const coverage = comparison.coverage || {};
+      if (coverage.label) return coverage.label;
+      const scored = coverage.scored_count ?? coverage.scored_model_count;
+      const eligible = coverage.eligible_count ?? coverage.eligible_model_count;
+      return scored != null && eligible != null ? `${scored} of ${eligible} compatible models` : "";
+    }
+    function evidenceLabel(score) {
+      const evidence = score.evidence || score.comparison?.evidence || {};
+      if (evidence.label) return evidence.label;
+      const count = evidence.count ?? score.observation_count ?? score.vote_count ?? score.session_count;
+      const unit = evidence.unit || (score.observation_count != null ? "observations" : score.vote_count != null ? "votes" : score.session_count != null ? "sessions" : "");
+      return count != null ? `${count}${unit ? ` ${unit}` : ""}` : "Not reported";
+    }
+    function distributionLine(position, benchmark) {
+      const distribution = position?.distribution || {};
+      if (distribution.median == null) return "";
+      const median = formatBenchmarkValue(distribution.median, benchmark);
+      const p25 = distribution.p25 == null ? "" : formatBenchmarkValue(distribution.p25, benchmark);
+      const p75 = distribution.p75 == null ? "" : formatBenchmarkValue(distribution.p75, benchmark);
+      return `Median ${median}${p25 && p75 ? ` · middle 50% ${p25}–${p75}` : ""}`;
+    }
+    function percentileTrack(position) {
+      const percentile = Number(position?.percentile);
+      if (!Number.isFinite(percentile) || Number(position?.cohort_size || 0) < 20) return "";
+      const width = Math.max(0, Math.min(100, percentile));
+      return `<div class="percentile-track" role="img" aria-label="${escapeHtml(`${percentileLabel(percentile)}; lower-performing to higher-performing`)}"><span style="width:${width}%"></span></div>`;
+    }
+    function safeHttpUrl(value) {
+      if (!value) return null;
+      try {
+        const parsed = new URL(String(value));
+        return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : null;
+      } catch (_) { return null; }
+    }
+    function renderBenchmarkCard(record) {
+      const { benchmark, score } = record;
+      const comparison = score.comparison || {};
+      const strict = comparison.strict;
+      const broad = comparison.broad;
+      const status = comparison.status || "unavailable";
+      const strictText = status === "invalid" ? "Data check needed" : (positionText(strict) || (status === "limited" ? "Comparable cohort is limited" : "Comparison unavailable"));
+      const broadText = positionText(broad);
+      const role = label((benchmarkRoles(benchmark)[0] || "model"));
+      const broadCohort = broad?.cohort_label || `All scored ${role} models`;
+      const distribution = distributionLine(strict, benchmark);
+      const coverage = coverageLabel(comparison);
+      const warnings = Array.isArray(comparison.warnings) ? comparison.warnings : (comparison.warnings ? [comparison.warnings] : []);
+      const contributor = comparison.contributor_model_name || comparison.selected_contributor_model_name || score.variant_model_name || comparison.contributor_model_id || comparison.selected_contributor_model_id || score.variant_model_id;
+      const configuration = record.configured ? `${label(score.configuration_key || "configuration")}: ${score.configuration_value || "default"}` : "Default benchmark configuration";
+      const sourceUrl = score.source_url || benchmark.url;
+      const safeSourceUrl = safeHttpUrl(sourceUrl);
+      const sourceLink = safeSourceUrl ? `<a href="${escapeHtml(safeSourceUrl)}" target="_blank" rel="noreferrer">Open source record</a>` : (sourceUrl ? "Unsupported source link" : "Not supplied");
+      const displayContext = [scoreDisplayUnit(score, benchmark), score.display?.direction_label || (benchmark.higher_is_better === false ? "Lower is better" : "Higher is better")].filter(Boolean).join(" · ");
+      return `<article class="benchmark-card" data-status="${escapeHtml(status)}">
+        <div class="benchmark-card-head"><div><div class="benchmark-name">${escapeHtml(benchmark.short || benchmark.name || record.id)}${record.configured ? ` · ${escapeHtml(score.configuration_value || label(score.configuration_key))}` : ""}</div><div class="benchmark-source">${escapeHtml(benchmark.source || benchmark.category || "Benchmark")}</div></div>${strict?.position_band || strict?.band ? badge(strict.position_band || strict.band) : (status === "invalid" ? badge("data check") : "")}</div>
+        <div class="metric-value"><strong>${escapeHtml(scoreDisplay(score, benchmark))}</strong><span>${escapeHtml(displayContext)}</span></div>
+        <div class="position-primary">${escapeHtml(strictText)}</div>
+        ${percentileTrack(strict)}
+        ${broadText ? `<div class="position-secondary">${escapeHtml(broadCohort)}: ${escapeHtml(broadText)}</div>` : ""}
+        <div class="benchmark-context">
+          ${distribution ? `<div>${escapeHtml(distribution)}</div>` : ""}
+          <div><strong>Evidence:</strong> ${escapeHtml(evidenceLabel(score))}</div>
+          ${coverage ? `<div><strong>Database coverage:</strong> ${escapeHtml(coverage)}</div>` : ""}
+          <div><strong>Provenance:</strong> ${escapeHtml(provenanceLabel(score))}</div>
+          ${warnings.map((warning) => `<div class="benchmark-warning">${escapeHtml(warning)}</div>`).join("")}
+        </div>
+        <details class="metric-details"><summary>Evidence details</summary><dl>
+          <dt>Benchmark</dt><dd>${escapeHtml(benchmark.name || record.id)}</dd>
+          <dt>Configuration</dt><dd>${escapeHtml(configuration)}</dd>
+          <dt>Contributor</dt><dd>${escapeHtml(contributor || "This source record")}</dd>
+          <dt>Collected</dt><dd>${escapeHtml(formatDate(score.collected_at))}</dd>
+          <dt>Comparison as of</dt><dd>${escapeHtml(formatDate(comparison.as_of))}</dd>
+          <dt>Source</dt><dd>${sourceLink}</dd>
+          ${benchmark.description ? `<dt>Meaning</dt><dd>${escapeHtml(benchmark.description)}</dd>` : ""}
+          ${score.methodology ? `<dt>Methodology</dt><dd>${escapeHtml(score.methodology)}</dd>` : ""}
+          ${score.notes ? `<dt>Notes</dt><dd>${escapeHtml(score.notes)}</dd>` : ""}
+        </dl></details>
+      </article>`;
+    }
+    function renderBenchmarkSection(model) {
+      const evidence = benchmarkEvidence(model);
+      const roleNames = (model.model_roles || []).map(label).join(" / ") || "this model type";
+      const missingHtml = evidence.missing.length ? `<details class="missing-evidence"><summary>Missing relevant evidence (${evidence.missing.length})</summary><ul>${evidence.missing.map((benchmark) => `<li>${escapeHtml(benchmark.short || benchmark.name || benchmark.id)}</li>`).join("")}</ul></details>` : "";
+      if (!evidence.all.length) return `<div class="reason">No benchmark evidence has been imported for ${escapeHtml(roleNames)} models. A missing result is not a weak result.</div>${missingHtml}`;
+      const groups = new Map();
+      evidence.all.forEach((record) => {
+        const category = record.benchmark.category || "other";
+        if (!groups.has(category)) groups.set(category, []);
+        groups.get(category).push(record);
+      });
+      const allHtml = [...groups.entries()].map(([category, records]) => `<div class="benchmark-category"><h4>${escapeHtml(label(category))}</h4><div class="benchmark-grid">${records.map(renderBenchmarkCard).join("")}</div></div>`).join("");
+      return `<div class="benchmark-grid">${evidence.key.map(renderBenchmarkCard).join("")}</div>
+        <details class="benchmark-all"><summary>Show all ${evidence.all.length} benchmark result${evidence.all.length === 1 ? "" : "s"}</summary>${allHtml}</details>
+        ${missingHtml}
+        <p class="verification-note">Source verification confirms the record and provenance; it does not mean an independent benchmark rerun or production approval. Positions describe only the evidence currently imported into this database.</p>`;
     }
 
     function renderSuggestions(model) {
@@ -506,15 +863,14 @@
     function renderDetail() {
       const model = activeModel();
       if (!model || !state.draft) { els.detail.innerHTML = '<div class="empty">Choose a model to review.</div>'; return; }
-      const metrics = topMetrics(model);
       els.detail.innerHTML = `
         <div class="detail-header">
           <div><p class="eyebrow">General model review</p><h2>${escapeHtml(model.name)}</h2><div class="detail-sub">${escapeHtml(model.provider)} · ${escapeHtml(label(model.type || "model"))}${model.source_record_count > 1 ? ` · ${model.source_record_count} source records combined` : ""}</div></div>
           <div class="detail-actions">${badge(approvalStatus(model))}${badge(recommendationStatus(model))}</div>
         </div>
         <section class="section">
-          <div class="section-head"><div><h3>Performance evidence</h3><p>The strongest currently available benchmark signals for this model.</p></div></div>
-          <div class="metrics">${metrics.length ? metrics.map((metric) => `<div class="metric"><span>${escapeHtml(metric.name)}</span><strong>${escapeHtml(formatMetric(metric.value))}</strong><span>${metric.verified ? "Verified" : "Unverified"}</span></div>`).join("") : '<div class="reason">No benchmark scores available.</div>'}</div>
+          <div class="section-head"><div><h3>Benchmark position</h3><p>How this model compares with similar scored models in this database.</p></div><span class="badge">Key benchmarks</span></div>
+          ${renderBenchmarkSection(model)}
         </section>
         <section class="section">
           <div class="section-head"><div><h3>Pricing by provider</h3><p>Current published route prices with source and verification date. Prices older than 30 days are hidden.</p></div><span class="badge">${Number(model.pricing_summary?.priced_route_count || (model.inference_destinations || []).filter((item) => (item.pricing_offers || []).some((offer) => !offer.provenance?.stale)).length)} priced</span></div>

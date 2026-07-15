@@ -155,6 +155,9 @@ def build_model_ranking(
                 "notes": score.get("notes"),
                 "variant_model_id": score.get("variant_model_id"),
                 "variant_model_name": score.get("variant_model_name"),
+                "display": score.get("display"),
+                "evidence": score.get("evidence"),
+                "comparison": score.get("comparison"),
             }
         )
 

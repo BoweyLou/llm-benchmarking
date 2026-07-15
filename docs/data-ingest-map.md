@@ -137,10 +137,12 @@ flowchart LR
    runs each adapter through `fetch_raw()` and `normalize()`.
 3. Each adapter produces raw source records and normalized score candidates.
    The update engine resolves names, creates missing models, promotes trusted
-   metadata through explicit precedence rules, upserts the best score per model
-   and benchmark, and stores raw records for auditability. Trusted source
-   release dates are promoted with precision, confidence, source URL, and
-   verification timestamp.
+   metadata through explicit precedence rules, upserts the selected score per
+   model, benchmark, and evaluation configuration, and stores raw records for
+   auditability. Score selection follows source provenance and evidence depth;
+   it does not choose whichever candidate is numerically most favorable.
+   Trusted source release dates are promoted with precision, confidence, source
+   URL, and verification timestamp.
 4. Post-source phases refresh identity/canonical model fields, reapply provider
    origin baselines, pull all-modality OpenRouter model metadata, run configured
    model discovery for full updates, refresh Hugging Face model cards and
@@ -161,6 +163,71 @@ WAL file modification time, while `last_sync_at`, `last_sync_status`, and
 `last_sync_log_id` come from the newest `update_log` row ordered by start time
 and id. Running updates use their start time; terminal updates use their
 completion time.
+
+## Benchmark Presentation and Comparison
+
+The backend owns the authoritative 92 benchmark definitions and a typed
+presentation policy for every active definition. Bootstrap upserts that
+code-owned set and marks database definitions absent from it inactive while
+retaining their score history. Each policy declares its value kind, unit,
+precision, direction, valid range, compatible model roles, evidence-count unit,
+and evaluation-signature fields.
+Stored raw scores remain unchanged; API and export consumers receive formatted
+display values from this registry. Browser code must not infer meaning from a
+benchmark name. Bounds are metric-specific: for example, SWE-bench percentages
+are limited to 0–100, while word error rate may legitimately exceed 100 and has
+no generic percentage bound.
+
+Comparison uses the canonical review entity and evaluation configuration to
+avoid counting source aliases as separate models. Competing observations are
+resolved deterministically by verified primary, verified secondary, verified
+manual, then equivalent unverified provenance, followed by collection date,
+evidence depth, and stable model ID. Complementary benchmark observations from
+grouped aliases are retained.
+
+Two role-aware cohorts are calculated:
+
+- **Strict/comparable** requires the same benchmark, a compatible role,
+  configuration, and all available signature fields declared by the benchmark
+  policy, such as task set, dataset revision and split, Arena methodology, or
+  system scaffold.
+- **Broad context** requires the same benchmark and a compatible role. It is
+  labelled as mixed configurations or task sets when stricter metadata differs
+  or is unavailable.
+
+The cached comparison index calculates competition rank, tie count, a tie-aware
+percentile, min/p10/p25/median/p75/p90/max, and coverage of valid scored
+canonical models among active compatible models. Ranking, tie detection, and
+distributions use stored normalized numeric values; presentation precision and
+unit conversion do not manufacture ties. The index is invalidated after score
+or catalog updates so catalog generation does not issue a query per model or
+card. Every result carries an `as_of` timestamp because its position changes as
+the database grows.
+
+Cohort size controls what can be claimed. Cohorts of at least 20 may show rank,
+percentile, a distribution track, and a descriptive position band; cohorts of
+5–19 show rank and percentile with `Small cohort`; cohorts of 2–4 show rank with
+`Very small cohort`; and a cohort of one reports `Only scored comparable model`.
+Invalid, non-finite, or out-of-policy values are excluded and marked `Data check
+needed`. Position bands—Leading, Strong, Mid-pack, Below most, and Trailing—are
+database-position descriptions, not universal quality or production-approval
+ratings. Verified provenance remains separate from evidence depth and does not
+claim independent reproduction.
+
+The root catalog, `/api/models`, `/api/review/catalog`, and ranking breakdowns
+carry each score's compact display and comparison objects. `/api/benchmarks`
+publishes the complete policy and aggregate distributions. Review catalog schema
+version 4 is additive; review snapshots remain version 3 and no database
+migration is required. JSON and JSONL preserve nested objects, normalized score
+CSV flattens comparison fields, clean model CSV summarizes comparison counts,
+and raw and banking bundles retain their compatible comparison context. The
+compatibility copy of a latest configured observation can appear in both
+`scores` and `score_configurations`; review presentation, model-level counts,
+and normalized score CSV suppress that exact duplicate while retaining records
+whose configuration or policy-declared evaluation signature differs.
+Benchmark position is evidence alongside, not an input secretly added to, the
+weighted use-case ranking score. The architectural rationale is recorded in
+[ADR 0005](adr/0005-benchmark-presentation-and-comparison-contract.md).
 
 ## Current Source Inventory
 
@@ -208,10 +275,10 @@ collapse cannot pass merely because a handful of names still match.
 | LiveBench | `LiveBenchAdapter` | Official static leaderboard overall and category scores with release and task-score metadata. | Task-level LiveBench scores remain raw metadata until category ingestion is stable in production. |
 | LiveCodeBench | `LiveCodeBenchAdapter` | Code-generation Pass@1 for the default window plus difficulty, platform, release-window, and contamination metadata. | Contamination flags should be inspected before using the score as a sole coding signal. |
 | MMMU | `MmmuAdapter` | Validation overall plus stable test and MMMU-Pro companion metrics; human/random baselines are skipped. | Use validation overall as the continuity anchor; companion rows add coverage. |
-| MTEB | `MtebAdapter` | Retrieval, reranking, blended retrieval/reranking, and RTEB Finance averages from official per-task result files plus the official `mteb/results` dataset, with task, revision, language, public/private, and role metadata. | Used only for embedding/reranker model-role rankings; generator use cases remain separated. RTEB Finance is a finance-domain retrieval signal, not a generator answer-quality score. |
+| MTEB | `MtebAdapter` | Retrieval, reranking, blended retrieval/reranking, and RTEB Finance averages from official per-task result files plus the official `mteb/results` dataset, with structured observation counts and compact task, language, coherent revision, dataset-revision, split, and subset signatures. The adapter deterministically probes every listed model and every eligible retrieval/reranking task file with no per-model or global task cap, then fetches in bounded concurrent batches with retry and backoff. Confirmed `404`/`410` entries are reported as stale inventory; the accessible set is resolved to one coherent revision per model. | Used only for embedding/reranker model-role rankings; generator use cases remain separated. A transient, parse, shard, incomplete-task, or RTEB row failure aborts the source before score replacement, preserving prior MTEB scores. A fully transient dataset-viewer outage may use a size-bounded, revision-pinned official Parquet fallback only when all seven RTEB tasks are present. Update-log coverage must reconcile probed, accessible, stale, selected, and fetched totals, and later-source-order models must produce evidence when accessible eligible files exist. RTEB Finance is a finance-domain retrieval signal, not a generator answer-quality score. |
 | Open ASR Leaderboard | `OpenAsrLeaderboardAdapter` | English short-form, multilingual, and long-form word error rate plus RTFx speed from the Hugging Face Open ASR Leaderboard CSV datasets. | Used only for `speech_to_text` model-role rankings; WER is lower-is-better quality evidence, while RTFx is companion speed evidence. |
 | RAGTruth | `RagtruthAdapter` | Overall and task-level hallucination rates for published held-out corpus evidence. | Historical corpus evidence; lower is better. |
-| SWE-bench | `SwebenchAdapter` | Verified best single-model submission plus Lite, Full, Multilingual, and Multimodal companion split scores; submitter/scaffold metadata is preserved. | Harness and scaffold effects still require review when interpreting scores. |
+| SWE-bench | `SwebenchAdapter` | Verified best single-model submission plus Lite, Full, Multilingual, and Multimodal companion split scores; submitter, scaffold, split, and system metadata are preserved. Upstream `resolved` values are percentage points, so `1.4` is stored and displayed as `1.4%`, not rescaled to `140%`. | Non-finite or out-of-range 0–100 observations are excluded until a targeted refresh replaces legacy invalid values. Harness and scaffold effects still require review when interpreting scores. |
 | tau-bench | `TaubenchAdapter` | Standard text and voice domain Pass^1 scores with domain, mode, retrieval, and submission metadata. | Custom or aggregate systems are skipped for model score rows. |
 | Terminal-Bench | `TerminalBenchAdapter` | Best verified single-model Terminal-Bench score plus agent, version, integration method, date, and stderr metadata. | Phase-two only; distinguish model capability from best agent-system evidence. |
 | FaithJudge | `FaithJudgeAdapter` | Aggregate RAG hallucination rate plus task-level FaithBench/RAGTruth summarization, QA, and data-to-text rates. | Lower is better; task rows prevent one aggregate from carrying all RAG faithfulness meaning. |
@@ -279,7 +346,12 @@ roles. Generator use cases default to `["generator"]`; `retrieval_embeddings`
 and `retrieval_reranking` rank only embedding or reranker models, while
 `voice_to_text` ranks only speech-to-text models and `text_to_speech` ranks
 only speech-synthesis models. tau-bench voice rows remain voice-agent evidence,
-not primary text-to-speech synthesis quality.
+not primary text-to-speech synthesis quality. The same compatibility boundary
+applies to benchmark comparison cohorts; roles with no imported benchmark
+evidence receive an empty state rather than a cross-role comparison.
+In the review detail, missing relevant evidence comes from the active use case's
+positive weights and required benchmarks. Role-compatible defaults are used
+only when the active context declares no relevant benchmark IDs.
 
 ### Catalog Discovery Boundary
 
