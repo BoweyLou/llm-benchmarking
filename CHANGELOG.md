@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0 - 2026-07-17
+
+- Added the NVIDIA Enterprise RAG Blueprint family to configured catalog discovery, including ingestion, OCR, page/layout, table, graphic, parsing, safety, Riva ASR, embedding, reranking, and multimodal components. The catalog now represents operational RAG dependencies with dedicated roles instead of treating the Blueprint as generator-only coverage.
+- Corrected Llama Nemotron Rerank VL 1B V2 source classification to `reranker`, including its model role metadata, so retrieval filtering and ranking do not misclassify it as a generator.
+- Made the root `VERSION` file the single SemVer release source for the FastAPI service and the served LLM Model Tool. Proxmox deployment now validates the local release before syncing and verifies both the remote release file and visible review UI version after restart.
+
 ## 0.10.1 - 2026-07-15
 
 - Made model startup seeding decision-safe by limiting existing-row updates to the eight fields owned by the code seed: name, provider identity, type, roles, release date, context window, and active status. The model seed upsert now leaves general and legacy approvals, recommendations, usage policy, catalog lifecycle, enrichment, pricing, capabilities, family/discovery metadata, and future non-seed model columns untouched; authoritative benchmark upserts are unchanged.

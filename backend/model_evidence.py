@@ -339,6 +339,14 @@ def _primary_model_type(role_set: set[str], model: dict[str, Any]) -> str:
         return "reranker"
     if "multimodal_embedding" in role_set:
         return "multimodal_embedding"
+    if "document_layout" in role_set:
+        return "document_layout"
+    if "document_parsing" in role_set:
+        return "document_parsing"
+    if "ocr" in role_set:
+        return "ocr"
+    if "content_safety" in role_set:
+        return "content_safety"
     if "text_to_speech" in role_set:
         return "text_to_speech"
     if "speech_to_text" in role_set:

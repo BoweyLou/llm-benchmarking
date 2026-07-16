@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 
 import httpx
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from .database import (
@@ -160,6 +160,10 @@ SOURCE_METADATA_PROMOTION_LABELS = {
     "ifeval": "IFEval",
 }
 MODEL_ROLE_GENERATOR = "generator"
+MODEL_ROLE_DOCUMENT_LAYOUT = "document_layout"
+MODEL_ROLE_DOCUMENT_PARSING = "document_parsing"
+MODEL_ROLE_OCR = "ocr"
+MODEL_ROLE_CONTENT_SAFETY = "content_safety"
 MODEL_ROLE_SPEECH_TO_TEXT = "speech_to_text"
 MODEL_ROLE_TEXT_TO_SPEECH = "text_to_speech"
 VALID_MODEL_ROLES = {
@@ -167,6 +171,10 @@ VALID_MODEL_ROLES = {
     "embedding",
     "reranker",
     "multimodal_embedding",
+    MODEL_ROLE_DOCUMENT_LAYOUT,
+    MODEL_ROLE_DOCUMENT_PARSING,
+    MODEL_ROLE_OCR,
+    MODEL_ROLE_CONTENT_SAFETY,
     MODEL_ROLE_SPEECH_TO_TEXT,
     MODEL_ROLE_TEXT_TO_SPEECH,
 }
@@ -200,6 +208,7 @@ TEXT_GENERATION_CAPABILITY_MARKERS = {
     "tool-use",
     "tool-choice",
 }
+RERANKING_CAPABILITY_MARKERS = {"rerank", "reranker", "reranking", "ranking"}
 TEXT_TO_SPEECH_NAME_RE = re.compile(
     r"(?<![a-z0-9])(?:tts|text-to-speech|speech-synthesis|gpt-4o-mini-tts|tts-1(?:-hd)?|sonic(?:[-\s]\d(?:\.\d)?)?|kokoro|orpheus|zonos|chatterbox|aura|polly|playdialog|play3|chirp(?:[-\s]*3)?[-:\s]*hd|grok-voice-tts|gemini.*tts|voxtral.*tts|mai-voice|eleven(?:labs)?|multilingual-v2|flash-v2-5|speech-\d+(?:\.\d+)?(?:[-\s](?:hd|turbo))?)(?![a-z0-9])",
     re.IGNORECASE,
@@ -623,6 +632,21 @@ def _merge_inferred_audio_roles(
     capabilities: Iterable[str] | None = None,
     names: Iterable[Any] = (),
 ) -> list[str]:
+    return _merge_inferred_model_roles(
+        current_roles_value,
+        capabilities=capabilities,
+        names=names,
+    )
+
+
+def _merge_inferred_model_roles(
+    current_roles_value: Any,
+    *,
+    capabilities: Iterable[str] | None = None,
+    names: Iterable[Any] = (),
+) -> list[str]:
+    """Infer specialised roles from provider metadata without retaining a generator fallback."""
+
     roles = _normalise_model_roles(current_roles_value, default=(MODEL_ROLE_GENERATOR,))
     capability_values = list(capabilities or [])
     tts_detected = _values_indicate_text_to_speech(*capability_values, *names)
@@ -635,7 +659,23 @@ def _merge_inferred_audio_roles(
         roles.append(MODEL_ROLE_SPEECH_TO_TEXT)
     if tts_detected:
         roles.append(MODEL_ROLE_TEXT_TO_SPEECH)
+    reranker_detected = _values_indicate_reranking(*capability_values, *names)
+    if reranker_detected:
+        # Router payloads often describe every service with a text modality.
+        # A reranker is not a text-generation model, so discard the historical
+        # generator default rather than producing a misleading dual role.
+        roles = [role for role in roles if role != MODEL_ROLE_GENERATOR]
+        roles.append("reranker")
     return sorted(dict.fromkeys(roles))
+
+
+def _values_indicate_reranking(*values: Any) -> bool:
+    for value in values:
+        for text in _iter_text_values(value):
+            normalized = text.strip().lower().replace("_", "-")
+            if any(marker in normalized for marker in RERANKING_CAPABILITY_MARKERS):
+                return True
+    return False
 
 
 def _humanize_source_name(source_name: str) -> str:
@@ -4924,6 +4964,50 @@ def _merge_model_roles(model_id: str, metadata: dict[str, Any]) -> bool:
         return True
 
 
+def _merge_catalog_model_roles(current_roles: Iterable[str], catalog_roles: Iterable[str]) -> list[str]:
+    """Merge catalog roles, letting an authoritative pure reranker correct a bad generator default."""
+
+    current = _normalise_model_roles(list(current_roles), default=())
+    authoritative = _normalise_model_roles(list(catalog_roles), default=())
+    if authoritative == ["reranker"]:
+        return sorted(dict.fromkeys([role for role in current if role != MODEL_ROLE_GENERATOR] + authoritative))
+    return sorted(dict.fromkeys([*current, *authoritative]))
+
+
+def _merge_catalog_aliases_into_canonical(
+    conn: Any,
+    *,
+    canonical_id: str,
+    catalog_model_id: str,
+    roles: Iterable[str],
+) -> None:
+    """Fold router aliases (including ``:free``) into an authoritative catalog id."""
+
+    aliases = fetch_all(
+        conn,
+        select(models_table.c.id).where(
+            models_table.c.id != canonical_id,
+            or_(
+                models_table.c.openrouter_canonical_slug == catalog_model_id,
+                models_table.c.openrouter_model_id == catalog_model_id,
+                models_table.c.openrouter_model_id.like(f"{catalog_model_id}:%"),
+            ),
+        ),
+    )
+    for alias in aliases:
+        _merge_model_into_target(conn, str(alias["id"]), canonical_id)
+    if aliases:
+        current = fetch_one(conn, select(models_table.c.model_roles_json).where(models_table.c.id == canonical_id))
+        if current is not None:
+            conn.execute(
+                update(models_table)
+                .where(models_table.c.id == canonical_id)
+                .values(model_roles_json=json.dumps(_merge_catalog_model_roles(
+                    _normalise_model_roles(current.get("model_roles_json"), default=()), roles
+                ), ensure_ascii=True))
+            )
+
+
 def _load_identity_override_indexes(
     conn,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
@@ -5144,12 +5228,13 @@ def _ensure_discovered_catalog_model(
     if small_model_candidate is None and parameter_count_b is not None:
         small_model_candidate = parameter_count_b <= 15.0
     huggingface_repo_id = _clean_text(item.get("huggingface_repo_id"))
+    catalog_model_id = _clean_text(item.get("catalog_model_id"))
     identity = infer_model_identity(name, provider, model_id)
 
     with ENGINE.begin() as conn:
         provider_id = _ensure_provider_row(provider, conn=conn)
         existing = fetch_one(conn, select(models_table).where(models_table.c.id == model_id))
-        if existing is None:
+        if existing is None and not catalog_model_id:
             resolved = _resolve_model_id(name)
             if resolved:
                 existing = fetch_one(conn, select(models_table).where(models_table.c.id == resolved))
@@ -5164,7 +5249,7 @@ def _ensure_discovered_catalog_model(
                 values["provider_id"] = provider_id
 
             current_roles = _normalise_model_roles(existing.get("model_roles_json"), default=())
-            merged_roles = sorted(dict.fromkeys([*current_roles, *roles]))
+            merged_roles = _merge_catalog_model_roles(current_roles, roles)
             if merged_roles and merged_roles != current_roles:
                 values["model_roles_json"] = json.dumps(merged_roles, ensure_ascii=True)
 
@@ -5232,6 +5317,10 @@ def _ensure_discovered_catalog_model(
             if not values:
                 return model_id, "unchanged"
             conn.execute(update(models_table).where(models_table.c.id == model_id).values(**values))
+            if catalog_model_id:
+                _merge_catalog_aliases_into_canonical(
+                    conn, canonical_id=model_id, catalog_model_id=catalog_model_id, roles=roles
+                )
             return model_id, "updated"
 
         values = {
@@ -5293,6 +5382,10 @@ def _ensure_discovered_catalog_model(
         stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
         result = conn.execute(stmt)
         if result.rowcount:
+            if catalog_model_id:
+                _merge_catalog_aliases_into_canonical(
+                    conn, canonical_id=model_id, catalog_model_id=catalog_model_id, roles=roles
+                )
             return model_id, "created"
 
     return model_id, "unchanged"
@@ -6155,7 +6248,6 @@ def _refresh_openrouter_model_metadata() -> None:
             unmatched_items=list(exact_release_items.values()),
             existing_canonical_model_ids=existing_canonical_model_ids,
             verified_at=verified_at,
-            allow_existing_canonical_model_ids=True,
         )
     # Persist the complete router price shape separately from the deprecated
     # model-level input/output compatibility values.
@@ -6887,12 +6979,12 @@ def _openrouter_model_values(
         values["price_output_per_mtok"] = output_price
     if openrouter_capabilities:
         values["capabilities_json"] = json.dumps(openrouter_capabilities, ensure_ascii=True)
-    inferred_roles = _merge_inferred_audio_roles(
+    inferred_roles = _merge_inferred_model_roles(
         current_model_roles if current_model_roles is not None else (MODEL_ROLE_GENERATOR,),
         capabilities=openrouter_capabilities,
         names=(model_id, canonical_slug, item.get("name"), huggingface_repo_id),
     )
-    if MODEL_ROLE_SPEECH_TO_TEXT in inferred_roles or MODEL_ROLE_TEXT_TO_SPEECH in inferred_roles:
+    if inferred_roles != _normalise_model_roles(current_model_roles, default=(MODEL_ROLE_GENERATOR,)):
         values["model_roles_json"] = json.dumps(inferred_roles, ensure_ascii=True)
 
     return values

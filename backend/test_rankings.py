@@ -597,6 +597,40 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(len(source_runs), 1)
         self.assertEqual(len(raw_records), 1)
 
+    def test_blueprint_catalog_imports_all_roles_and_corrects_existing_vl_reranker(self) -> None:
+        self.add_model(
+            "llama-nemotron-rerank-vl-1b-v2",
+            "Llama Nemotron Rerank VL 1B V2",
+            provider="NVIDIA",
+            model_roles=["generator"],
+        )
+        summary = update_engine.refresh_model_discovery_metadata(
+            source="catalog", family="nvidia-enterprise-rag-blueprint"
+        )
+        self.assertEqual(summary["records_found"], 15)
+        models = {model["id"]: model for model in update_engine.list_models()}
+        self.assertEqual(models["llama-nemotron-rerank-vl-1b-v2"]["model_roles"], ["reranker"])
+        self.assertEqual(models["nemotron-page-elements-v3"]["model_roles"], ["document_layout"])
+        self.assertEqual(models["nemotron-ocr-v1"]["model_roles"], ["ocr"])
+        self.assertEqual(models["llama-3_1-nemoguard-8b-topic-control"]["model_roles"], ["content_safety"])
+
+    def test_openrouter_normal_and_free_aliases_create_one_canonical_row(self) -> None:
+        self.add_model("anchor", "Anchor")
+        items = [
+            {"id": "nvidia/llama-nemotron-rerank-vl-1b-v2", "canonical_slug": "nvidia/llama-nemotron-rerank-vl-1b-v2", "name": "NVIDIA: Llama Nemotron Rerank VL 1B V2", "created": 1780000000},
+            {"id": "nvidia/llama-nemotron-rerank-vl-1b-v2:free", "canonical_slug": "nvidia/llama-nemotron-rerank-vl-1b-v2", "name": "NVIDIA: Llama Nemotron Rerank VL 1B V2 (free)", "created": 1780000000},
+        ]
+        with patch.object(update_engine, "_fetch_openrouter_models", return_value=items), patch.object(
+            update_engine.pricing, "sync_openrouter_items"
+        ):
+            update_engine._refresh_openrouter_model_metadata()
+        with get_connection(self.engine) as conn:
+            rows = fetch_all(conn, select(models_table).where(
+                models_table.c.openrouter_canonical_slug == "nvidia/llama-nemotron-rerank-vl-1b-v2"
+            ))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(json.loads(rows[0]["model_roles_json"]), ["reranker"])
+
     def test_provider_api_model_discovery_adds_rich_provider_catalog_rows(self) -> None:
         catalog = {
             "id": "openai",

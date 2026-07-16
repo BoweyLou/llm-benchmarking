@@ -12,6 +12,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from backend import catalog_export, main, recommendation_engine, review_workbench, update_engine
+from backend.versioning import read_app_version
 from backend.database import (
     get_engine,
     init_db,
@@ -85,10 +86,13 @@ class ReviewWorkbenchTests(unittest.TestCase):
             catalog_response = client.get("/api/review/catalog")
 
         self.assertEqual(app_response.status_code, 200)
+        self.assertEqual(main.app.version, read_app_version())
         self.assertIn("<title>LLM Model Tool</title>", app_response.text)
         self.assertIn('<div class="brand-mark">LLM</div>', app_response.text)
         self.assertIn("<h1>Model Tool</h1>", app_response.text)
         self.assertIn("General model review", app_response.text)
+        self.assertIn(f'<span id="appVersion">Version {main.app.version}</span>', app_response.text)
+        self.assertNotIn("{{APP_VERSION}}", app_response.text)
         self.assertIn("Suggested use cases", app_response.text)
         self.assertIn("These are not approvals or recommendations", app_response.text)
         self.assertIn("Your general decision", app_response.text)

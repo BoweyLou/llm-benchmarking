@@ -28,6 +28,14 @@ require_command python3
 
 cd "$ROOT_DIR"
 
+LOCAL_VERSION="$(PYTHONPATH="$ROOT_DIR" python3 - <<'PY'
+from backend.versioning import read_app_version
+
+print(read_app_version())
+PY
+)"
+printf 'Validated local release version: %s\n' "$LOCAL_VERSION"
+
 TAILSCALE_IP="${TAILSCALE_IP:-$(ssh -o BatchMode=yes "$REMOTE_HOST" 'tailscale ip -4 | head -n 1')}"
 if [[ -z "$TAILSCALE_IP" ]]; then
   printf 'Could not resolve a Tailscale IPv4 address on %s.\n' "$REMOTE_HOST" >&2
@@ -62,7 +70,7 @@ rsync -az --delete \
   "$ROOT_DIR/" "$REMOTE_HOST:$REMOTE_APP_DIR/"
 
 ssh -o BatchMode=yes "$REMOTE_HOST" \
-  "REMOTE_APP_DIR='$REMOTE_APP_DIR' REMOTE_STATE_DIR='$REMOTE_STATE_DIR' REMOTE_DB_PATH='$REMOTE_DB_PATH' REMOTE_ENV_FILE='$REMOTE_ENV_FILE' REMOTE_SERVICE='$REMOTE_SERVICE' REMOTE_USER='$REMOTE_USER' REMOTE_PORT='$REMOTE_PORT' TAILSCALE_IP='$TAILSCALE_IP' TAILNET_TRUSTED_WRITES='$TAILNET_TRUSTED_WRITES' ADMIN_TOKEN='${ADMIN_TOKEN:-}' bash -s" <<'REMOTE'
+  "REMOTE_APP_DIR='$REMOTE_APP_DIR' REMOTE_STATE_DIR='$REMOTE_STATE_DIR' REMOTE_DB_PATH='$REMOTE_DB_PATH' REMOTE_ENV_FILE='$REMOTE_ENV_FILE' REMOTE_SERVICE='$REMOTE_SERVICE' REMOTE_USER='$REMOTE_USER' REMOTE_PORT='$REMOTE_PORT' TAILSCALE_IP='$TAILSCALE_IP' TAILNET_TRUSTED_WRITES='$TAILNET_TRUSTED_WRITES' LOCAL_VERSION='$LOCAL_VERSION' ADMIN_TOKEN='${ADMIN_TOKEN:-}' bash -s" <<'REMOTE'
 set -euo pipefail
 
 if ! getent passwd "$REMOTE_USER" >/dev/null; then
@@ -108,6 +116,11 @@ chown "root:$REMOTE_USER" "$REMOTE_ENV_FILE"
 chmod 0640 "$REMOTE_ENV_FILE"
 
 cd "$REMOTE_APP_DIR"
+remote_version="$(tr -d '\r\n' < VERSION)"
+if [[ "$remote_version" != "$LOCAL_VERSION" ]]; then
+  printf 'Remote VERSION mismatch: expected %s, got %s.\n' "$LOCAL_VERSION" "$remote_version" >&2
+  exit 1
+fi
 if [[ ! -x .venv/bin/python ]] || ! .venv/bin/python -m pip --version >/dev/null 2>&1; then
   rm -rf .venv
   if ! python3 -m venv .venv; then
@@ -139,6 +152,7 @@ systemctl is-active --quiet "$REMOTE_SERVICE"
 REMOTE
 
 CATALOG_JSON="$(mktemp)"
+REVIEW_HTML="$(mktemp)"
 catalog_ready="no"
 for attempt in $(seq 1 30); do
   if curl --fail --silent --show-error "http://$TAILSCALE_IP:$REMOTE_PORT/api/review/catalog" -o "$CATALOG_JSON"; then
@@ -149,7 +163,7 @@ for attempt in $(seq 1 30); do
 done
 if [[ "$catalog_ready" != "yes" ]]; then
   printf 'Review catalog did not become ready at http://%s:%s/api/review/catalog.\n' "$TAILSCALE_IP" "$REMOTE_PORT" >&2
-  rm -f "$CATALOG_JSON"
+  rm -f "$CATALOG_JSON" "$REVIEW_HTML"
   exit 1
 fi
 python3 - "$CATALOG_JSON" <<'PY'
@@ -168,7 +182,20 @@ print(
     f"{summary.get('family_count')} families"
 )
 PY
-rm -f "$CATALOG_JSON"
+
+curl --fail --silent --show-error "http://$TAILSCALE_IP:$REMOTE_PORT/review" -o "$REVIEW_HTML"
+python3 - "$REVIEW_HTML" "$LOCAL_VERSION" <<'PY'
+import sys
+from pathlib import Path
+
+page = Path(sys.argv[1]).read_text(encoding="utf-8")
+version = sys.argv[2]
+expected = f'<span id="appVersion">Version {version}</span>'
+if expected not in page:
+    raise SystemExit(f"review UI did not report the deployed version {version}")
+print(f"Verified deployed app version: {version}")
+PY
+rm -f "$CATALOG_JSON" "$REVIEW_HTML"
 
 printf 'Deployed LLM Model Tool: http://%s:%s/review\n' "$TAILSCALE_IP" "$REMOTE_PORT"
 printf 'Trusted tailnet writes: %s\n' "$TAILNET_TRUSTED_WRITES"

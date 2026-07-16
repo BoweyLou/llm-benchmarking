@@ -57,6 +57,30 @@
     },
     {
       "source": "catalog",
+      "family": "nvidia-enterprise-rag-blueprint",
+      "provider": "NVIDIA",
+      "model_type": "proprietary",
+      "source_url": "https://build.nvidia.com/nvidia/build-an-enterprise-rag-pipeline",
+      "models": [
+        {"id": "nemotron-3-super-120b-a12b", "name": "Nemotron 3 Super 120B A12B", "catalog_model_id": "nvidia/nemotron-3-super-120b-a12b", "model_roles": ["generator"], "capabilities": ["text->text", "rag", "nim"]},
+        {"id": "llama-nemotron-embed-vl-1b-v2", "name": "Llama Nemotron Embed VL 1B V2", "catalog_model_id": "nvidia/llama-nemotron-embed-vl-1b-v2", "model_roles": ["multimodal_embedding"], "capabilities": ["multimodal-embedding", "retrieval", "vision", "nim"]},
+        {"id": "llama-nemotron-embed-1b-v2", "name": "Llama Nemotron Embed 1B V2", "catalog_model_id": "nvidia/llama-nemotron-embed-1b-v2", "model_roles": ["embedding"], "capabilities": ["embedding", "retrieval", "optional", "nim"]},
+        {"id": "llama-nemotron-rerank-1b-v2", "name": "Llama Nemotron Rerank 1B V2", "catalog_model_id": "nvidia/llama-nemotron-rerank-1b-v2", "model_roles": ["reranker"], "capabilities": ["reranking", "retrieval", "nim"]},
+        {"id": "llama-nemotron-rerank-vl-1b-v2", "name": "Llama Nemotron Rerank VL 1B V2", "catalog_model_id": "nvidia/llama-nemotron-rerank-vl-1b-v2", "model_roles": ["reranker"], "capabilities": ["reranking", "multimodal", "vision", "retrieval", "nim"]},
+        {"id": "nemotron-page-elements-v3", "name": "Nemotron Page Elements V3", "catalog_model_id": "nvidia/nemotron-page-elements-v3", "model_roles": ["document_layout"], "capabilities": ["document-layout", "document-ingestion", "nim"]},
+        {"id": "nemotron-table-structure-v1", "name": "Nemotron Table Structure V1", "catalog_model_id": "nvidia/nemotron-table-structure-v1", "model_roles": ["document_layout"], "capabilities": ["table-structure", "document-layout", "document-ingestion", "nim"]},
+        {"id": "nemotron-graphic-elements-v1", "name": "Nemotron Graphic Elements V1", "catalog_model_id": "nvidia/nemotron-graphic-elements-v1", "model_roles": ["document_layout"], "capabilities": ["graphic-elements", "document-layout", "document-ingestion", "nim"]},
+        {"id": "nemotron-ocr-v1", "name": "Nemotron OCR V1", "catalog_model_id": "nvidia/nemotron-ocr-v1", "model_roles": ["ocr"], "capabilities": ["ocr", "document-ingestion", "nim"]},
+        {"id": "nemotron-3-nano-omni-30b-a3b-reasoning", "name": "Nemotron 3 Nano Omni 30B A3B Reasoning", "catalog_model_id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "model_roles": ["generator"], "capabilities": ["text->text", "multimodal", "optional", "nim"]},
+        {"id": "nemotron-nano-12b-v2-vl", "name": "Nemotron Nano 12B V2 VL", "catalog_model_id": "nvidia/nemotron-nano-12b-v2-vl", "model_roles": ["generator"], "capabilities": ["text->text", "vision", "optional", "nim"]},
+        {"id": "nemotron-parse", "name": "Nemotron Parse", "catalog_model_id": "nvidia/nemotron-parse", "model_roles": ["document_parsing"], "capabilities": ["document-parsing", "document-ingestion", "optional", "nim"]},
+        {"id": "llama-3_1-nemoguard-8b-content-safety", "name": "Llama 3.1 NemoGuard 8B Content Safety", "catalog_model_id": "nvidia/llama-3_1-nemoguard-8b-content-safety", "model_roles": ["content_safety"], "capabilities": ["content-safety", "guardrail", "optional", "nim"]},
+        {"id": "llama-3_1-nemoguard-8b-topic-control", "name": "Llama 3.1 NemoGuard 8B Topic Control", "catalog_model_id": "nvidia/llama-3_1-nemoguard-8b-topic-control", "model_roles": ["content_safety"], "capabilities": ["topic-control", "content-safety", "guardrail", "optional", "nim"]},
+        {"id": "parakeet-ctc-1_1b-asr", "name": "Parakeet CTC 1.1B ASR", "catalog_model_id": "nvidia/parakeet-ctc-1_1b-asr", "model_roles": ["speech_to_text"], "capabilities": ["speech-to-text", "asr", "optional", "nim"]}
+      ]
+    },
+    {
+      "source": "catalog",
       "family": "ibm-watsonx-retrieval",
       "provider": "IBM",
       "model_type": "proprietary",
@@ -666,8 +690,8 @@
         "nvidia/*Rerank*"
       ],
       "exclude_patterns": [
-        "*vl-*",
-        "*VL-*"
+        "*embed-vl*",
+        "*Embed*VL*"
       ],
       "trusted_mirrors": [],
       "model_roles": ["reranker"],

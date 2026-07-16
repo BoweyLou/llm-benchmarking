@@ -1426,6 +1426,10 @@ _VALID_MODEL_ROLES = {
     "embedding",
     "reranker",
     "multimodal_embedding",
+    "document_layout",
+    "document_parsing",
+    "ocr",
+    "content_safety",
     _SPEECH_TO_TEXT_ROLE,
     _TEXT_TO_SPEECH_ROLE,
 }

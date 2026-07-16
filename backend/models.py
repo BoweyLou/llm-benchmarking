@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SourceType = Literal["primary", "secondary", "manual"]
-ModelRole = Literal["generator", "embedding", "reranker", "multimodal_embedding", "speech_to_text", "text_to_speech"]
+ModelRole = Literal["generator", "embedding", "reranker", "multimodal_embedding", "document_layout", "document_parsing", "ocr", "content_safety", "speech_to_text", "text_to_speech"]
 RawSourceResolutionStatus = Literal["resolved", "skipped_aggregate", "skipped_unmatched_listing", "unresolved"]
 UpdateStatus = Literal["running", "completed", "failed"]
 SourceRunStatus = Literal["running", "completed", "failed", "skipped"]

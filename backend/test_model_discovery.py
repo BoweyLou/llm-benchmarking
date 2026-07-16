@@ -133,11 +133,22 @@ class ModelDiscoveryTests(unittest.TestCase):
         }
 
         self.assertIn("nvidia-retrieval", catalog_families)
+        self.assertIn("nvidia-enterprise-rag-blueprint", catalog_families)
         self.assertIn("ibm-watsonx-retrieval", catalog_families)
         self.assertIn("nvidia-embedding", huggingface_families)
         self.assertIn("nvidia-reranking", huggingface_families)
         self.assertIn("ibm-granite-embedding", huggingface_families)
         self.assertIn("ibm-granite-reranking", huggingface_families)
+
+    def test_nvidia_enterprise_rag_blueprint_catalog_has_all_component_roles(self) -> None:
+        entries = model_discovery.catalog_discovery_entries(family="nvidia-enterprise-rag-blueprint")
+        self.assertEqual(len(entries), 1)
+        models = {item["id"]: item["model_roles"] for item in model_discovery.catalog_discovery_models(entries[0])}
+        self.assertEqual(len(models), 15)
+        self.assertEqual(models["llama-nemotron-rerank-vl-1b-v2"], ["reranker"])
+        self.assertEqual(models["nemotron-ocr-v1"], ["ocr"])
+        self.assertEqual(models["nemotron-parse"], ["document_parsing"])
+        self.assertEqual(models["llama-3_1-nemoguard-8b-content-safety"], ["content_safety"])
 
     def test_baseline_includes_restricted_frontier_catalog_models(self) -> None:
         catalog_models = {

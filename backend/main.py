@@ -84,6 +84,7 @@ from .review_workbench import (
     export_review_snapshot,
     import_review_snapshot,
 )
+from .versioning import read_app_version
 
 ADMIN_TOKEN_ENV_VAR = "LLM_BENCHMARKING_ADMIN_TOKEN"
 ADMIN_TOKEN_HEADER = "x-llm-benchmarking-admin-token"
@@ -149,7 +150,7 @@ def require_local_admin(request: Request) -> None:
         )
 
 
-app = FastAPI(title="LLM Benchmarking API", version="0.1.0")
+app = FastAPI(title="LLM Benchmarking API", version=read_app_version())
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 
@@ -165,7 +166,7 @@ def root_model_metadata_list() -> list[dict]:
 
 @app.get("/review", response_class=HTMLResponse, include_in_schema=False)
 def review_workbench_app() -> str:
-    return REVIEW_APP_PATH.read_text(encoding="utf-8")
+    return REVIEW_APP_PATH.read_text(encoding="utf-8").replace("{{APP_VERSION}}", app.version)
 
 
 @app.get("/api/benchmarks", response_model=list[BenchmarkOut])
