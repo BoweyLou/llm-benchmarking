@@ -864,6 +864,11 @@ independent: recommendation records preference or suitability, while usage
 classification records governance permissions. A status of mixed means the
 grouped source records disagree.
 
+General recommendation values are recommended, acceptable, legacy_supported,
+not_recommended, and unrated. acceptable means okay for normal use but not the
+preferred option. The raw value unrated is displayed in the review UI as
+Not Assessed and means no recommendation decision has been recorded.
+
 Suggested use cases are read-only metric evidence. They are not approval
 decisions and do not include legacy per-use-case approval records.
 

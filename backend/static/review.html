@@ -249,7 +249,7 @@
         </label>
         <label class="field-label">Recommendation
           <select class="select" id="recommendationFilter">
-            <option value="">Any recommendation</option><option value="unrated">Unrated</option><option value="recommended">Recommended</option><option value="legacy_supported">Legacy Supported</option><option value="not_recommended">Not recommended</option>
+            <option value="">Any recommendation</option><option value="recommended">Recommended</option><option value="acceptable">Acceptable</option><option value="legacy_supported">Legacy Supported</option><option value="not_recommended">Not recommended</option><option value="unrated">Not Assessed</option>
           </select>
         </label>
         <label class="field-label">Usage Classification
@@ -305,7 +305,7 @@
       <p class="intro">Choose only the fields you want to change. This decision applies to each selected model, never to an individual use case.</p>
       <div class="bulk-form-grid">
         <label class="field-label">Approval<select class="select" id="bulkApproval"><option value="">Leave unchanged</option><option value="approved">Approved</option><option value="not_approved">Not approved</option><option value="unreviewed">Unreviewed</option></select></label>
-        <label class="field-label">Recommendation<select class="select" id="bulkRecommendation"><option value="">Leave unchanged</option><option value="recommended">Recommended</option><option value="legacy_supported">Legacy Supported</option><option value="not_recommended">Not recommended</option><option value="unrated">Unrated</option></select></label>
+        <label class="field-label">Recommendation<select class="select" id="bulkRecommendation"><option value="">Leave unchanged</option><option value="recommended">Recommended</option><option value="acceptable">Acceptable</option><option value="legacy_supported">Legacy Supported</option><option value="not_recommended">Not recommended</option><option value="unrated">Not Assessed</option></select></label>
         <label class="field-label">Usage Classification<select class="select" id="bulkUsageClassification"><option value="">Leave unchanged</option><option value="standard">Standard</option><option value="restricted">Restricted</option><option value="prohibited">Prohibited</option><option value="unclassified">Unclassified</option></select></label>
       </div>
       <label class="field-label">Shared rationale<textarea class="textarea" id="bulkNotes" placeholder="Why does this decision apply to the selected models?"></textarea></label>
@@ -375,11 +375,12 @@
       return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
     }
     function label(value) { return String(value || "").replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase()); }
+    function recommendationLabel(value) { return value === "unrated" ? "Not Assessed" : label(value); }
     function formatDate(value) { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString(); }
     function approvalStatus(model) { return model.general_approval_status || (model.general_approved_for_use ? "approved" : (model.general_approval_updated_at ? "not_approved" : "unreviewed")); }
     function recommendationStatus(model) { return model.general_recommendation_status === "discouraged" ? "not_recommended" : (model.general_recommendation_status || "unrated"); }
     function usageClassification(model) { return model.usage_classification || "unclassified"; }
-    function badge(status) { return `<span class="badge ${escapeHtml(String(status).replaceAll("_", "-"))}">${escapeHtml(label(status))}</span>`; }
+    function badge(status, displayLabel = label(status)) { return `<span class="badge ${escapeHtml(String(status).replaceAll("_", "-"))}">${escapeHtml(displayLabel)}</span>`; }
 
     function normalizedName(model) { return String(model.name || model.canonical_model_name || "").trim().toLowerCase().replace(/\s+/g, " "); }
     function roleKey(model) { return [...(model.model_roles || [model.type || "model"])].sort().join("|"); }
@@ -615,7 +616,7 @@
           <button class="model-open" data-open-group-id="${escapeHtml(model.group_id)}">
             <div><div class="model-name">${escapeHtml(model.name)}</div><div class="provider">${escapeHtml(model.provider)}${model.source_record_count > 1 ? ` · ${model.source_record_count} source records` : ""}</div></div>
             <span class="badge">${(model.suggested_use_cases || []).length} fits</span>
-            <div class="row-meta">${badge(approvalStatus(model))}${badge(recommendationStatus(model))}${badge(usageClassification(model))}</div>
+            <div class="row-meta">${badge(approvalStatus(model))}${badge(recommendationStatus(model), recommendationLabel(recommendationStatus(model)))}${badge(usageClassification(model))}</div>
           </button>
         </div>`).join("") + (visibleModels.length < models.length ? `<button class="btn load-more" id="loadMoreModels">Show next ${Math.min(200, models.length - visibleModels.length)} of ${models.length}</button>` : "");
     }
@@ -907,8 +908,8 @@
       }).join("")}</div>`;
     }
 
-    function choiceGroup(name, values, active) {
-      return `<div class="choice-grid">${values.map((value) => `<button class="choice ${value === active ? "active" : ""}" data-choice-group="${name}" data-choice-value="${value}">${escapeHtml(label(value))}</button>`).join("")}</div>`;
+    function choiceGroup(name, values, active, labeler = label) {
+      return `<div class="choice-grid">${values.map((value) => `<button class="choice ${value === active ? "active" : ""}" data-choice-group="${name}" data-choice-value="${value}">${escapeHtml(labeler(value))}</button>`).join("")}</div>`;
     }
 
     function renderDetail() {
@@ -917,7 +918,7 @@
       els.detail.innerHTML = `
         <div class="detail-header">
           <div><p class="eyebrow">General model review</p><h2>${escapeHtml(model.name)}</h2><div class="detail-sub">${escapeHtml(model.provider)} · ${escapeHtml(label(model.type || "model"))}${model.source_record_count > 1 ? ` · ${model.source_record_count} source records combined` : ""}</div></div>
-          <div class="detail-actions">${badge(approvalStatus(model))}${badge(recommendationStatus(model))}${badge(usageClassification(model))}</div>
+          <div class="detail-actions">${badge(approvalStatus(model))}${badge(recommendationStatus(model), recommendationLabel(recommendationStatus(model)))}${badge(usageClassification(model))}</div>
         </div>
         <section class="section">
           <div class="section-head"><div><h3>Benchmark position</h3><p>How this model compares with similar scored models in this database.</p></div><span class="badge">Key benchmarks</span></div>
@@ -931,7 +932,7 @@
           <div class="section-head"><div><h3>Your model decisions</h3><p>Record model-level decisions. They apply across the catalog, not to individual use cases.</p></div></div>
           <div class="decision-grid">
             <div class="decision-group"><span>Approval</span>${choiceGroup("approval", ["approved", "not_approved", "unreviewed"], state.draft.approval)}</div>
-            <div class="decision-group"><span>Recommendation</span>${choiceGroup("recommendation", ["recommended", "legacy_supported", "not_recommended", "unrated"], state.draft.recommendation)}</div>
+            <div class="decision-group"><span>Recommendation</span>${choiceGroup("recommendation", ["recommended", "acceptable", "legacy_supported", "not_recommended", "unrated"], state.draft.recommendation, recommendationLabel)}</div>
             <div class="decision-group"><span>Usage Classification</span>${choiceGroup("usageClassification", ["standard", "restricted", "prohibited", "unclassified"], state.draft.usageClassification)}</div>
           </div>
           <div class="policy-grid">

@@ -255,7 +255,7 @@ def _catalog() -> dict[str, object]:
         "inference_destinations": [],
     }
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "generated_at": EXPORTED_AT,
         "models": [alpha_a, alpha_b, beta],
     }
@@ -263,7 +263,7 @@ def _catalog() -> dict[str, object]:
 
 def _edge_catalog(destinations: list[dict[str, object]]) -> dict[str, object]:
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "generated_at": EXPORTED_AT,
         "models": [
             {
@@ -301,7 +301,7 @@ def _archive_rows(
 class ReviewModelGuideExportTests(unittest.TestCase):
     def test_archive_has_readable_models_costs_and_legend_members(self) -> None:
         catalog = {
-            "schema_version": 5,
+            "schema_version": 6,
             "generated_at": "2026-07-15T05:30:00Z",
             "models": [
                 {
@@ -311,7 +311,7 @@ class ReviewModelGuideExportTests(unittest.TestCase):
                     "provider": "Example Provider",
                     "model_roles": ["generator"],
                     "general_approval_status": "approved",
-                    "general_recommendation_status": "recommended",
+                    "general_recommendation_status": "acceptable",
                     "usage_classification": "standard",
                     "suggested_use_cases": [],
                     "inference_destinations": [],
@@ -334,11 +334,14 @@ class ReviewModelGuideExportTests(unittest.TestCase):
         self.assertEqual(list(model_rows[0]), review_export.MODEL_FIELDS)
         self.assertEqual(list(cost_rows[0]), review_export.INFERENCE_COST_FIELDS)
         self.assertEqual(model_rows[0]["model_group_id"], "alpha-group")
+        self.assertEqual(model_rows[0]["general_recommendation_status"], "acceptable")
         self.assertEqual(cost_rows[0]["price_evidence_state"], "no_known_route")
         self.assertIn("Suggested use cases are read-only metric evidence", readme)
         self.assertIn("curated_fallback", readme)
         self.assertIn("possible route, not confirmed model availability", readme)
         self.assertIn("custom", readme)
+        self.assertIn("acceptable means okay for normal use", readme)
+        self.assertIn("unrated is displayed in the review UI as\nNot Assessed", readme)
 
     def test_grouped_decisions_are_mixed_only_on_source_disagreement(self) -> None:
         _, models, _, readme = _archive_rows()
@@ -362,7 +365,7 @@ class ReviewModelGuideExportTests(unittest.TestCase):
 
     def test_missing_server_owned_review_entity_id_fails_closed(self) -> None:
         catalog = {
-            "schema_version": 5,
+            "schema_version": 6,
             "models": [
                 {
                     "id": "missing-review-entity",
@@ -770,7 +773,7 @@ class ReviewModelGuideExportTests(unittest.TestCase):
 
     def test_au_route_without_fresh_au_specific_pair_is_explicit(self) -> None:
         catalog = {
-            "schema_version": 5,
+            "schema_version": 6,
             "models": [
                 {
                     "id": "au-no-price",

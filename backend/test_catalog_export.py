@@ -178,7 +178,7 @@ class CatalogExportTests(unittest.TestCase):
                 "huggingface_last_modified_at": "2026-06-25T18:30:00Z",
                 "model_roles": ["embedding", "reranker"],
                 "relevant_benchmark_ids": ["benchmark", "missing-benchmark"],
-                "general_recommendation_status": "legacy_supported",
+                "general_recommendation_status": "acceptable",
                 "usage_classification": "restricted",
                 "usage_classification_notes": "Approved users only.",
                 "usage_classification_updated_at": "2026-07-16T06:07:08Z",
@@ -259,7 +259,7 @@ class CatalogExportTests(unittest.TestCase):
         self.assertEqual(rows[0]["limited_score_count"], "0")
         self.assertEqual(rows[0]["leading_score_count"], "1")
         self.assertEqual(rows[0]["missing_relevant_benchmark_count"], "1")
-        self.assertEqual(rows[0]["general_recommendation_status"], "legacy_supported")
+        self.assertEqual(rows[0]["general_recommendation_status"], "acceptable")
         self.assertEqual(rows[0]["usage_classification"], "restricted")
         self.assertEqual(rows[0]["usage_classification_notes"], "Approved users only.")
         self.assertEqual(rows[0]["usage_classification_updated_at"], "2026-07-16T06:07:08Z")

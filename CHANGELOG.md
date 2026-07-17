@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.0 - 2026-07-17
+
+- Added model-level `Acceptable` as a completed general recommendation for models that are okay for normal use but are not preferred.
+- Renamed the model-level `Unrated` presentation to `Not Assessed` while preserving the stored/API `unrated` compatibility value and its unset decision semantics.
+- Advanced the review catalog to schema 6 and snapshots to schema 5, with snapshot imports remaining compatible with versions 1 through 5; legacy per-use-case recommendation and Usage Classification contracts are unchanged.
+
 ## 0.12.0 - 2026-07-17
 
 - Split model recommendation from governance: Recommendation now uses `Recommended`, `Legacy Supported`, `Not Recommended`, or `Unrated`, while Usage Classification independently uses `Standard`, `Restricted`, `Prohibited`, or `Unclassified`.

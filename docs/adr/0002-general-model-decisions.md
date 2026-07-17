@@ -21,9 +21,12 @@ confidence, reasons, warnings, and controls for each use case.
 Human review has three model-level decisions:
 
 - general approval: `approved`, `not_approved`, or `unreviewed`;
-- general recommendation: `recommended`, `legacy_supported`,
-  `not_recommended`, or `unrated`. `legacy_supported` means the model remains
-  usable when necessary while migration to a recommended option is preferred;
+- general recommendation: `recommended`, `acceptable`, `legacy_supported`,
+  `not_recommended`, or `unrated`. `acceptable` means the model is okay for
+  normal use but is not the preferred option. `legacy_supported` means the model
+  remains usable when necessary while migration to a recommended option is
+  preferred. The raw `unrated` compatibility value is displayed as
+  `Not Assessed` and means no decision has been recorded;
 - usage classification: `standard`, `restricted`, `prohibited`, or
   `unclassified`.
 
@@ -71,8 +74,9 @@ meet all three conditions stay separate.
   changing source data.
 - Suggested use cases explain likely fit without implying authorization.
 - New databases and upgraded databases gain usage-classification columns.
-- Review snapshot schema 4 includes both axes; imports accept schemas 1 through
-  4, and older general `restricted` snapshots receive the migration mapping.
+- Review snapshot schema 5 includes both axes and the `acceptable` recommendation;
+  imports accept schemas 1 through 5, and older general `restricted` snapshots
+  receive the migration mapping.
 - Clean exports expose both axes and suggested-use-case summaries; the
   legacy use-case approval sidecar remains available for audit compatibility.
 - Legacy clients continue to work, but new integrations should use

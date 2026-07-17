@@ -307,10 +307,13 @@ Saved decisions write to SQLite:
 - `models.general_recommendation_status`,
   `models.general_recommendation_notes`, and
   `models.general_recommendation_updated_at` store one general recommendation:
-  `Recommended`, `Legacy Supported`, `Not recommended`, or `Unrated`. Use
-  `Legacy Supported` when a model remains usable if necessary but should be
-  replaced by a recommended option. Upgrades and legacy API inputs normalize
-  general `Discouraged` to `Not recommended`.
+  `Recommended`, `Acceptable`, `Legacy Supported`, `Not recommended`, or
+  `Not Assessed`. `Acceptable` means okay for normal use but not the preferred
+  option. `Legacy Supported` means a model remains usable if necessary but
+  should be replaced by a recommended option. The stored/API value for
+  `Not Assessed` remains `unrated` for compatibility and means no recommendation
+  decision has been saved. Upgrades and legacy API inputs normalize general
+  `Discouraged` to `Not recommended`.
 - `models.usage_classification`, `models.usage_classification_notes`, and
   `models.usage_classification_updated_at` store the independent governance
   classification: `Standard`, `Restricted`, `Prohibited`, or `Unclassified`.
@@ -330,7 +333,7 @@ Select a model, review its Key benchmark position, expandable evidence, and
 metric-derived suggested use cases, then save one general approval and one
 general recommendation plus one usage classification. Use `Needs a decision`
 to find models whose approval is still `Unreviewed`, recommendation is still
-`Unrated`, or usage classification is still `Unclassified`. Recommendation and
+`Not Assessed`, or usage classification is still `Unclassified`. Recommendation and
 usage classification do not rewrite one another; record any access boundary in
 the shared decision rationale.
 

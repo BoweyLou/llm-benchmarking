@@ -861,7 +861,7 @@ def _normalize_general_recommendation_status(value: Any) -> str:
     normalized = str(value or "").strip().lower()
     if normalized == RECOMMENDATION_STATUS_DISCOURAGED:
         return RECOMMENDATION_STATUS_NOT_RECOMMENDED
-    if normalized in {"unrated", "recommended", "legacy_supported", "not_recommended"}:
+    if normalized in {"unrated", "recommended", "acceptable", "legacy_supported", "not_recommended"}:
         return normalized
     return RECOMMENDATION_STATUS_UNRATED
 

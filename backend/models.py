@@ -23,6 +23,7 @@ RecommendationStatusOut = Literal["unrated", "recommended", "not_recommended", "
 GeneralRecommendationStatusIn = Literal[
     "unrated",
     "recommended",
+    "acceptable",
     "legacy_supported",
     "not_recommended",
 ]

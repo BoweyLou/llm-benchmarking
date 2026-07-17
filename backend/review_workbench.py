@@ -32,13 +32,14 @@ from .database import (
 )
 from .model_evidence import enrich_models_with_selection_evidence
 
-CATALOG_SCHEMA_VERSION = 5
-SNAPSHOT_SCHEMA_VERSION = 4
+CATALOG_SCHEMA_VERSION = 6
+SNAPSHOT_SCHEMA_VERSION = 5
 GENERAL_RECOMMENDATION_STATUSES = (
-    "unrated",
     "recommended",
+    "acceptable",
     "legacy_supported",
     "not_recommended",
+    "unrated",
 )
 USAGE_CLASSIFICATIONS = ("unclassified", "standard", "restricted", "prohibited")
 
@@ -438,7 +439,7 @@ def import_review_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Import a review snapshot into the current SQLite database."""
     update_engine.bootstrap()
     snapshot_schema_version = int(snapshot.get("schema_version") or 0)
-    if snapshot_schema_version not in {1, 2, 3, SNAPSHOT_SCHEMA_VERSION}:
+    if snapshot_schema_version not in set(range(1, SNAPSHOT_SCHEMA_VERSION + 1)):
         raise ValueError(f"Unsupported review snapshot schema version: {snapshot.get('schema_version')}")
 
     created_manual_models = 0
@@ -588,7 +589,10 @@ def _build_facets(
         "model_roles": _counts_to_list(role_counts),
         "capabilities": _counts_to_list(capability_counts),
         "general_approvals": _counts_to_list(general_approval_counts),
-        "general_recommendations": _counts_to_list(general_recommendation_counts),
+        "general_recommendations": [
+            {"id": status, "name": status, "count": general_recommendation_counts[status]}
+            for status in GENERAL_RECOMMENDATION_STATUSES
+        ],
         "usage_classifications": _counts_to_list(usage_classification_counts),
         "approvals": _counts_to_list(approval_counts),
     }

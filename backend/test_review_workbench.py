@@ -104,12 +104,19 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Usage Classification", app_response.text)
         self.assertIn('id="usageClassificationFilter"', app_response.text)
         self.assertIn('id="bulkUsageClassification"', app_response.text)
+        self.assertIn("Acceptable", app_response.text)
         self.assertIn("Legacy Supported", app_response.text)
+        self.assertIn("Not Assessed", app_response.text)
+        self.assertNotIn(">Unrated<", app_response.text)
+        self.assertEqual(app_response.text.count('value="acceptable"'), 2)
         self.assertEqual(app_response.text.count('value="legacy_supported"'), 2)
         self.assertIn(
-            '["recommended", "legacy_supported", "not_recommended", "unrated"]',
+            '["recommended", "acceptable", "legacy_supported", "not_recommended", "unrated"]',
             app_response.text,
         )
+        self.assertIn('function recommendationLabel(value) { return value === "unrated" ? "Not Assessed"', app_response.text)
+        self.assertIn('recommendation_status: state.draft.recommendation', app_response.text)
+        self.assertIn('payload.recommendation_status = recommendation', app_response.text)
         self.assertIn(
             '["standard", "restricted", "prohibited", "unclassified"]',
             app_response.text,
@@ -176,7 +183,7 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Unreviewed", app_response.text)
         self.assertEqual(catalog_response.status_code, 200)
         payload = catalog_response.json()
-        self.assertEqual(payload["schema_version"], 5)
+        self.assertEqual(payload["schema_version"], 6)
         self.assertIsNotNone(payload["database_updated_at"])
         self.assertIsNone(payload["last_sync_at"])
         self.assertIsNone(payload["last_sync_status"])
@@ -196,6 +203,14 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn(
             "legacy_supported",
             {item["id"] for item in payload["facets"]["general_recommendations"]},
+        )
+        self.assertIn(
+            "acceptable",
+            {item["id"] for item in payload["facets"]["general_recommendations"]},
+        )
+        self.assertEqual(
+            [item["id"] for item in payload["facets"]["general_recommendations"]],
+            ["recommended", "acceptable", "legacy_supported", "not_recommended", "unrated"],
         )
         self.assertNotIn(
             "restricted",
@@ -251,6 +266,9 @@ function section(start, end) {
   if (from < 0 || to < 0) throw new Error(`Missing section: ${start}`);
   return source.slice(from, to);
 }
+eval(section("    function label", "    function normalizedName"));
+if (recommendationLabel("acceptable") !== "Acceptable") throw new Error("Acceptable recommendation label was not rendered");
+if (recommendationLabel("unrated") !== "Not Assessed") throw new Error("Unrated recommendation was not rendered as Not Assessed");
 const benchmark = {presentation: {comparison_dimensions: ["source_metadata.task_names"], value_kind: "elo", unit: "Elo"}};
 function benchmarkLookup() { return {mteb_retrieval: benchmark}; }
 eval(section("    function scoreSelectionRank", "    function reviewGroups"));
@@ -635,6 +653,23 @@ global.document = {
 
         self.assertEqual(response.status_code, 422)
 
+    def test_acceptable_is_not_accepted_by_legacy_use_case_route(self) -> None:
+        os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
+        self._insert_review_model("general-acceptable-only-status-model")
+
+        with patch("backend.main.bootstrap"):
+            response = TestClient(main.app).post(
+                "/api/review/decisions",
+                json={
+                    "model_ids": ["general-acceptable-only-status-model"],
+                    "use_case_ids": ["customer_support"],
+                    "recommendation_status": "acceptable",
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+
+        self.assertEqual(response.status_code, 422)
+
     def test_restricted_is_rejected_by_general_model_decision_route(self) -> None:
         os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
         self._insert_review_model("general-restricted-invalid")
@@ -863,6 +898,59 @@ global.document = {
         self.assertIsNone(reset["usage_classification_updated_at"])
         self.assertTrue(review_workbench._model_needs_decision(reset))
 
+    def test_acceptable_is_completed_and_unrated_clears_recommendation_decision(self) -> None:
+        os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
+        self._insert_review_model("acceptable-model")
+        client = TestClient(main.app)
+
+        with patch("backend.main.bootstrap"):
+            acceptable_response = client.post(
+                "/api/review/model-decisions",
+                json={
+                    "model_ids": ["acceptable-model"],
+                    "approval_status": "approved",
+                    "recommendation_status": "acceptable",
+                    "recommendation_notes": "Okay for normal use; prefer the recommended option.",
+                    "usage_classification": "standard",
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+
+        self.assertEqual(acceptable_response.status_code, 200)
+        self.assertEqual(acceptable_response.json()["recommendation_status"], "acceptable")
+        catalog = review_workbench.build_review_catalog()
+        model = next(item for item in catalog["models"] if item["id"] == "acceptable-model")
+        self.assertEqual(model["general_recommendation_status"], "acceptable")
+        self.assertEqual(
+            model["general_recommendation_notes"],
+            "Okay for normal use; prefer the recommended option.",
+        )
+        self.assertIsNotNone(model["general_recommendation_updated_at"])
+        self.assertFalse(review_workbench._model_needs_decision(model))
+        facet_counts = {item["id"]: item["count"] for item in catalog["facets"]["general_recommendations"]}
+        self.assertEqual(facet_counts["acceptable"], 1)
+
+        with patch("backend.main.bootstrap"):
+            unrated_response = client.post(
+                "/api/review/model-decisions",
+                json={
+                    "model_ids": ["acceptable-model"],
+                    "recommendation_status": "unrated",
+                    "recommendation_notes": "This must be discarded.",
+                },
+                headers={main.ADMIN_TOKEN_HEADER: "secret-token"},
+            )
+
+        self.assertEqual(unrated_response.status_code, 200)
+        cleared = next(
+            item for item in review_workbench.build_review_catalog()["models"]
+            if item["id"] == "acceptable-model"
+        )
+        self.assertEqual(cleared["general_recommendation_status"], "unrated")
+        self.assertIsNone(cleared["general_recommendation_notes"])
+        self.assertIsNone(cleared["general_recommendation_updated_at"])
+        self.assertTrue(review_workbench._model_needs_decision(cleared))
+
     def test_model_decision_policy_round_trips_through_catalog_snapshot_and_csv(self) -> None:
         os.environ[main.ADMIN_TOKEN_ENV_VAR] = "secret-token"
         self._insert_review_model("gpt-5-6-sol")
@@ -893,7 +981,7 @@ global.document = {
         self.assertEqual(model["general_recommendation_status"], "recommended")
         self.assertEqual(model["usage_classification"], "restricted")
         snapshot = review_workbench.export_review_snapshot()
-        self.assertEqual(snapshot["schema_version"], 4)
+        self.assertEqual(snapshot["schema_version"], 5)
         policy_row = next(row for row in snapshot["model_approvals"] if row["id"] == "gpt-5-6-sol")
         self.assertEqual(policy_row["usage_classification"], "restricted")
         self.assertEqual(policy_row["usage_classification_notes"], "Approved team access only.")
@@ -1128,8 +1216,8 @@ global.document = {
             model_ids=["snapshot-manual-model"],
             approval_status="approved",
             approval_notes="Snapshot general model approval.",
-            recommendation_status="legacy_supported",
-            recommendation_notes="Snapshot legacy-supported recommendation.",
+            recommendation_status="acceptable",
+            recommendation_notes="Snapshot acceptable recommendation.",
             usage_classification="prohibited",
             usage_classification_notes="Do not deploy in production.",
         )
@@ -1145,7 +1233,8 @@ global.document = {
         snapshot = export_response.json()
         self.assertEqual(len(snapshot["model_approvals"]), 1)
         self.assertEqual(snapshot["model_approvals"][0]["approval_status"], "approved")
-        self.assertEqual(snapshot["model_approvals"][0]["general_recommendation_status"], "legacy_supported")
+        self.assertEqual(snapshot["schema_version"], 5)
+        self.assertEqual(snapshot["model_approvals"][0]["general_recommendation_status"], "acceptable")
         self.assertEqual(snapshot["model_approvals"][0]["usage_classification"], "prohibited")
 
         second_tempdir = tempfile.TemporaryDirectory()
@@ -1174,10 +1263,10 @@ global.document = {
             self.assertEqual(imported_model["catalog_status"], "deprecated")
             self.assertTrue(imported_model["general_approved_for_use"])
             self.assertEqual(imported_model["general_approval_notes"], "Snapshot general model approval.")
-            self.assertEqual(imported_model["general_recommendation_status"], "legacy_supported")
+            self.assertEqual(imported_model["general_recommendation_status"], "acceptable")
             self.assertEqual(
                 imported_model["general_recommendation_notes"],
-                "Snapshot legacy-supported recommendation.",
+                "Snapshot acceptable recommendation.",
             )
             self.assertEqual(imported_model["usage_classification"], "prohibited")
             self.assertEqual(
@@ -1213,7 +1302,7 @@ global.document = {
             if model["id"] == "snapshot-v3-restricted"
         )
 
-        self.assertEqual(result["schema_version"], 4)
+        self.assertEqual(result["schema_version"], 5)
         self.assertEqual(result["model_approval_updated_count"], 1)
         self.assertEqual(model["general_recommendation_status"], "unrated")
         self.assertIsNone(model["general_recommendation_notes"])
@@ -1221,6 +1310,15 @@ global.document = {
         self.assertEqual(model["usage_classification"], "restricted")
         self.assertEqual(model["usage_classification_notes"], "Legacy controlled access.")
         self.assertEqual(model["usage_classification_updated_at"], "2026-07-16T03:04:05Z")
+
+    def test_snapshot_import_accepts_versions_one_through_five(self) -> None:
+        for schema_version in range(1, 6):
+            with self.subTest(schema_version=schema_version):
+                result = review_workbench.import_review_snapshot({"schema_version": schema_version})
+                self.assertEqual(result["schema_version"], 5)
+
+        with self.assertRaisesRegex(ValueError, "Unsupported review snapshot schema version"):
+            review_workbench.import_review_snapshot({"schema_version": 6})
 
     def test_latest_sync_metadata_uses_started_at_for_running_run(self) -> None:
         self._insert_update_log(
