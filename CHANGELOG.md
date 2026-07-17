@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.1 - 2026-07-17
+
+- Removed trailing `(free)` labels from model display names while retaining the underlying OpenRouter route, pricing, and free-route metadata.
+
 ## 0.11.0 - 2026-07-17
 
 - Added the NVIDIA Enterprise RAG Blueprint family to configured catalog discovery, including ingestion, OCR, page/layout, table, graphic, parsing, safety, Riva ASR, embedding, reranking, and multimodal components. The catalog now represents operational RAG dependencies with dedicated roles instead of treating the Blueprint as generator-only coverage.

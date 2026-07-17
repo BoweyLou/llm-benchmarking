@@ -71,6 +71,7 @@ from .model_provenance import (
     build_provenance_policy_payload,
 )
 from .model_taxonomy import ModelIdentity, infer_model_identity
+from .model_names import remove_trailing_free_suffix
 from .name_resolution import build_model_lookup, name_signatures, normalize_text, resolve_model_name
 from .seed_data import (
     INTERNAL_VIEW_BENCHMARK_ID,
@@ -351,6 +352,7 @@ def bootstrap() -> None:
         _migrate_legacy_model_approvals()
         _refresh_model_identity_metadata()
         _canonicalize_model_catalog()
+        _repair_trailing_free_display_names()
         _refresh_model_identity_metadata()
         BOOTSTRAPPED = True
 
@@ -3732,7 +3734,7 @@ def _refresh_huggingface_model_discovery(
                     repo_id = model_discovery.repo_id_from_huggingface_item(item)
                     if not repo_id:
                         continue
-                    display_name = _suggest_display_name(repo_id.split("/", 1)[1]) or repo_id
+                    display_name = remove_trailing_free_suffix(_suggest_display_name(repo_id.split("/", 1)[1]) or repo_id)
                     provider = canonical_provider_name(
                         _clean_text(entry.get("provider")) or _provider_hint_from_name(repo_id) or "Unknown"
                     )
@@ -5128,6 +5130,7 @@ def _ensure_model(
     if resolved:
         return resolved
 
+    display_name = remove_trailing_free_suffix(raw_model_name)
     candidate_model_id = _choose_model_id(raw_model_name, raw_model_key)
     provider = canonical_provider_name(_infer_provider(metadata, raw_model_name) or "Unknown")
     discovered_at = utc_now_iso()
@@ -5153,7 +5156,7 @@ def _ensure_model(
         identity = _identity_from_override(identity_override) or infer_model_identity(raw_model_name, provider, model_id)
         stmt = sqlite_insert(models_table).values(
             id=model_id,
-            name=raw_model_name,
+            name=display_name,
             provider_id=provider_id,
             provider=provider,
             type="proprietary" if provider != "Unknown" else "open_weights",
@@ -5193,12 +5196,13 @@ def _ensure_discovered_catalog_model(
     discovered_update_log_id: int | None,
     entry_roles: list[str],
 ) -> tuple[str, str]:
-    name = _clean_text(item.get("name"))
-    if not name:
+    raw_name = _clean_text(item.get("name"))
+    if not raw_name:
         raise ValueError("Catalog discovery item is missing a name.")
+    name = remove_trailing_free_suffix(raw_name)
 
     provider = canonical_provider_name(provider)
-    model_id = _clean_text(item.get("id")) or _choose_model_id(name, _clean_text(item.get("catalog_model_id")))
+    model_id = _clean_text(item.get("id")) or _choose_model_id(raw_name, _clean_text(item.get("catalog_model_id")))
     roles = _normalise_model_roles(item.get("model_roles"), default=entry_roles or (MODEL_ROLE_GENERATOR,))
     model_type = _clean_text(item.get("model_type")) or _clean_text(entry.get("model_type")) or "proprietary"
     catalog_status = _clean_text(item.get("catalog_status")) or CATALOG_STATUS_TRACKED
@@ -5229,13 +5233,14 @@ def _ensure_discovered_catalog_model(
         small_model_candidate = parameter_count_b <= 15.0
     huggingface_repo_id = _clean_text(item.get("huggingface_repo_id"))
     catalog_model_id = _clean_text(item.get("catalog_model_id"))
-    identity = infer_model_identity(name, provider, model_id)
+    identity = infer_model_identity(raw_name, provider, model_id)
 
     with ENGINE.begin() as conn:
         provider_id = _ensure_provider_row(provider, conn=conn)
         existing = fetch_one(conn, select(models_table).where(models_table.c.id == model_id))
-        if existing is None and not catalog_model_id:
-            resolved = _resolve_model_id(name)
+        if existing is None:
+            # Resolve against the source label, not a display-normalized name.
+            resolved = _resolve_model_id(raw_name)
             if resolved:
                 existing = fetch_one(conn, select(models_table).where(models_table.c.id == resolved))
                 if existing is not None:
@@ -5403,8 +5408,10 @@ def _ensure_discovered_huggingface_model(
     size_values: dict[str, Any],
     timestamp_values: dict[str, Any],
 ) -> tuple[str, str]:
+    raw_display_name = display_name
+    display_name = remove_trailing_free_suffix(raw_display_name)
     provider = canonical_provider_name(provider)
-    existing_model_id = _resolve_huggingface_model_id(repo_id, display_name, provider)
+    existing_model_id = _resolve_huggingface_model_id(repo_id, raw_display_name, provider)
     if existing_model_id:
         with ENGINE.begin() as conn:
             row = fetch_one(conn, select(models_table).where(models_table.c.id == existing_model_id))
@@ -5432,7 +5439,7 @@ def _ensure_discovered_huggingface_model(
             return existing_model_id, "updated"
 
     model_id = _choose_model_id(display_name, repo_id)
-    identity = infer_model_identity(display_name, provider, repo_id)
+    identity = infer_model_identity(raw_display_name, provider, repo_id)
     discovered_at = verified_at
     with ENGINE.begin() as conn:
         provider_id = _ensure_provider_row(provider, conn=conn)
@@ -6245,9 +6252,15 @@ def _refresh_openrouter_model_metadata() -> None:
         )
         _import_openrouter_provisional_models(
             conn,
-            unmatched_items=list(exact_release_items.values()),
+            # ``:free`` is a route alias, not a separately reviewable release.
+            unmatched_items=[
+                item
+                for item in exact_release_items.values()
+                if not str(item.get("id") or "").strip().lower().endswith(":free")
+            ],
             existing_canonical_model_ids=existing_canonical_model_ids,
             verified_at=verified_at,
+            allow_existing_canonical_model_ids=True,
         )
     # Persist the complete router price shape separately from the deprecated
     # model-level input/output compatibility values.
@@ -6787,6 +6800,10 @@ def _openrouter_name_variants(value: Any) -> list[str]:
 
 
 def _openrouter_display_name(item: dict[str, Any]) -> str:
+    return remove_trailing_free_suffix(_openrouter_raw_display_name(item))
+
+
+def _openrouter_raw_display_name(item: dict[str, Any]) -> str:
     name = str(item.get("name") or "").strip()
     if not name:
         model_id = str(item.get("id") or "").strip()
@@ -7218,7 +7235,8 @@ def _import_openrouter_provisional_models(
         model_id = str(item.get("id") or "").strip()
         canonical_slug = str(item.get("canonical_slug") or "").strip()
         provider = _openrouter_provider_name(item)
-        display_name = _suggest_display_name(_openrouter_display_name(item)) or _openrouter_display_name(item) or model_id
+        raw_display_name = _openrouter_raw_display_name(item)
+        display_name = remove_trailing_free_suffix(_suggest_display_name(raw_display_name) or raw_display_name or model_id)
         if _gpt56_identity_and_configuration(display_name) is not None:
             # GPT-5.6 effort and product modes belong to the stable base model,
             # not the active review catalog as provisional model identities.
@@ -7226,6 +7244,21 @@ def _import_openrouter_provisional_models(
         identity = infer_model_identity(display_name, provider, canonical_slug or model_id or None)
         if not allow_existing_canonical_model_ids and identity.canonical_model_id in existing_canonical_model_ids:
             continue
+        if allow_existing_canonical_model_ids:
+            represented = fetch_one(
+                conn,
+                select(models_table.c.id)
+                .where(
+                    models_table.c.active == 1,
+                    or_(
+                        models_table.c.openrouter_model_id == model_id,
+                        models_table.c.openrouter_canonical_slug == canonical_slug,
+                    ),
+                )
+                .limit(1),
+            )
+            if represented is not None:
+                continue
 
         provider_id = _ensure_provider_row(provider, conn=conn)
         provisional_model_id = _choose_model_id(display_name, canonical_slug or model_id or None, reserved_ids=reserved_ids)
@@ -7507,7 +7540,7 @@ def _canonical_model_enrichment(group: list[dict[str, Any]], canonical: dict[str
 
 
 def _suggest_display_name(raw_name: str) -> str | None:
-    candidate = raw_name.strip()
+    candidate = remove_trailing_free_suffix(raw_name)
     if not candidate:
         return None
 
@@ -7540,6 +7573,24 @@ def _suggest_display_name(raw_name: str) -> str | None:
 
     humanized = " ".join(_humanize_display_token(token) for token in tokens).strip()
     return humanized or None
+
+
+def _repair_trailing_free_display_names() -> int:
+    """Repair legacy display labels without changing model identity or links."""
+    repaired = 0
+    with ENGINE.begin() as conn:
+        rows = fetch_all(conn, select(models_table.c.id, models_table.c.name))
+        for row in rows:
+            current_name = str(row.get("name") or "")
+            cleaned_name = remove_trailing_free_suffix(current_name)
+            if cleaned_name and cleaned_name != current_name:
+                conn.execute(
+                    update(models_table)
+                    .where(models_table.c.id == row["id"])
+                    .values(name=cleaned_name)
+                )
+                repaired += 1
+    return repaired
 
 
 def _humanize_display_token(token: str) -> str:

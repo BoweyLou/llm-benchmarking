@@ -629,7 +629,39 @@ class RankingTests(unittest.TestCase):
                 models_table.c.openrouter_canonical_slug == "nvidia/llama-nemotron-rerank-vl-1b-v2"
             ))
         self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "Llama Nemotron Rerank Vl 1B V2")
+        self.assertEqual(rows[0]["openrouter_model_id"], "nvidia/llama-nemotron-rerank-vl-1b-v2")
+        self.assertEqual(rows[0]["openrouter_canonical_slug"], "nvidia/llama-nemotron-rerank-vl-1b-v2")
         self.assertEqual(json.loads(rows[0]["model_roles_json"]), ["reranker"])
+
+    def test_repair_trailing_free_display_names_preserves_linked_fields(self) -> None:
+        self.add_model("free-model", "Example (free)")
+        with self.engine.begin() as conn:
+            conn.execute(
+                update(models_table)
+                .where(models_table.c.id == "free-model")
+                .values(openrouter_model_id="vendor/example:free", openrouter_canonical_slug="vendor/example")
+            )
+            conn.execute(
+                model_use_case_approvals_table.insert().values(
+                    model_id="free-model",
+                    use_case_id="customer_service",
+                    approved_for_use=1,
+                    approval_notes="retain",
+                    approval_updated_at="2026-07-17T00:00:00Z",
+                )
+            )
+
+        self.assertEqual(update_engine._repair_trailing_free_display_names(), 1)
+        with self.engine.connect() as conn:
+            model = conn.execute(select(models_table).where(models_table.c.id == "free-model")).mappings().one()
+            approval = conn.execute(
+                select(model_use_case_approvals_table).where(model_use_case_approvals_table.c.model_id == "free-model")
+            ).mappings().one()
+        self.assertEqual(model["name"], "Example")
+        self.assertEqual(model["openrouter_model_id"], "vendor/example:free")
+        self.assertEqual(model["openrouter_canonical_slug"], "vendor/example")
+        self.assertEqual(approval["approval_notes"], "retain")
 
     def test_provider_api_model_discovery_adds_rich_provider_catalog_rows(self) -> None:
         catalog = {

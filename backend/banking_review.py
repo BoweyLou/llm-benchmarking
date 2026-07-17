@@ -26,6 +26,7 @@ from .database import (
     providers as providers_table,
 )
 from .model_taxonomy import infer_model_identity
+from .model_names import remove_trailing_free_suffix
 from .recommendation_engine import PROFILE_AUSTRALIAN_BANK, sync_recommendation_proposals
 from .seed_data import canonical_provider_name, provider_id_from_name
 
@@ -132,11 +133,12 @@ def add_model_to_listing(
 ) -> dict[str, Any]:
     """Add a manually curated model row to the local listing."""
     update_engine.bootstrap()
-    cleaned_name = _required_text(name, "name")
+    raw_name = _required_text(name, "name")
+    cleaned_name = remove_trailing_free_suffix(raw_name)
     cleaned_provider = canonical_provider_name(_required_text(provider, "provider"))
     normalized_status = _validate_catalog_status(catalog_status)
     normalized_roles = _normalise_model_roles(model_roles)
-    normalized_model_id = _normalise_model_id(model_id) if model_id else _available_model_id(cleaned_name)
+    normalized_model_id = _normalise_model_id(model_id) if model_id else _available_model_id(raw_name)
     provider_id = provider_id_from_name(cleaned_provider)
     identity = infer_model_identity(cleaned_name, cleaned_provider, normalized_model_id)
 
