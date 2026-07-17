@@ -238,7 +238,7 @@
     <aside class="filters">
       <p class="eyebrow">Review queue</p>
       <h2>Find a model</h2>
-      <p class="intro">Filter the model list, inspect the evidence, then make one general decision.</p>
+      <p class="intro">Filter the model list, inspect the evidence, then record model-level decisions.</p>
       <div class="filter-fields">
         <label class="field-label">Search<input class="field" id="search" type="search" placeholder="Model or provider"></label>
         <label class="field-label">Provider<select class="select" id="providerFilter"><option value="">All providers</option></select></label>
@@ -274,7 +274,7 @@
     <main class="detail" id="detail"><div class="empty">Loading model evidence…</div></main>
   </div>
 
-  <div class="bulk-bar" id="bulkBar" hidden><div><strong id="bulkBarTitle">0 models selected</strong><span id="bulkBarMeta">0 source records</span></div><button class="btn primary" id="openBulkDecision">Apply general decision</button></div>
+  <div class="bulk-bar" id="bulkBar" hidden><div><strong id="bulkBarTitle">0 models selected</strong><span id="bulkBarMeta">0 source records</span></div><button class="btn primary" id="openBulkDecision">Apply model decisions</button></div>
 
   <dialog id="settingsDialog">
     <form method="dialog" class="dialog-body">
@@ -301,7 +301,7 @@
   </dialog>
   <dialog id="bulkDecisionDialog" class="bulk-dialog">
     <form class="dialog-body" id="bulkDecisionForm">
-      <p class="eyebrow">Bulk review</p><h2>Apply general decision</h2>
+      <p class="eyebrow">Bulk review</p><h2>Apply model decisions</h2>
       <p class="intro">Choose only the fields you want to change. This decision applies to each selected model, never to an individual use case.</p>
       <div class="bulk-form-grid">
         <label class="field-label">Approval<select class="select" id="bulkApproval"><option value="">Leave unchanged</option><option value="approved">Approved</option><option value="not_approved">Not approved</option><option value="unreviewed">Unreviewed</option></select></label>
@@ -946,7 +946,7 @@
               <label class="check"><input type="checkbox" data-restricted-mode="ultra" ${state.draft.restrictedModes.has("ultra") ? "checked" : ""}> Ultra</label>
             </div></div>
           </div>
-          <label class="rationale">Decision rationale<textarea class="textarea" id="decisionNotes" placeholder="Why is this the right general decision?">${escapeHtml(state.draft.notes)}</textarea></label>
+          <label class="rationale">Decision rationale<textarea class="textarea" id="decisionNotes" placeholder="Why are these the right model decisions?">${escapeHtml(state.draft.notes)}</textarea></label>
           <div class="save-row"><span>Last decision: ${escapeHtml(formatDate(model.usage_classification_updated_at || model.general_recommendation_updated_at || model.general_approval_updated_at))}</span><div><button class="btn ghost" id="skipModel">Decide later</button> <button class="btn primary" id="saveDecision" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Save and next"}</button></div></div>
         </section>
         <section class="section">
@@ -954,7 +954,7 @@
           ${renderSuggestions(model)}
         </section>
         <section class="section">
-          <div class="section-head"><div><h3>Model facts</h3><p>Reference details that can affect a general decision.</p></div></div>
+          <div class="section-head"><div><h3>Model facts</h3><p>Reference details that can affect model decisions.</p></div></div>
           <div class="details-grid">
             <div class="detail-item"><span>Release</span><strong>${escapeHtml(model.release_date || "—")}</strong></div>
             <div class="detail-item"><span>Context window</span><strong>${escapeHtml(model.context_window || model.context_window_tokens || "—")}</strong></div>
@@ -1090,7 +1090,7 @@
           usage_policy_notes: notes
         }) });
         if (result.updated_count !== model.member_ids.length) throw new Error(`Expected ${model.member_ids.length} updates but received ${result.updated_count}`);
-        toast(`General decision saved for ${model.member_ids.length} source record${model.member_ids.length === 1 ? "" : "s"}`);
+        toast(`Model decisions saved for ${model.member_ids.length} source record${model.member_ids.length === 1 ? "" : "s"}`);
         await loadCatalog(model.id);
         selectNext();
       } catch (error) { toast(error.message, true); }

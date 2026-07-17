@@ -66,7 +66,7 @@ meet all three conditions stay separate.
 - Reviewers make one approval, one recommendation, and one usage classification
   per model.
 - Reviewers can select all models matching the current filters and confirm one
-  general decision for the explicit underlying model-ID set.
+  set of model-level decisions for the explicit underlying model-ID set.
 - Safe duplicate groups reduce queue noise without hiding ambiguous records or
   changing source data.
 - Suggested use cases explain likely fit without implying authorization.

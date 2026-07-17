@@ -145,9 +145,9 @@ The ZIP contains three files:
 
 - `models.csv` has one readable row per server-owned `review_entity_id` group.
   It preserves the stable group ID, source-record count and IDs, general
-  approval, general recommendation, read-only suggested-use evidence, and an
+  approval, general recommendation, usage classification, read-only suggested-use evidence, and an
   AU-first inference summary. `mixed` appears only when the grouped source
-  records disagree on the corresponding general decision.
+  records disagree on the corresponding model-level decision.
 - `inference-costs.csv` is the normalized evidence table: one row per source
   record, route, location, offer, and price component. It retains native
   currency, amount, billing unit and quantity, modality, charge type, service
@@ -545,11 +545,11 @@ Metadata and catalog enrichments:
 
 The current human review contract is intentionally model-level:
 
-- general approval and general recommendation are separate fields on each model
+- general approval, general recommendation, and usage classification are separate fields on each model
 - use-case recommendation proposals are regenerated metric evidence, not human authorization
 - legacy per-use-case approval and recommendation rows remain available only for compatibility and audit
 - inference-route approval can be stored per `model x use case x provider x location`
-- bulk general decisions write through to exact model IDs rather than using hidden inheritance
+- bulk model-level decisions write through to exact model IDs rather than using hidden inheritance
 - new models discovered in updates can be surfaced for review
 - provider-origin and model-curation state can be exported back to repo-backed baselines
 
@@ -617,7 +617,7 @@ Notes:
 - `model-card-sync` backfills Hugging Face-backed model-card metadata such as license, docs URL, repo URL, paper URL, languages, capabilities, intended use, and limitations.
 - `model-card-audit` reports current model-card field coverage, extraction-quality issues, and a `commercial_production` quality gate. The gate treats missing license metadata, generic license markers, and incomplete derivative provenance as blockers; missing source URLs or suspicious extraction output as warnings; and richer model-card enrichment as backlog-only cleanup.
 - `recommendation-audit` previews generated use-case recommendation proposals. `recommendation-sync` persists them so `list-models`, CSV export, and the API include proposed/effective recommendation fields.
-- `/review` is the interactive LLM Model Tool for single and all-filtered bulk general decisions. A model can also carry a usage policy: a maximum permitted reasoning effort (`none` through `max`) and restricted `pro` or `ultra` product modes. For example, GPT-5.6 Sol can be approved and recommended while being allowed only through `high` with `ultra` restricted. It can also start `/api/update` and show live progress from `/api/update/status/{log_id}`. `banking-review export` writes the review-friendly combined CSV from the CLI; legacy `banking-review set` and `banking-review deprecate` commands remain available for compatibility workflows.
+- `/review` is the interactive LLM Model Tool for single and all-filtered bulk model-level decisions. A model can also carry configuration-level usage controls: a maximum permitted reasoning effort (`none` through `max`) and restricted `pro` or `ultra` product modes. For example, GPT-5.6 Sol can be approved and recommended while being allowed only through `high` with `ultra` restricted. It can also start `/api/update` and show live progress from `/api/update/status/{log_id}`. `banking-review export` writes the review-friendly combined CSV from the CLI; legacy `banking-review set` and `banking-review deprecate` commands remain available for compatibility workflows.
 - `model-license-sync` fills missing licenses using safe open-weight family propagation, a `Proprietary` fallback for missing proprietary licenses, and tracked exact/family overrides from [backend/model_license_baseline.json](backend/model_license_baseline.json).
 - `list-models` writes a clean CSV bundle to `output/model-list*.csv` by default in addition to the requested stdout/file format; pass `--no-csv` when you do not want the bundle, or `--no-csv-sidecars` when you only want the main model CSV.
 - `provider-origin-export` and `model-curation-export` push live curation back into the tracked baseline JSON files.
