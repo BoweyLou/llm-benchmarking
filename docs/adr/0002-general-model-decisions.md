@@ -18,15 +18,32 @@ confidence, reasons, warnings, and controls for each use case.
 
 ## Decision
 
-Human review has two model-level decisions:
+Human review has three model-level decisions:
 
 - general approval: `approved`, `not_approved`, or `unreviewed`;
-- general recommendation: `recommended`, `restricted`, `not_recommended`, or
-  `unrated`. Legacy general `discouraged` values are normalized to
-  `not_recommended`; the legacy use-case contract remains unchanged.
+- general recommendation: `recommended`, `legacy_supported`,
+  `not_recommended`, or `unrated`. `legacy_supported` means the model remains
+  usable when necessary while migration to a recommended option is preferred;
+- usage classification: `standard`, `restricted`, `prohibited`, or
+  `unclassified`.
 
-The `/api/review/model-decisions` endpoint saves either or both decisions on the
-`models` row. It does not create or update model/use-case decision rows.
+Recommendation describes preference or suitability. Usage classification
+describes permission and governance. The axes are independent: saving one does
+not infer or rewrite the other. `Prohibited` therefore does not imply
+`not_recommended`, and `not_recommended` does not imply `prohibited`.
+
+Legacy general `discouraged` values are normalized to `not_recommended`; the
+legacy use-case contract remains unchanged and continues to accept
+`restricted`. Existing configuration-level reasoning-effort ceilings,
+restricted modes, and usage-policy fields also remain unchanged.
+
+The schema migration maps an existing general `restricted` decision to usage
+classification `restricted`, copies its notes and timestamp, and resets the
+general recommendation to `unrated`. Other rows begin as `unclassified`.
+
+The `/api/review/model-decisions` endpoint saves any supplied model-level
+decision fields on the `models` row. It does not create or update model/use-case
+decision rows.
 
 Use cases are read-only evidence. Positive generated proposals are exposed as
 `suggested_use_cases`, ordered by metric fit score and confidence. Each
@@ -46,16 +63,17 @@ meet all three conditions stay separate.
 
 ## Consequences
 
-- Reviewers make one approval and one recommendation per model.
+- Reviewers make one approval, one recommendation, and one usage classification
+  per model.
 - Reviewers can select all models matching the current filters and confirm one
   general decision for the explicit underlying model-ID set.
 - Safe duplicate groups reduce queue noise without hiding ambiguous records or
   changing source data.
 - Suggested use cases explain likely fit without implying authorization.
-- New databases and upgraded databases gain general recommendation columns.
-- Review snapshots include general recommendations while version 1 imports
-  remain supported.
-- Clean exports expose general decisions and suggested-use-case summaries; the
+- New databases and upgraded databases gain usage-classification columns.
+- Review snapshot schema 4 includes both axes; imports accept schemas 1 through
+  4, and older general `restricted` snapshots receive the migration mapping.
+- Clean exports expose both axes and suggested-use-case summaries; the
   legacy use-case approval sidecar remains available for audit compatibility.
 - Legacy clients continue to work, but new integrations should use
   `/api/review/model-decisions`.

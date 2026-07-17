@@ -20,7 +20,13 @@ AuditSeverity = Literal["blocker", "warning", "info"]
 FamilyApprovalScope = Literal["family", "delta"]
 RecommendationStatusIn = Literal["unrated", "recommended", "not_recommended", "discouraged", "restricted"]
 RecommendationStatusOut = Literal["unrated", "recommended", "not_recommended", "discouraged", "restricted", "mixed"]
-GeneralRecommendationStatusIn = Literal["unrated", "recommended", "not_recommended", "restricted"]
+GeneralRecommendationStatusIn = Literal[
+    "unrated",
+    "recommended",
+    "legacy_supported",
+    "not_recommended",
+]
+UsageClassification = Literal["standard", "restricted", "prohibited", "unclassified"]
 CatalogStatusIn = Literal["tracked", "provisional", "deprecated"]
 GeneralApprovalStatusIn = Literal["approved", "not_approved", "unreviewed"]
 UpdateProgressStatus = Literal["pending", "running", "completed", "failed"]
@@ -525,6 +531,9 @@ class ModelOut(APIModel):
     general_recommendation_status: GeneralRecommendationStatusIn = "unrated"
     general_recommendation_notes: str | None = None
     general_recommendation_updated_at: datetime | None = None
+    usage_classification: UsageClassification = "unclassified"
+    usage_classification_notes: str | None = None
+    usage_classification_updated_at: datetime | None = None
     reasoning_effort_ceiling: ReasoningEffort | None = None
     restricted_modes: list[RestrictedMode] = Field(default_factory=list)
     usage_policy_notes: str | None = None
@@ -634,6 +643,9 @@ class ModelSummaryOut(APIModel):
     general_recommendation_status: GeneralRecommendationStatusIn = "unrated"
     general_recommendation_notes: str | None = None
     general_recommendation_updated_at: datetime | None = None
+    usage_classification: UsageClassification = "unclassified"
+    usage_classification_notes: str | None = None
+    usage_classification_updated_at: datetime | None = None
     reasoning_effort_ceiling: ReasoningEffort | None = None
     restricted_modes: list[RestrictedMode] = Field(default_factory=list)
     usage_policy_notes: str | None = None
@@ -698,6 +710,8 @@ class ReviewModelDecisionIn(APIModel):
     approval_notes: str | None = None
     recommendation_status: GeneralRecommendationStatusIn | None = None
     recommendation_notes: str | None = None
+    usage_classification: UsageClassification | None = None
+    usage_classification_notes: str | None = None
     reasoning_effort_ceiling: ReasoningEffort | None = None
     restricted_modes: list[RestrictedMode] | None = None
     usage_policy_notes: str | None = None

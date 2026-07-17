@@ -78,7 +78,8 @@
     .row-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
     .badge { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); font-size: 11px; font-weight: 680; }
     .badge.approved, .badge.recommended { border-color: #b8dfc3; color: var(--green); background: var(--green-soft); }
-    .badge.not-approved, .badge.not-recommended { border-color: #edc0bc; color: var(--red); background: var(--red-soft); }
+    .badge.legacy-supported { border-color: #b9cfee; color: var(--blue); background: var(--blue-soft); }
+    .badge.not-approved, .badge.not-recommended, .badge.prohibited { border-color: #edc0bc; color: var(--red); background: var(--red-soft); }
     .badge.restricted, .badge.mixed { border-color: #f0d0a9; color: var(--amber); background: var(--amber-soft); }
     .detail { min-width: 0; padding: 24px; overflow: auto; }
     .empty { height: 100%; min-height: 360px; display: grid; place-items: center; color: var(--muted); text-align: center; }
@@ -246,9 +247,14 @@
             <option value="">Any approval</option><option value="unreviewed">Unreviewed</option><option value="approved">Approved</option><option value="not_approved">Not approved</option>
           </select>
         </label>
-        <label class="field-label">General recommendation
+        <label class="field-label">Recommendation
           <select class="select" id="recommendationFilter">
-            <option value="">Any recommendation</option><option value="unrated">Unrated</option><option value="recommended">Recommended</option><option value="restricted">Restricted</option><option value="not_recommended">Not recommended</option>
+            <option value="">Any recommendation</option><option value="unrated">Unrated</option><option value="recommended">Recommended</option><option value="legacy_supported">Legacy Supported</option><option value="not_recommended">Not recommended</option>
+          </select>
+        </label>
+        <label class="field-label">Usage Classification
+          <select class="select" id="usageClassificationFilter">
+            <option value="">Any classification</option><option value="unclassified">Unclassified</option><option value="standard">Standard</option><option value="restricted">Restricted</option><option value="prohibited">Prohibited</option>
           </select>
         </label>
         <label class="check"><input type="checkbox" id="needsDecision"> Needs a decision</label>
@@ -299,7 +305,8 @@
       <p class="intro">Choose only the fields you want to change. This decision applies to each selected model, never to an individual use case.</p>
       <div class="bulk-form-grid">
         <label class="field-label">Approval<select class="select" id="bulkApproval"><option value="">Leave unchanged</option><option value="approved">Approved</option><option value="not_approved">Not approved</option><option value="unreviewed">Unreviewed</option></select></label>
-        <label class="field-label">Recommendation<select class="select" id="bulkRecommendation"><option value="">Leave unchanged</option><option value="recommended">Recommended</option><option value="restricted">Restricted</option><option value="not_recommended">Not recommended</option><option value="unrated">Unrated</option></select></label>
+        <label class="field-label">Recommendation<select class="select" id="bulkRecommendation"><option value="">Leave unchanged</option><option value="recommended">Recommended</option><option value="legacy_supported">Legacy Supported</option><option value="not_recommended">Not recommended</option><option value="unrated">Unrated</option></select></label>
+        <label class="field-label">Usage Classification<select class="select" id="bulkUsageClassification"><option value="">Leave unchanged</option><option value="standard">Standard</option><option value="restricted">Restricted</option><option value="prohibited">Prohibited</option><option value="unclassified">Unclassified</option></select></label>
       </div>
       <label class="field-label">Shared rationale<textarea class="textarea" id="bulkNotes" placeholder="Why does this decision apply to the selected models?"></textarea></label>
       <div class="bulk-preview" id="bulkPreview"></div>
@@ -313,7 +320,7 @@
     const state = {
       catalog: null,
       activeGroupId: null,
-      filters: { search: "", provider: "", approval: "", recommendation: "", needsDecision: false },
+      filters: { search: "", provider: "", approval: "", recommendation: "", usageClassification: "", needsDecision: false },
       draft: null,
       saving: false,
       updating: false,
@@ -329,13 +336,13 @@
 
     const els = Object.fromEntries([
       "databaseUpdated", "lastSynced", "runUpdates", "openExport", "openSettings", "search", "providerFilter",
-      "approvalFilter", "recommendationFilter", "needsDecision", "resetFilters", "queueCount",
+      "approvalFilter", "recommendationFilter", "usageClassificationFilter", "needsDecision", "resetFilters", "queueCount",
       "queueList", "detail", "settingsDialog", "adminToken", "saveToken", "toast", "toggleSelection",
       "selectionTools", "selectionCount", "selectAllFiltered", "clearSelection",
       "exportDialog", "exportForm", "exportScopeAll", "exportScopeFiltered", "exportScopeSelected",
       "exportAllMeta", "exportFilteredMeta", "exportSelectedMeta", "cancelExport", "downloadExport", "exportStatus",
       "bulkBar", "bulkBarTitle", "bulkBarMeta", "openBulkDecision", "bulkDecisionDialog",
-      "bulkDecisionForm", "bulkApproval", "bulkRecommendation", "bulkNotes", "bulkPreview",
+      "bulkDecisionForm", "bulkApproval", "bulkRecommendation", "bulkUsageClassification", "bulkNotes", "bulkPreview",
       "cancelBulkDecision", "applyBulkDecision"
     ].map((id) => [id, document.getElementById(id)]));
 
@@ -371,6 +378,7 @@
     function formatDate(value) { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString(); }
     function approvalStatus(model) { return model.general_approval_status || (model.general_approved_for_use ? "approved" : (model.general_approval_updated_at ? "not_approved" : "unreviewed")); }
     function recommendationStatus(model) { return model.general_recommendation_status === "discouraged" ? "not_recommended" : (model.general_recommendation_status || "unrated"); }
+    function usageClassification(model) { return model.usage_classification || "unclassified"; }
     function badge(status) { return `<span class="badge ${escapeHtml(String(status).replaceAll("_", "-"))}">${escapeHtml(label(status))}</span>`; }
 
     function normalizedName(model) { return String(model.name || model.canonical_model_name || "").trim().toLowerCase().replace(/\s+/g, " "); }
@@ -533,6 +541,7 @@
           provider: providers.length === 1 ? providers[0] : "Multiple providers",
           general_approval_status: unanimous(members, approvalStatus, "unreviewed"),
           general_recommendation_status: unanimous(members, recommendationStatus, "unrated"),
+          usage_classification: unanimous(members, usageClassification, "unclassified"),
           suggested_use_cases: [...suggestions.values()].sort((left, right) => Number(right.fit_score || 0) - Number(left.fit_score || 0)),
           scores: mergedEvidence.scores,
           score_configurations: mergedEvidence.scoreConfigurations,
@@ -559,7 +568,8 @@
         if (state.filters.provider && !model.members.some((member) => member.provider === state.filters.provider)) return false;
         if (state.filters.approval && model.general_approval_status !== state.filters.approval) return false;
         if (state.filters.recommendation && model.general_recommendation_status !== state.filters.recommendation) return false;
-        if (state.filters.needsDecision && model.general_approval_status !== "unreviewed" && model.general_approval_status !== "mixed" && model.general_recommendation_status !== "unrated" && model.general_recommendation_status !== "mixed") return false;
+        if (state.filters.usageClassification && model.usage_classification !== state.filters.usageClassification) return false;
+        if (state.filters.needsDecision && model.general_approval_status !== "unreviewed" && model.general_approval_status !== "mixed" && model.general_recommendation_status !== "unrated" && model.general_recommendation_status !== "mixed" && model.usage_classification !== "unclassified" && model.usage_classification !== "mixed") return false;
         return true;
       }).sort((left, right) => {
         const leftSuggestions = left.suggested_use_cases || [];
@@ -577,7 +587,8 @@
       state.draft = {
         approval: approvalStatus(model) === "mixed" ? null : approvalStatus(model),
         recommendation: recommendationStatus(model) === "mixed" ? null : recommendationStatus(model),
-        notes: model.members.every((member) => (member.general_recommendation_notes || member.general_approval_notes || "") === (model.general_recommendation_notes || model.general_approval_notes || "")) ? (model.general_recommendation_notes || model.general_approval_notes || "") : "",
+        usageClassification: usageClassification(model) === "mixed" ? null : usageClassification(model),
+        notes: model.members.every((member) => (member.general_recommendation_notes || member.usage_classification_notes || member.general_approval_notes || "") === (model.general_recommendation_notes || model.usage_classification_notes || model.general_approval_notes || "")) ? (model.general_recommendation_notes || model.usage_classification_notes || model.general_approval_notes || "") : "",
         reasoningEffortCeiling: model.reasoning_effort_ceiling || "",
         restrictedModes: new Set(model.restricted_modes || [])
       };
@@ -604,7 +615,7 @@
           <button class="model-open" data-open-group-id="${escapeHtml(model.group_id)}">
             <div><div class="model-name">${escapeHtml(model.name)}</div><div class="provider">${escapeHtml(model.provider)}${model.source_record_count > 1 ? ` · ${model.source_record_count} source records` : ""}</div></div>
             <span class="badge">${(model.suggested_use_cases || []).length} fits</span>
-            <div class="row-meta">${badge(approvalStatus(model))}${badge(recommendationStatus(model))}</div>
+            <div class="row-meta">${badge(approvalStatus(model))}${badge(recommendationStatus(model))}${badge(usageClassification(model))}</div>
           </button>
         </div>`).join("") + (visibleModels.length < models.length ? `<button class="btn load-more" id="loadMoreModels">Show next ${Math.min(200, models.length - visibleModels.length)} of ${models.length}</button>` : "");
     }
@@ -906,7 +917,7 @@
       els.detail.innerHTML = `
         <div class="detail-header">
           <div><p class="eyebrow">General model review</p><h2>${escapeHtml(model.name)}</h2><div class="detail-sub">${escapeHtml(model.provider)} · ${escapeHtml(label(model.type || "model"))}${model.source_record_count > 1 ? ` · ${model.source_record_count} source records combined` : ""}</div></div>
-          <div class="detail-actions">${badge(approvalStatus(model))}${badge(recommendationStatus(model))}</div>
+          <div class="detail-actions">${badge(approvalStatus(model))}${badge(recommendationStatus(model))}${badge(usageClassification(model))}</div>
         </div>
         <section class="section">
           <div class="section-head"><div><h3>Benchmark position</h3><p>How this model compares with similar scored models in this database.</p></div><span class="badge">Key benchmarks</span></div>
@@ -917,10 +928,11 @@
           ${renderPricing(model)}
         </section>
         <section class="section">
-          <div class="section-head"><div><h3>Your general decision</h3><p>Make one decision for the model. It applies across the catalog, not to individual use cases.</p></div></div>
+          <div class="section-head"><div><h3>Your model decisions</h3><p>Record model-level decisions. They apply across the catalog, not to individual use cases.</p></div></div>
           <div class="decision-grid">
             <div class="decision-group"><span>Approval</span>${choiceGroup("approval", ["approved", "not_approved", "unreviewed"], state.draft.approval)}</div>
-            <div class="decision-group"><span>Recommendation</span>${choiceGroup("recommendation", ["recommended", "restricted", "not_recommended", "unrated"], state.draft.recommendation)}</div>
+            <div class="decision-group"><span>Recommendation</span>${choiceGroup("recommendation", ["recommended", "legacy_supported", "not_recommended", "unrated"], state.draft.recommendation)}</div>
+            <div class="decision-group"><span>Usage Classification</span>${choiceGroup("usageClassification", ["standard", "restricted", "prohibited", "unclassified"], state.draft.usageClassification)}</div>
           </div>
           <div class="policy-grid">
             <label class="field-label">Reasoning effort limit
@@ -935,7 +947,7 @@
             </div></div>
           </div>
           <label class="rationale">Decision rationale<textarea class="textarea" id="decisionNotes" placeholder="Why is this the right general decision?">${escapeHtml(state.draft.notes)}</textarea></label>
-          <div class="save-row"><span>Last decision: ${escapeHtml(formatDate(model.general_recommendation_updated_at || model.general_approval_updated_at))}</span><div><button class="btn ghost" id="skipModel">Decide later</button> <button class="btn primary" id="saveDecision" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Save and next"}</button></div></div>
+          <div class="save-row"><span>Last decision: ${escapeHtml(formatDate(model.usage_classification_updated_at || model.general_recommendation_updated_at || model.general_approval_updated_at))}</span><div><button class="btn ghost" id="skipModel">Decide later</button> <button class="btn primary" id="saveDecision" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Save and next"}</button></div></div>
         </section>
         <section class="section">
           <div class="section-head"><div><h3>Suggested use cases</h3><p>Read-only metric fits. These are not approvals or recommendations.</p></div><span class="badge">${(model.suggested_use_cases || []).length} suggested</span></div>
@@ -1069,10 +1081,11 @@
       const restrictedModes = [...document.querySelectorAll("[data-restricted-mode]:checked")].map((input) => input.dataset.restrictedMode);
       state.saving = true; renderDetail();
       try {
-        if (!state.draft.approval && !state.draft.recommendation) throw new Error("Choose an approval or recommendation first");
+        if (!state.draft.approval && !state.draft.recommendation && !state.draft.usageClassification) throw new Error("Choose an approval, recommendation, or usage classification first");
         const result = await request("/api/review/model-decisions", { method: "POST", body: JSON.stringify({
           model_ids: model.member_ids, approval_status: state.draft.approval, approval_notes: notes,
           recommendation_status: state.draft.recommendation, recommendation_notes: notes,
+          usage_classification: state.draft.usageClassification, usage_classification_notes: notes,
           reasoning_effort_ceiling: reasoningEffortCeiling, restricted_modes: restrictedModes,
           usage_policy_notes: notes
         }) });
@@ -1090,6 +1103,7 @@
       const records = groups.reduce((sum, group) => sum + group.member_ids.length, 0);
       els.bulkApproval.value = "";
       els.bulkRecommendation.value = "";
+      els.bulkUsageClassification.value = "";
       els.bulkNotes.value = "";
       els.bulkPreview.innerHTML = `<strong>${groups.length} model${groups.length === 1 ? "" : "s"} · ${records} source record${records === 1 ? "" : "s"}</strong><br>${groups.slice(0, 12).map((group) => escapeHtml(group.name)).join(" · ")}${groups.length > 12 ? ` · and ${groups.length - 12} more` : ""}`;
       els.applyBulkDecision.textContent = `Apply to ${groups.length} model${groups.length === 1 ? "" : "s"}`;
@@ -1103,11 +1117,13 @@
       const modelIds = [...new Set(groups.flatMap((group) => group.member_ids))];
       const approval = els.bulkApproval.value;
       const recommendation = els.bulkRecommendation.value;
+      const usageClassificationValue = els.bulkUsageClassification.value;
       const notes = els.bulkNotes.value.trim();
-      if (!approval && !recommendation) { toast("Choose an approval or recommendation to change", true); return; }
+      if (!approval && !recommendation && !usageClassificationValue) { toast("Choose an approval, recommendation, or usage classification to change", true); return; }
       const payload = { model_ids: modelIds };
       if (approval) { payload.approval_status = approval; payload.approval_notes = notes; }
       if (recommendation) { payload.recommendation_status = recommendation; payload.recommendation_notes = notes; }
+      if (usageClassificationValue) { payload.usage_classification = usageClassificationValue; payload.usage_classification_notes = notes; }
       state.bulkSaving = true;
       els.applyBulkDecision.disabled = true;
       els.applyBulkDecision.textContent = "Applying…";
@@ -1166,12 +1182,13 @@
 
     [
       [els.search, "search", "input"], [els.providerFilter, "provider", "change"],
-      [els.approvalFilter, "approval", "change"], [els.recommendationFilter, "recommendation", "change"]
+      [els.approvalFilter, "approval", "change"], [els.recommendationFilter, "recommendation", "change"],
+      [els.usageClassificationFilter, "usageClassification", "change"]
     ].forEach(([element, key, event]) => element.addEventListener(event, () => { state.filters[key] = element.value; state.visibleLimit = 200; render(); }));
     els.needsDecision.addEventListener("change", () => { state.filters.needsDecision = els.needsDecision.checked; state.visibleLimit = 200; render(); });
     els.resetFilters.addEventListener("click", () => {
-      state.filters = { search: "", provider: "", approval: "", recommendation: "", needsDecision: false };
-      [els.search, els.providerFilter, els.approvalFilter, els.recommendationFilter].forEach((element) => { element.value = ""; });
+      state.filters = { search: "", provider: "", approval: "", recommendation: "", usageClassification: "", needsDecision: false };
+      [els.search, els.providerFilter, els.approvalFilter, els.recommendationFilter, els.usageClassificationFilter].forEach((element) => { element.value = ""; });
       els.needsDecision.checked = false; state.visibleLimit = 200; render();
     });
     els.queueList.addEventListener("click", (event) => {

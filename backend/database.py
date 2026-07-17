@@ -211,6 +211,9 @@ models = Table(
     Column("general_recommendation_status", String, nullable=False, server_default=text("'unrated'")),
     Column("general_recommendation_notes", Text),
     Column("general_recommendation_updated_at", String),
+    Column("usage_classification", String, nullable=False, server_default=text("'unclassified'")),
+    Column("usage_classification_notes", Text),
+    Column("usage_classification_updated_at", String),
     Column("reasoning_effort_ceiling", String),
     Column("restricted_modes_json", Text, nullable=False, server_default=text("'[]'")),
     Column("usage_policy_notes", Text),
@@ -630,6 +633,9 @@ def _create_schema_sql() -> list[str]:
             general_recommendation_status TEXT NOT NULL DEFAULT 'unrated',
             general_recommendation_notes TEXT,
             general_recommendation_updated_at TEXT,
+            usage_classification TEXT NOT NULL DEFAULT 'unclassified',
+            usage_classification_notes TEXT,
+            usage_classification_updated_at TEXT,
             reasoning_effort_ceiling TEXT,
             restricted_modes_json TEXT NOT NULL DEFAULT '[]',
             usage_policy_notes TEXT,
@@ -1889,6 +1895,36 @@ def _migration_20260714_provider_pricing(conn: Connection) -> None:
     )
 
 
+def _migration_20260717_usage_classification(conn: Connection) -> None:
+    """Split governance restrictions from model recommendation decisions."""
+    model_columns = {
+        str(row[1])
+        for row in conn.exec_driver_sql("PRAGMA table_info(models)").fetchall()
+    }
+    for column_name, sql_type in {
+        "usage_classification": "TEXT NOT NULL DEFAULT 'unclassified'",
+        "usage_classification_notes": "TEXT",
+        "usage_classification_updated_at": "TEXT",
+    }.items():
+        if column_name not in model_columns:
+            conn.exec_driver_sql(f"ALTER TABLE models ADD COLUMN {column_name} {sql_type}")
+
+    if "general_recommendation_status" not in model_columns:
+        return
+    conn.exec_driver_sql(
+        """
+        UPDATE models
+        SET usage_classification = 'restricted',
+            usage_classification_notes = general_recommendation_notes,
+            usage_classification_updated_at = general_recommendation_updated_at,
+            general_recommendation_status = 'unrated',
+            general_recommendation_notes = NULL,
+            general_recommendation_updated_at = NULL
+        WHERE lower(trim(general_recommendation_status)) = 'restricted'
+        """
+    )
+
+
 SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260701_001_schema_repairs", _migration_20260701_schema_repairs),
     ("20260701_002_model_roles", _migration_20260701_model_roles),
@@ -1904,6 +1940,7 @@ SCHEMA_MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
     ("20260714_002_general_recommendation_simplification", _migration_20260714_general_recommendation_simplification),
     ("20260714_003_gpt56_configuration_policy", _migration_20260714_gpt56_configuration_policy),
     ("20260714_004_provider_pricing", _migration_20260714_provider_pricing),
+    ("20260717_001_usage_classification", _migration_20260717_usage_classification),
 )
 
 

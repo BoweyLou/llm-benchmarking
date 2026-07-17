@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0 - 2026-07-17
+
+- Split model recommendation from governance: Recommendation now uses `Recommended`, `Legacy Supported`, `Not Recommended`, or `Unrated`, while Usage Classification independently uses `Standard`, `Restricted`, `Prohibited`, or `Unclassified`.
+- Added an idempotent migration that moves existing general `Restricted` decisions and their notes/timestamps to Usage Classification, plus catalog schema 5, snapshot schema 4 compatibility, independent API/UI controls, and CSV/model-guide export fields.
+- Kept legacy per-use-case `restricted` recommendations and existing configuration-level usage-policy controls unchanged.
+
 ## 0.11.1 - 2026-07-17
 
 - Removed trailing `(free)` labels from model display names while retaining the underlying OpenRouter route, pricing, and free-route metadata.

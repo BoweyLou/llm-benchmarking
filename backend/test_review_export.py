@@ -106,6 +106,9 @@ def _catalog() -> dict[str, object]:
         "general_recommendation_status": "recommended",
         "general_recommendation_notes": "Recommended in source A",
         "general_recommendation_updated_at": "2026-07-14T02:00:00Z",
+        "usage_classification": "standard",
+        "usage_classification_notes": "Standard approved use.",
+        "usage_classification_updated_at": "2026-07-14T03:00:00Z",
         "suggested_use_cases": [
             _suggestion("customer_support", "Customer support", fit_score=0.91, confidence=0.82)
         ],
@@ -228,8 +231,10 @@ def _catalog() -> dict[str, object]:
         "provider": "Second Provider",
         "general_approval_status": "not_approved",
         "general_approval_notes": "Not approved in source B",
-        "general_recommendation_status": "restricted",
-        "general_recommendation_notes": "Restricted in source B",
+        "general_recommendation_status": "legacy_supported",
+        "general_recommendation_notes": "Legacy supported in source B",
+        "usage_classification": "restricted",
+        "usage_classification_notes": "Restricted in source B",
         "suggested_use_cases": [
             _suggestion("customer_support", "Customer support", fit_score=0.86, confidence=0.79),
             _suggestion("document_summary", "Document summary", fit_score=0.74, confidence=0.68),
@@ -245,11 +250,12 @@ def _catalog() -> dict[str, object]:
         "model_roles": ["embedding"],
         "general_approval_status": "unreviewed",
         "general_recommendation_status": "unrated",
+        "usage_classification": "unclassified",
         "suggested_use_cases": [],
         "inference_destinations": [],
     }
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "generated_at": EXPORTED_AT,
         "models": [alpha_a, alpha_b, beta],
     }
@@ -257,7 +263,7 @@ def _catalog() -> dict[str, object]:
 
 def _edge_catalog(destinations: list[dict[str, object]]) -> dict[str, object]:
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "generated_at": EXPORTED_AT,
         "models": [
             {
@@ -268,6 +274,7 @@ def _edge_catalog(destinations: list[dict[str, object]]) -> dict[str, object]:
                 "model_roles": ["generator"],
                 "general_approval_status": "approved",
                 "general_recommendation_status": "recommended",
+                "usage_classification": "standard",
                 "suggested_use_cases": [],
                 "inference_destinations": destinations,
             }
@@ -294,7 +301,7 @@ def _archive_rows(
 class ReviewModelGuideExportTests(unittest.TestCase):
     def test_archive_has_readable_models_costs_and_legend_members(self) -> None:
         catalog = {
-            "schema_version": 4,
+            "schema_version": 5,
             "generated_at": "2026-07-15T05:30:00Z",
             "models": [
                 {
@@ -305,6 +312,7 @@ class ReviewModelGuideExportTests(unittest.TestCase):
                     "model_roles": ["generator"],
                     "general_approval_status": "approved",
                     "general_recommendation_status": "recommended",
+                    "usage_classification": "standard",
                     "suggested_use_cases": [],
                     "inference_destinations": [],
                 }
@@ -342,14 +350,19 @@ class ReviewModelGuideExportTests(unittest.TestCase):
         self.assertEqual(alpha["provider"], "Multiple providers")
         self.assertEqual(alpha["general_approval_status"], "mixed")
         self.assertEqual(alpha["general_recommendation_status"], "mixed")
+        self.assertEqual(alpha["usage_classification"], "mixed")
+        self.assertEqual(alpha["usage_classification_notes"], "Standard approved use.; Restricted in source B")
         self.assertEqual(beta["general_approval_status"], "unreviewed")
         self.assertEqual(beta["general_recommendation_status"], "unrated")
+        self.assertEqual(beta["usage_classification"], "unclassified")
         self.assertNotEqual(beta["general_approval_status"], "mixed")
         self.assertIn("mixed", readme)
+        self.assertIn("usage classification", readme)
+        self.assertIn("independent", readme)
 
     def test_missing_server_owned_review_entity_id_fails_closed(self) -> None:
         catalog = {
-            "schema_version": 4,
+            "schema_version": 5,
             "models": [
                 {
                     "id": "missing-review-entity",
@@ -757,7 +770,7 @@ class ReviewModelGuideExportTests(unittest.TestCase):
 
     def test_au_route_without_fresh_au_specific_pair_is_explicit(self) -> None:
         catalog = {
-            "schema_version": 4,
+            "schema_version": 5,
             "models": [
                 {
                     "id": "au-no-price",

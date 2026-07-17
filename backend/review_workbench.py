@@ -32,9 +32,15 @@ from .database import (
 )
 from .model_evidence import enrich_models_with_selection_evidence
 
-CATALOG_SCHEMA_VERSION = 4
-SNAPSHOT_SCHEMA_VERSION = 3
-GENERAL_RECOMMENDATION_STATUSES = ("unrated", "recommended", "restricted", "not_recommended")
+CATALOG_SCHEMA_VERSION = 5
+SNAPSHOT_SCHEMA_VERSION = 4
+GENERAL_RECOMMENDATION_STATUSES = (
+    "unrated",
+    "recommended",
+    "legacy_supported",
+    "not_recommended",
+)
+USAGE_CLASSIFICATIONS = ("unclassified", "standard", "restricted", "prohibited")
 
 
 def build_review_catalog() -> dict[str, Any]:
@@ -45,6 +51,9 @@ def build_review_catalog() -> dict[str, Any]:
         model["general_approval_status"] = _general_approval_status(model)
         model["general_recommendation_status"] = _normalize_general_recommendation_status(
             model.get("general_recommendation_status")
+        )
+        model["usage_classification"] = _normalize_usage_classification(
+            model.get("usage_classification")
         )
     use_cases = update_engine.list_use_cases()
     benchmarks = update_engine.list_benchmarks()
@@ -206,6 +215,8 @@ def apply_model_decisions(
     approval_notes: str | None = None,
     recommendation_status: str | None = None,
     recommendation_notes: str | None = None,
+    usage_classification: str | None = None,
+    usage_classification_notes: str | None = None,
     reasoning_effort_ceiling: str | None = None,
     reasoning_effort_ceiling_set: bool = False,
     restricted_modes: Iterable[str] | None = None,
@@ -217,13 +228,20 @@ def apply_model_decisions(
         raise ValueError("At least one model id is required.")
     _ensure_models_exist(normalized_model_ids)
 
-    if approval_status is None and recommendation_status is None and not reasoning_effort_ceiling_set and restricted_modes is None:
+    if (
+        approval_status is None
+        and recommendation_status is None
+        and usage_classification is None
+        and not reasoning_effort_ceiling_set
+        and restricted_modes is None
+    ):
         raise ValueError("At least one general decision or usage policy field is required.")
 
     values: dict[str, Any] = {}
     saved_at = utc_now_iso()
     normalized_approval_status: str | None = None
     normalized_recommendation_status: str | None = None
+    normalized_usage_classification: str | None = None
     if approval_status is not None:
         normalized_approval_status = _normalize_general_approval_status(
             approval_status,
@@ -236,6 +254,17 @@ def apply_model_decisions(
             else _clean_text(approval_notes),
             general_approval_updated_at=None
             if normalized_approval_status == "unreviewed"
+            else saved_at,
+        )
+    if usage_classification is not None:
+        normalized_usage_classification = _normalize_usage_classification(usage_classification)
+        values.update(
+            usage_classification=normalized_usage_classification,
+            usage_classification_notes=None
+            if normalized_usage_classification == "unclassified"
+            else _clean_text(usage_classification_notes),
+            usage_classification_updated_at=None
+            if normalized_usage_classification == "unclassified"
             else saved_at,
         )
     if recommendation_status is not None:
@@ -278,6 +307,7 @@ def apply_model_decisions(
         "approved_for_use": normalized_approval_status == "approved" if normalized_approval_status else None,
         "approval_status": normalized_approval_status,
         "recommendation_status": normalized_recommendation_status,
+        "usage_classification": normalized_usage_classification,
         "reasoning_effort_ceiling": reasoning_effort_ceiling if reasoning_effort_ceiling_set else None,
         "restricted_modes": normalized_restricted_modes,
         "saved_at": saved_at,
@@ -339,6 +369,9 @@ def export_review_snapshot() -> dict[str, Any]:
                 models_table.c.general_recommendation_status,
                 models_table.c.general_recommendation_notes,
                 models_table.c.general_recommendation_updated_at,
+                models_table.c.usage_classification,
+                models_table.c.usage_classification_notes,
+                models_table.c.usage_classification_updated_at,
                 models_table.c.reasoning_effort_ceiling,
                 models_table.c.restricted_modes_json,
                 models_table.c.usage_policy_notes,
@@ -353,6 +386,9 @@ def export_review_snapshot() -> dict[str, Any]:
                     models_table.c.general_recommendation_status != "unrated",
                     models_table.c.general_recommendation_notes.is_not(None),
                     models_table.c.general_recommendation_updated_at.is_not(None),
+                    models_table.c.usage_classification != "unclassified",
+                    models_table.c.usage_classification_notes.is_not(None),
+                    models_table.c.usage_classification_updated_at.is_not(None),
                     models_table.c.reasoning_effort_ceiling.is_not(None),
                     models_table.c.restricted_modes_json != "[]",
                     models_table.c.usage_policy_notes.is_not(None),
@@ -381,6 +417,9 @@ def export_review_snapshot() -> dict[str, Any]:
         row["general_recommendation_status"] = _normalize_general_recommendation_status(
             row.get("general_recommendation_status")
         )
+        row["usage_classification"] = _normalize_usage_classification(
+            row.get("usage_classification")
+        )
 
     return {
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
@@ -398,7 +437,8 @@ def export_review_snapshot() -> dict[str, Any]:
 def import_review_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Import a review snapshot into the current SQLite database."""
     update_engine.bootstrap()
-    if int(snapshot.get("schema_version") or 0) not in {1, 2, SNAPSHOT_SCHEMA_VERSION}:
+    snapshot_schema_version = int(snapshot.get("schema_version") or 0)
+    if snapshot_schema_version not in {1, 2, 3, SNAPSHOT_SCHEMA_VERSION}:
         raise ValueError(f"Unsupported review snapshot schema version: {snapshot.get('schema_version')}")
 
     created_manual_models = 0
@@ -425,7 +465,10 @@ def import_review_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
 
     catalog_status_updated_count = _import_catalog_statuses(snapshot.get("catalog_statuses") or [])
     decision_summary = _import_decisions(snapshot.get("decisions") or [])
-    model_approval_updated_count = _import_model_approvals(snapshot.get("model_approvals") or [])
+    model_approval_updated_count = _import_model_approvals(
+        snapshot.get("model_approvals") or [],
+        snapshot_schema_version=snapshot_schema_version,
+    )
     return {
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "created_manual_model_count": created_manual_models,
@@ -479,11 +522,15 @@ def _build_facets(
     capability_counts: dict[str, int] = {}
     general_approval_counts = {"approved": 0, "not_approved": 0, "unreviewed": 0}
     general_recommendation_counts = {status: 0 for status in GENERAL_RECOMMENDATION_STATUSES}
+    usage_classification_counts = {status: 0 for status in USAGE_CLASSIFICATIONS}
     approval_counts = {"approved": 0, "not_approved": 0}
     for model in models:
         general_approval_counts[_general_approval_status(model)] += 1
         general_recommendation_counts[
             _normalize_general_recommendation_status(model.get("general_recommendation_status"))
+        ] += 1
+        usage_classification_counts[
+            _normalize_usage_classification(model.get("usage_classification"))
         ] += 1
         for country in _model_country_entries(model):
             country_id = country["id"]
@@ -542,6 +589,7 @@ def _build_facets(
         "capabilities": _counts_to_list(capability_counts),
         "general_approvals": _counts_to_list(general_approval_counts),
         "general_recommendations": _counts_to_list(general_recommendation_counts),
+        "usage_classifications": _counts_to_list(usage_classification_counts),
         "approvals": _counts_to_list(approval_counts),
     }
 
@@ -591,6 +639,7 @@ def _model_needs_decision(model: dict[str, Any]) -> bool:
     return (
         _general_approval_status(model) == "unreviewed"
         or _normalize_general_recommendation_status(model.get("general_recommendation_status")) == "unrated"
+        or _normalize_usage_classification(model.get("usage_classification")) == "unclassified"
     )
 
 
@@ -633,7 +682,7 @@ def _import_catalog_statuses(rows: Iterable[Any]) -> int:
     return updated
 
 
-def _import_model_approvals(rows: Iterable[Any]) -> int:
+def _import_model_approvals(rows: Iterable[Any], *, snapshot_schema_version: int) -> int:
     updated = 0
     with update_engine.ENGINE.begin() as conn:
         for row in rows:
@@ -648,6 +697,19 @@ def _import_model_approvals(rows: Iterable[Any]) -> int:
                 updated_at=_clean_text(row.get("general_approval_updated_at")),
                 unreviewed_when_missing=True,
             )
+            recommendation_status = _clean_text(row.get("general_recommendation_status")) or "unrated"
+            recommendation_notes = _clean_text(row.get("general_recommendation_notes"))
+            recommendation_updated_at = _clean_text(row.get("general_recommendation_updated_at"))
+            usage_classification = _clean_text(row.get("usage_classification")) or "unclassified"
+            usage_classification_notes = _clean_text(row.get("usage_classification_notes"))
+            usage_classification_updated_at = _clean_text(row.get("usage_classification_updated_at"))
+            if snapshot_schema_version < SNAPSHOT_SCHEMA_VERSION and recommendation_status.lower() == "restricted":
+                usage_classification = "restricted"
+                usage_classification_notes = recommendation_notes
+                usage_classification_updated_at = recommendation_updated_at
+                recommendation_status = "unrated"
+                recommendation_notes = None
+                recommendation_updated_at = None
             result = conn.execute(
                 update(models_table)
                 .where(models_table.c.id == model_id)
@@ -660,12 +722,13 @@ def _import_model_approvals(rows: Iterable[Any]) -> int:
                     if approval_status == "unreviewed"
                     else (_clean_text(row.get("general_approval_updated_at")) or utc_now_iso()),
                     general_recommendation_status=_normalize_general_recommendation_status(
-                        _clean_text(row.get("general_recommendation_status")) or "unrated"
+                        recommendation_status
                     ),
-                    general_recommendation_notes=_clean_text(row.get("general_recommendation_notes")),
-                    general_recommendation_updated_at=_clean_text(
-                        row.get("general_recommendation_updated_at")
-                    ),
+                    general_recommendation_notes=recommendation_notes,
+                    general_recommendation_updated_at=recommendation_updated_at,
+                    usage_classification=_normalize_usage_classification(usage_classification),
+                    usage_classification_notes=usage_classification_notes,
+                    usage_classification_updated_at=usage_classification_updated_at,
                     reasoning_effort_ceiling=_clean_text(row.get("reasoning_effort_ceiling")),
                     restricted_modes_json=_clean_text(row.get("restricted_modes_json")) or "[]",
                     usage_policy_notes=_clean_text(row.get("usage_policy_notes")),
@@ -776,8 +839,19 @@ def _validate_recommendation_status(value: str | None) -> str:
 
 
 def _normalize_general_recommendation_status(value: Any) -> str:
-    normalized = _validate_recommendation_status(_clean_text(value) or "unrated")
-    return "not_recommended" if normalized == "discouraged" else normalized
+    normalized = _required_text(_clean_text(value) or "unrated", "general recommendation status").lower()
+    if normalized == "discouraged":
+        normalized = "not_recommended"
+    if normalized not in GENERAL_RECOMMENDATION_STATUSES:
+        raise ValueError(f"Unsupported general recommendation status: {value}")
+    return normalized
+
+
+def _normalize_usage_classification(value: Any) -> str:
+    normalized = _required_text(_clean_text(value) or "unclassified", "usage classification").lower()
+    if normalized not in USAGE_CLASSIFICATIONS:
+        raise ValueError(f"Unsupported usage classification: {value}")
+    return normalized
 
 
 def _decode_model_roles(value: Any) -> list[str]:

@@ -29,6 +29,9 @@ MODEL_FIELDS = [
     "general_recommendation_status",
     "general_recommendation_notes",
     "general_recommendation_updated_at",
+    "usage_classification",
+    "usage_classification_notes",
+    "usage_classification_updated_at",
     "suggested_use_cases_read_only",
     "suggested_use_case_count",
     "suggested_use_cases",
@@ -243,6 +246,17 @@ def _model_row(group: Mapping[str, Any], cost_rows: Sequence[dict[str, Any]]) ->
         "general_recommendation_updated_at": _latest_text(
             member.get("general_recommendation_updated_at") for member in members
         ),
+        "usage_classification": _unanimous_status(
+            members,
+            _usage_classification,
+            "unclassified",
+        ),
+        "usage_classification_notes": _join_values(
+            member.get("usage_classification_notes") for member in members
+        ),
+        "usage_classification_updated_at": _latest_text(
+            member.get("usage_classification_updated_at") for member in members
+        ),
         "suggested_use_cases_read_only": "yes - metric evidence only",
         "suggested_use_case_count": len(suggestions),
         "suggested_use_cases": _join_values(item.get("label") for item in suggestions),
@@ -270,6 +284,10 @@ def _approval_status(model: Mapping[str, Any]) -> str:
 def _recommendation_status(model: Mapping[str, Any]) -> str:
     status = str(model.get("general_recommendation_status") or "unrated").strip().lower()
     return "not_recommended" if status == "discouraged" else status
+
+
+def _usage_classification(model: Mapping[str, Any]) -> str:
+    return str(model.get("usage_classification") or "unclassified").strip().lower()
 
 
 def _unanimous_status(
@@ -840,8 +858,11 @@ def _render_readme(timestamp: str) -> bytes:
 Exported at: {timestamp}
 
 models.csv contains one readable row per review entity, including approval,
-general recommendation, suggested use cases, and an AU-first inference summary.
-A status of mixed means the grouped source records disagree.
+general recommendation, usage classification, suggested use cases, and an
+AU-first inference summary. Recommendation and usage classification are
+independent: recommendation records preference or suitability, while usage
+classification records governance permissions. A status of mixed means the
+grouped source records disagree.
 
 Suggested use cases are read-only metric evidence. They are not approval
 decisions and do not include legacy per-use-case approval records.

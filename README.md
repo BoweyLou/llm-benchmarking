@@ -232,11 +232,11 @@ team members. Store the audience or access condition in recommendation notes.
 
 For interactive model review, run the FastAPI app locally and open `/review`.
 The LLM Model Tool presents a focused queue with provider, general approval,
-general recommendation, and needs-decision filters. Selecting a model puts its
-benchmark position, one general decision, read-only suggested use cases, and
-reference facts in one detail view. The section is labelled **Benchmark
-position — How this model compares with similar scored models in this
-database.** It leads with four Key benchmarks selected by active use-case
+recommendation, usage-classification, and needs-decision filters. Selecting a
+model puts its benchmark position, independent recommendation and governance
+decisions, read-only suggested use cases, and reference facts in one detail view. The section is labelled
+**Benchmark position — How this model compares with similar scored models in
+this database.** It leads with four Key benchmarks selected by active use-case
 relevance or role defaults, then tier and provenance, rather than by the most
 flattering percentile. An expandable complete list groups all benchmark results
 by category. Missing relevant evidence follows the active use case's positively
@@ -307,8 +307,15 @@ Saved decisions write to SQLite:
 - `models.general_recommendation_status`,
   `models.general_recommendation_notes`, and
   `models.general_recommendation_updated_at` store one general recommendation:
-  `Recommended`, `Restricted`, `Not recommended`, or `Unrated`. Upgrades and
-  legacy API inputs normalize general `Discouraged` to `Not recommended`.
+  `Recommended`, `Legacy Supported`, `Not recommended`, or `Unrated`. Use
+  `Legacy Supported` when a model remains usable if necessary but should be
+  replaced by a recommended option. Upgrades and legacy API inputs normalize
+  general `Discouraged` to `Not recommended`.
+- `models.usage_classification`, `models.usage_classification_notes`, and
+  `models.usage_classification_updated_at` store the independent governance
+  classification: `Standard`, `Restricted`, `Prohibited`, or `Unclassified`.
+  `Restricted` and `Prohibited` describe permission or controls, not model
+  preference or suitability.
 - `models.catalog_status` stores listing state such as `tracked`,
   `provisional`, or `deprecated`.
 - `model_use_case_recommendation_proposals` remains generated policy output and
@@ -321,16 +328,17 @@ Saved decisions write to SQLite:
 
 Select a model, review its Key benchmark position, expandable evidence, and
 metric-derived suggested use cases, then save one general approval and one
-general recommendation. Use `Needs a decision` to find models whose approval is
-still `Unreviewed` or recommendation is still `Unrated`. `Restricted` applies
-to the model generally; record the access boundary in the shared decision
-rationale.
+general recommendation plus one usage classification. Use `Needs a decision`
+to find models whose approval is still `Unreviewed`, recommendation is still
+`Unrated`, or usage classification is still `Unclassified`. Recommendation and
+usage classification do not rewrite one another; record any access boundary in
+the shared decision rationale.
 
 For bulk review, choose `Select`, optionally narrow the queue with filters, and
 use `Select all filtered`. The fixed action bar shows both the number of visible
 model groups and the exact underlying source-record count. The confirmation
-dialog changes only the selected general approval and/or recommendation fields;
-fields set to `Leave unchanged` and all suggested-use-case evidence are left
+dialog changes only the selected general approval, recommendation, and/or usage
+classification fields; fields set to `Leave unchanged` and all suggested-use-case evidence are left
 untouched. A decision on a combined row writes to every listed source record.
 The queue renders results in progressive 200-row batches for responsiveness;
 `Select all filtered` still targets the complete filtered result, including

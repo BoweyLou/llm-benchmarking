@@ -108,6 +108,9 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("general_recommendation_status", model_columns)
         self.assertIn("general_recommendation_notes", model_columns)
         self.assertIn("general_recommendation_updated_at", model_columns)
+        self.assertIn("usage_classification", model_columns)
+        self.assertIn("usage_classification_notes", model_columns)
+        self.assertIn("usage_classification_updated_at", model_columns)
         self.assertIn("reasoning_effort_ceiling", model_columns)
         self.assertIn("restricted_modes_json", model_columns)
         self.assertIn("change_summary_json", update_log_columns)
@@ -152,6 +155,9 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("general_recommendation_status", model_columns)
         self.assertIn("general_recommendation_notes", model_columns)
         self.assertIn("general_recommendation_updated_at", model_columns)
+        self.assertIn("usage_classification", model_columns)
+        self.assertIn("usage_classification_notes", model_columns)
+        self.assertIn("usage_classification_updated_at", model_columns)
         self.assertIn("reasoning_effort_ceiling", model_columns)
         self.assertIn("restricted_modes_json", model_columns)
         self.assertIn("resolution_status", raw_record_columns)
@@ -186,6 +192,7 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertIn("20260708_001_update_change_summary", migration_ids)
         self.assertIn("20260713_001_score_evidence", migration_ids)
         self.assertIn("20260714_001_general_model_recommendations", migration_ids)
+        self.assertIn("20260717_001_usage_classification", migration_ids)
 
     def test_speech_to_text_role_migration_backfills_transcription_capabilities(self) -> None:
         engine = init_db(get_engine("sqlite:///:memory:"))
@@ -251,6 +258,53 @@ class DatabaseMigrationTests(unittest.TestCase):
             ).mappings().one()
 
         self.assertEqual(row["general_recommendation_status"], "not_recommended")
+
+    def test_usage_classification_migration_maps_restricted_and_is_idempotent(self) -> None:
+        engine = init_db(get_engine("sqlite:///:memory:"))
+        with engine.begin() as conn:
+            conn.execute(models_table.insert(), [
+                {
+                    "id": "legacy-restricted-model",
+                    "name": "Legacy Restricted Model",
+                    "provider": "Test Provider",
+                    "type": "proprietary",
+                    "general_recommendation_status": "restricted",
+                    "general_recommendation_notes": "Controlled team access only.",
+                    "general_recommendation_updated_at": "2026-07-16T01:02:03Z",
+                    "active": 1,
+                },
+                {
+                    "id": "recommended-model",
+                    "name": "Recommended Model",
+                    "provider": "Test Provider",
+                    "type": "proprietary",
+                    "general_recommendation_status": "recommended",
+                    "general_recommendation_notes": "Preferred model.",
+                    "general_recommendation_updated_at": "2026-07-16T02:03:04Z",
+                    "active": 1,
+                },
+            ])
+
+            database._migration_20260717_usage_classification(conn)
+            database._migration_20260717_usage_classification(conn)
+            restricted = conn.execute(
+                models_table.select().where(models_table.c.id == "legacy-restricted-model")
+            ).mappings().one()
+            recommended = conn.execute(
+                models_table.select().where(models_table.c.id == "recommended-model")
+            ).mappings().one()
+
+        self.assertEqual(restricted["general_recommendation_status"], "unrated")
+        self.assertIsNone(restricted["general_recommendation_notes"])
+        self.assertIsNone(restricted["general_recommendation_updated_at"])
+        self.assertEqual(restricted["usage_classification"], "restricted")
+        self.assertEqual(restricted["usage_classification_notes"], "Controlled team access only.")
+        self.assertEqual(restricted["usage_classification_updated_at"], "2026-07-16T01:02:03Z")
+        self.assertEqual(recommended["general_recommendation_status"], "recommended")
+        self.assertEqual(recommended["general_recommendation_notes"], "Preferred model.")
+        self.assertEqual(recommended["usage_classification"], "unclassified")
+        self.assertIsNone(recommended["usage_classification_notes"])
+        self.assertIsNone(recommended["usage_classification_updated_at"])
 
     def test_gpt56_migration_is_idempotent_and_preserves_decisions_and_evidence(self) -> None:
         engine = init_db(get_engine("sqlite:///:memory:"))

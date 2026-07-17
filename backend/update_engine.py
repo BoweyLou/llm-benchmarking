@@ -857,6 +857,22 @@ def _normalize_recommendation_status(value: Any, *, allow_mixed: bool = False) -
     return RECOMMENDATION_STATUS_UNRATED
 
 
+def _normalize_general_recommendation_status(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == RECOMMENDATION_STATUS_DISCOURAGED:
+        return RECOMMENDATION_STATUS_NOT_RECOMMENDED
+    if normalized in {"unrated", "recommended", "legacy_supported", "not_recommended"}:
+        return normalized
+    return RECOMMENDATION_STATUS_UNRATED
+
+
+def _normalize_usage_classification(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"standard", "restricted", "prohibited", "unclassified"}:
+        return normalized
+    return "unclassified"
+
+
 def _serialize_use_case_approval(row: dict[str, Any]) -> dict[str, Any]:
     recommendation_status = _normalize_recommendation_status(row.get("recommendation_status"))
     auto_recommendation_status = _normalize_recommendation_status(row.get("auto_recommendation_status"))
@@ -7972,11 +7988,14 @@ def _serialize_model(
     payload["general_approved_for_use"] = bool(payload.get("general_approved_for_use", 0))
     payload["general_approval_notes"] = _clean_text(payload.get("general_approval_notes"))
     payload["general_approval_updated_at"] = payload.get("general_approval_updated_at")
-    payload["general_recommendation_status"] = _normalize_recommendation_status(
+    payload["general_recommendation_status"] = _normalize_general_recommendation_status(
         payload.get("general_recommendation_status")
     )
     payload["general_recommendation_notes"] = _clean_text(payload.get("general_recommendation_notes"))
     payload["general_recommendation_updated_at"] = payload.get("general_recommendation_updated_at")
+    payload["usage_classification"] = _normalize_usage_classification(payload.get("usage_classification"))
+    payload["usage_classification_notes"] = _clean_text(payload.get("usage_classification_notes"))
+    payload["usage_classification_updated_at"] = payload.get("usage_classification_updated_at")
     payload["reasoning_effort_ceiling"] = _clean_text(payload.get("reasoning_effort_ceiling"))
     payload["restricted_modes"] = _decode_json_string_list(payload.pop("restricted_modes_json", None))
     payload["usage_policy_notes"] = _clean_text(payload.get("usage_policy_notes"))
