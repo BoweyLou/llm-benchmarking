@@ -12,4 +12,3 @@ class ModelNameTests(unittest.TestCase):
         self.assertEqual(remove_trailing_free_suffix("Example (free) edition"), "Example (free) edition")
         self.assertEqual(remove_trailing_free_suffix("Free Example"), "Free Example")
         self.assertEqual(remove_trailing_free_suffix("Example (freedom)"), "Example (freedom)")
-
