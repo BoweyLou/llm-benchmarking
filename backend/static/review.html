@@ -294,7 +294,7 @@
         <label class="export-option" for="exportScopeFiltered"><input id="exportScopeFiltered" name="exportScope" type="radio" value="filtered"><span><strong>Filtered models</strong><small id="exportFilteredMeta">Current filter results</small></span></label>
         <label class="export-option" for="exportScopeSelected"><input id="exportScopeSelected" name="exportScope" type="radio" value="selected" disabled><span><strong>Selected models</strong><small id="exportSelectedMeta">Select models in the queue first</small></span></label>
       </fieldset>
-      <p class="export-note">Grouped models include every underlying source record. Stale prices remain in the detail CSV and are clearly marked.</p>
+      <p class="export-note">Grouped models include every underlying source record. Stale prices are excluded from current summaries and called out in the field guide.</p>
       <p class="export-status" id="exportStatus" role="status" aria-live="polite" aria-atomic="true"></p>
       <div class="dialog-actions"><button type="button" class="btn" id="cancelExport">Cancel</button><button type="submit" class="btn primary" id="downloadExport">Download ZIP</button></div>
     </form>

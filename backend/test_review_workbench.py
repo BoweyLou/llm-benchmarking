@@ -161,6 +161,10 @@ class ReviewWorkbenchTests(unittest.TestCase):
         self.assertIn("Run updates", app_response.text)
         self.assertIn('id="openExport"', app_response.text)
         self.assertIn("Export review data", app_response.text)
+        self.assertIn(
+            "Stale prices are excluded from current summaries and called out in the field guide.",
+            app_response.text,
+        )
         self.assertIn('value="all"', app_response.text)
         self.assertIn('value="filtered"', app_response.text)
         self.assertIn('value="selected" disabled', app_response.text)
