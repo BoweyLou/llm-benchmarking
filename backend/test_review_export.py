@@ -286,20 +286,151 @@ def _archive_rows(
     *,
     model_ids: list[str] | None = None,
 ) -> tuple[review_export.ModelGuideArchive, list[dict[str, str]], list[dict[str, str]], str]:
+    catalog = _catalog()
     archive = review_export.build_model_guide_archive(
-        catalog=_catalog(),
+        catalog=catalog,
         model_ids=model_ids,
         exported_at=EXPORTED_AT,
     )
     with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
-        models = list(csv.DictReader(io.StringIO(bundle.read("models.csv").decode("utf-8-sig"))))
-        costs = list(csv.DictReader(io.StringIO(bundle.read("inference-costs.csv").decode("utf-8-sig"))))
+        models = list(csv.DictReader(io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))))
         readme = bundle.read("README.txt").decode("utf-8")
+    selected = review_export._select_models(catalog["models"], model_ids)
+    costs = [
+        row
+        for group in review_export._group_models(selected)
+        for row in review_export._inference_cost_rows(group)
+    ]
     return archive, models, costs, readme
 
 
+def _raw_cost_rows(catalog: dict[str, object]) -> list[dict[str, object]]:
+    return [
+        row
+        for group in review_export._group_models(catalog["models"])
+        for row in review_export._inference_cost_rows(group)
+    ]
+
+
 class ReviewModelGuideExportTests(unittest.TestCase):
-    def test_archive_has_readable_models_costs_and_legend_members(self) -> None:
+    def test_single_csv_contract_is_one_human_readable_row_per_review_entity(self) -> None:
+        archive = review_export.build_model_guide_archive(
+            catalog=_catalog(),
+            exported_at=EXPORTED_AT,
+        )
+
+        with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
+            self.assertEqual(bundle.namelist(), ["model-guide.csv", "README.txt"])
+            rows = list(
+                csv.DictReader(
+                    io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))
+                )
+            )
+
+        self.assertEqual(list(rows[0]), review_export.MODEL_FIELDS)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(len({row["Model ID"] for row in rows}), 2)
+        alpha = next(row for row in rows if row["Model ID"] == "alpha-group")
+        beta = next(row for row in rows if row["Model ID"] == "beta-group")
+        self.assertEqual(alpha["Approval"], "Mixed")
+        self.assertEqual(alpha["Recommendation"], "Mixed")
+        self.assertEqual(alpha["Classification"], "Mixed")
+        self.assertEqual(alpha["Last review update"], "2026-07-14T03:00:00Z (Classification)")
+        self.assertEqual(beta["Approval"], "Not Reviewed")
+        self.assertEqual(beta["Recommendation"], "Not Assessed")
+        self.assertEqual(beta["Classification"], "Unclassified")
+        self.assertEqual(beta["Last review update"], "Not reviewed")
+
+    def test_route_prices_are_paired_deduplicated_and_combined_in_scope_columns(self) -> None:
+        catalog = _edge_catalog(
+            [
+                {
+                    "id": "aws-bedrock",
+                    "name": "AWS Bedrock",
+                    "hyperscaler": "AWS",
+                    "availability_scope": "Account + region scoped",
+                    "availability_note": "Matched routes.",
+                    "location_scope": "Published Bedrock regions",
+                    "regions": ["ap-southeast-2", "us-east-1", "eu-west-1"],
+                    "deployment_modes": ["On-demand"],
+                    "sources": [],
+                    "availability_evidence_kind": "synced",
+                    "pricing_offers": [
+                        _offer(101, destination_id="aws-bedrock", region="ap-southeast-2"),
+                        _offer(
+                            102,
+                            destination_id="aws-bedrock",
+                            region="us-east-1",
+                            amount_input=1,
+                            amount_output=4,
+                        ),
+                        _offer(
+                            103,
+                            destination_id="aws-bedrock",
+                            region="eu-west-1",
+                            amount_input=2,
+                            amount_output=8,
+                        ),
+                    ],
+                }
+            ]
+        )
+        archive = review_export.build_model_guide_archive(
+            catalog=catalog,
+            exported_at=EXPORTED_AT,
+        )
+
+        with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
+            row = next(
+                csv.DictReader(
+                    io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))
+                )
+            )
+
+        australia = row["Australian inference and pricing"]
+        overseas = row["Overseas inference and pricing"]
+        self.assertIn("AWS Bedrock", australia)
+        self.assertIn("AUD 2 input / 8 output per 1,000,000 tokens", australia)
+        self.assertIn("[confirmed route", australia)
+        self.assertIn("Ireland", overseas)
+        self.assertIn("United States", overseas)
+        self.assertIn("USD 1-2 input / 4-8 output per 1,000,000 tokens", overseas)
+        self.assertEqual(overseas.count("AWS Bedrock"), 1)
+
+    def test_price_only_australian_evidence_is_visible_but_never_called_available(self) -> None:
+        destination = {
+            "id": "aws-bedrock",
+            "name": "AWS Bedrock",
+            "hyperscaler": "AWS",
+            "availability_scope": "Region scoped via public pricing",
+            "availability_note": "Pricing does not confirm account access.",
+            "location_scope": "Published pricing regions",
+            "regions": ["ap-southeast-2"],
+            "deployment_modes": ["On-demand"],
+            "sources": [],
+            "availability_evidence_kind": "pricing_only",
+            "pricing_offers": [
+                _offer(104, destination_id="aws-bedrock", region="ap-southeast-2")
+            ],
+        }
+        archive = review_export.build_model_guide_archive(
+            catalog=_edge_catalog([destination]),
+            exported_at=EXPORTED_AT,
+        )
+
+        with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
+            row = next(
+                csv.DictReader(
+                    io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))
+                )
+            )
+
+        summary = row["Australian inference and pricing"]
+        self.assertIn("AUD 2 input / 8 output per 1,000,000 tokens", summary)
+        self.assertIn("price only; availability unconfirmed", summary)
+        self.assertNotIn("confirmed route", summary)
+
+    def test_archive_has_readable_single_csv_and_legend_members(self) -> None:
         catalog = {
             "schema_version": 6,
             "generated_at": "2026-07-15T05:30:00Z",
@@ -326,42 +457,34 @@ class ReviewModelGuideExportTests(unittest.TestCase):
 
         self.assertEqual(archive.filename, "llm-model-guide-20260715T053000Z.zip")
         with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
-            self.assertEqual(bundle.namelist(), ["models.csv", "inference-costs.csv", "README.txt"])
-            model_rows = list(csv.DictReader(io.StringIO(bundle.read("models.csv").decode("utf-8-sig"))))
-            cost_rows = list(csv.DictReader(io.StringIO(bundle.read("inference-costs.csv").decode("utf-8-sig"))))
+            self.assertEqual(bundle.namelist(), ["model-guide.csv", "README.txt"])
+            model_rows = list(csv.DictReader(io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))))
             readme = bundle.read("README.txt").decode("utf-8")
 
         self.assertEqual(list(model_rows[0]), review_export.MODEL_FIELDS)
-        self.assertEqual(list(cost_rows[0]), review_export.INFERENCE_COST_FIELDS)
-        self.assertEqual(model_rows[0]["model_group_id"], "alpha-group")
-        self.assertEqual(model_rows[0]["general_recommendation_status"], "acceptable")
-        self.assertEqual(cost_rows[0]["price_evidence_state"], "no_known_route")
-        self.assertIn("Suggested use cases are read-only metric evidence", readme)
-        self.assertIn("curated_fallback", readme)
-        self.assertIn("possible route, not confirmed model availability", readme)
-        self.assertIn("custom", readme)
-        self.assertIn("acceptable means okay for normal use", readme)
-        self.assertIn("unrated is displayed in the review UI as\nNot Assessed", readme)
+        self.assertEqual(model_rows[0]["Model ID"], "alpha-group")
+        self.assertEqual(model_rows[0]["Recommendation"], "Acceptable")
+        self.assertIn("Suggested uses are\nread-only metric evidence", readme)
+        self.assertIn("Possible route", readme)
+        self.assertIn("Acceptable means suitable for normal use", readme)
+        self.assertIn("Not Assessed means no recommendation", readme)
 
     def test_grouped_decisions_are_mixed_only_on_source_disagreement(self) -> None:
         _, models, _, readme = _archive_rows()
-        alpha = next(row for row in models if row["model_group_id"] == "alpha-group")
-        beta = next(row for row in models if row["model_group_id"] == "beta-group")
+        alpha = next(row for row in models if row["Model ID"] == "alpha-group")
+        beta = next(row for row in models if row["Model ID"] == "beta-group")
 
-        self.assertEqual(alpha["source_record_count"], "2")
-        self.assertEqual(alpha["source_record_ids"], "alpha-a; alpha-b")
-        self.assertEqual(alpha["provider"], "Multiple providers")
-        self.assertEqual(alpha["general_approval_status"], "mixed")
-        self.assertEqual(alpha["general_recommendation_status"], "mixed")
-        self.assertEqual(alpha["usage_classification"], "mixed")
-        self.assertEqual(alpha["usage_classification_notes"], "Standard approved use.; Restricted in source B")
-        self.assertEqual(beta["general_approval_status"], "unreviewed")
-        self.assertEqual(beta["general_recommendation_status"], "unrated")
-        self.assertEqual(beta["usage_classification"], "unclassified")
-        self.assertNotEqual(beta["general_approval_status"], "mixed")
-        self.assertIn("mixed", readme)
-        self.assertIn("usage classification", readme)
-        self.assertIn("independent", readme)
+        self.assertEqual(alpha["Provider"], "Multiple providers")
+        self.assertEqual(alpha["Approval"], "Mixed")
+        self.assertEqual(alpha["Recommendation"], "Mixed")
+        self.assertEqual(alpha["Classification"], "Mixed")
+        self.assertIn("Classification: Standard approved use.; Restricted in source B", alpha["Review notes and caveats"])
+        self.assertEqual(beta["Approval"], "Not Reviewed")
+        self.assertEqual(beta["Recommendation"], "Not Assessed")
+        self.assertEqual(beta["Classification"], "Unclassified")
+        self.assertNotEqual(beta["Approval"], "Mixed")
+        self.assertIn("Mixed", readme)
+        self.assertIn("Classification remain independent", readme)
 
     def test_missing_server_owned_review_entity_id_fails_closed(self) -> None:
         catalog = {
@@ -387,15 +510,10 @@ class ReviewModelGuideExportTests(unittest.TestCase):
 
     def test_suggested_use_cases_are_read_only_metric_evidence_not_legacy_decisions(self) -> None:
         _, models, _, _ = _archive_rows()
-        alpha = next(row for row in models if row["model_group_id"] == "alpha-group")
+        alpha = next(row for row in models if row["Model ID"] == "alpha-group")
 
-        self.assertEqual(alpha["suggested_use_cases_read_only"], "yes - metric evidence only")
-        self.assertEqual(alpha["suggested_use_case_count"], "2")
-        self.assertEqual(alpha["suggested_use_cases"], "Customer support; Document summary")
-        self.assertIn("fit 0.91", alpha["suggested_use_case_evidence"])
-        self.assertIn("confidence 0.82", alpha["suggested_use_case_evidence"])
-        self.assertIn("policy au-bank-v3", alpha["suggested_use_case_evidence"])
-        self.assertIn("computed 2026-07-15T04:00:00Z", alpha["suggested_use_case_evidence"])
+        self.assertEqual(alpha["Suggested uses"], "Customer support; Document summary")
+        self.assertNotIn("fit 0.91", alpha["Suggested uses"])
         self.assertNotIn("LEGACY-DECISION-MUST-NOT-EXPORT", "\n".join(alpha.values()))
 
     def test_inference_costs_are_au_first_and_never_borrow_non_au_prices(self) -> None:
@@ -406,12 +524,12 @@ class ReviewModelGuideExportTests(unittest.TestCase):
             ordered_locations,
             ["Australia", "United States", "Global", "Provider managed", "Provider routed", "Unknown"],
         )
-        regionless = next(row for row in costs if row["offer_id"] == "3" and row["charge_type"] == "input")
+        regionless = next(row for row in costs if row["offer_id"] == 3 and row["charge_type"] == "input")
         self.assertEqual(regionless["location_country"], "Unknown")
         self.assertEqual(regionless["location_evidence"], "price_only")
         self.assertFalse(
             any(
-                row["offer_id"] == "3" and row["location_country"] == "Australia"
+                row["offer_id"] == 3 and row["location_country"] == "Australia"
                 for row in costs
             )
         )
@@ -428,26 +546,26 @@ class ReviewModelGuideExportTests(unittest.TestCase):
     def test_inference_costs_preserve_states_native_units_conditions_and_provenance(self) -> None:
         _, _, costs, _ = _archive_rows(model_ids=["alpha-a"])
 
-        current = next(row for row in costs if row["offer_id"] == "1" and row["charge_type"] == "input")
-        stale = next(row for row in costs if row["offer_id"] == "4" and row["charge_type"] == "input")
-        unavailable = next(row for row in costs if row["offer_id"] == "5")
-        free = next(row for row in costs if row["offer_id"] == "6" and row["charge_type"] == "input")
+        current = next(row for row in costs if row["offer_id"] == 1 and row["charge_type"] == "input")
+        stale = next(row for row in costs if row["offer_id"] == 4 and row["charge_type"] == "input")
+        unavailable = next(row for row in costs if row["offer_id"] == 5)
+        free = next(row for row in costs if row["offer_id"] == 6 and row["charge_type"] == "input")
         azure = next(row for row in costs if row["destination_id"] == "azure-ai-foundry")
 
         self.assertEqual(current["price_evidence_state"], "current")
-        self.assertEqual(current["pricing_is_stale"], "False")
+        self.assertEqual(current["pricing_is_stale"], False)
         self.assertEqual(stale["price_evidence_state"], "current")
-        self.assertEqual(stale["pricing_is_stale"], "True")
+        self.assertEqual(stale["pricing_is_stale"], True)
         self.assertEqual(unavailable["price_evidence_state"], "unavailable")
-        self.assertEqual(unavailable["pricing_is_stale"], "False")
+        self.assertEqual(unavailable["pricing_is_stale"], False)
         self.assertEqual(free["price_evidence_state"], "free")
-        self.assertEqual(free["pricing_is_stale"], "False")
+        self.assertEqual(free["pricing_is_stale"], False)
         self.assertEqual(current["currency"], "AUD")
-        self.assertEqual(current["amount"], "2.0")
+        self.assertEqual(current["amount"], 2.0)
         self.assertEqual(current["billing_unit"], "token")
-        self.assertEqual(current["unit_quantity"], "1000000")
-        self.assertEqual(current["constraints"], '{"minimum_commitment":"none"}')
-        self.assertEqual(current["conditions"], '{"cache":"miss"}')
+        self.assertEqual(current["unit_quantity"], 1_000_000)
+        self.assertEqual(current["constraints"], {"minimum_commitment": "none"})
+        self.assertEqual(current["conditions"], {"cache": "miss"})
         self.assertEqual(current["source_kind"], "official_api")
         self.assertEqual(current["source_label"], "Official price API")
         self.assertEqual(current["source_url"], "https://example.com/pricing")
@@ -500,36 +618,29 @@ class ReviewModelGuideExportTests(unittest.TestCase):
                 ),
             ],
         }
-        archive = review_export.build_model_guide_archive(
-            catalog=_edge_catalog([destination]),
-            exported_at=EXPORTED_AT,
-        )
-        with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
-            rows = list(
-                csv.DictReader(io.StringIO(bundle.read("inference-costs.csv").decode("utf-8-sig")))
-            )
+        rows = _raw_cost_rows(_edge_catalog([destination]))
 
         lifecycle_by_offer = {
-            row["offer_id"]: (row["price_evidence_state"], row["pricing_is_stale"])
+            str(row["offer_id"]): (row["price_evidence_state"], row["pricing_is_stale"])
             for row in rows
         }
-        self.assertEqual(lifecycle_by_offer["40"], ("free", "True"))
-        self.assertEqual(lifecycle_by_offer["41"], ("unavailable", "True"))
-        self.assertEqual(lifecycle_by_offer["42"], ("custom", "True"))
+        self.assertEqual(lifecycle_by_offer["40"], ("free", True))
+        self.assertEqual(lifecycle_by_offer["41"], ("unavailable", True))
+        self.assertEqual(lifecycle_by_offer["42"], ("custom", True))
 
     def test_model_summary_uses_only_current_au_standard_text_input_output_pairs(self) -> None:
         _, models, _, _ = _archive_rows(model_ids=["alpha-a"])
         alpha = models[0]
 
-        self.assertIn("AWS Bedrock", alpha["australia_current_pricing"])
-        self.assertIn("AUD 2", alpha["australia_current_pricing"])
-        self.assertIn("input", alpha["australia_current_pricing"])
-        self.assertIn("AUD 8", alpha["australia_current_pricing"])
-        self.assertIn("output", alpha["australia_current_pricing"])
-        self.assertNotIn("USD 1", alpha["australia_current_pricing"])
-        self.assertNotIn("USD 0.5", alpha["australia_current_pricing"])
-        self.assertIn("[synced]", alpha["australia_inference_options"])
-        self.assertIn("[curated fallback]", alpha["australia_inference_options"])
+        summary = alpha["Australian inference and pricing"]
+        self.assertIn("AWS Bedrock", summary)
+        self.assertIn("AUD 2 input / 8 output", summary)
+        self.assertIn("Free (AUD 0 input / 0 output", summary)
+        self.assertNotIn("USD 1", summary)
+        self.assertNotIn("USD 0.5", summary)
+        self.assertIn("[confirmed route", summary)
+        self.assertIn("Azure AI Foundry", summary)
+        self.assertIn("[possible route; availability unconfirmed]", summary)
 
     def test_price_only_au_evidence_does_not_create_readable_au_route_or_price(self) -> None:
         destination = {
@@ -551,24 +662,22 @@ class ReviewModelGuideExportTests(unittest.TestCase):
                 )
             ],
         }
+        catalog = _edge_catalog([destination])
         archive = review_export.build_model_guide_archive(
-            catalog=_edge_catalog([destination]),
+            catalog=catalog,
             exported_at=EXPORTED_AT,
         )
         with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
-            models = list(csv.DictReader(io.StringIO(bundle.read("models.csv").decode("utf-8-sig"))))
-            costs = list(
-                csv.DictReader(io.StringIO(bundle.read("inference-costs.csv").decode("utf-8-sig")))
-            )
+            models = list(csv.DictReader(io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))))
+        costs = _raw_cost_rows(catalog)
 
         au_price_rows = [row for row in costs if row["location_country"] == "Australia"]
         self.assertTrue(au_price_rows)
         self.assertEqual({row["location_evidence"] for row in au_price_rows}, {"price_only"})
-        self.assertEqual(models[0]["australia_inference_options"], "")
-        self.assertEqual(
-            models[0]["australia_current_pricing"],
-            "No known Australian inference route.",
-        )
+        summary = models[0]["Australian inference and pricing"]
+        self.assertIn("AUD 2 input / 8 output", summary)
+        self.assertIn("price only; availability unconfirmed", summary)
+        self.assertNotIn("confirmed route", summary)
 
     def test_pricing_only_destination_regions_never_become_availability(self) -> None:
         destination = {
@@ -590,20 +699,20 @@ class ReviewModelGuideExportTests(unittest.TestCase):
                 )
             ],
         }
+        catalog = _edge_catalog([destination])
         archive = review_export.build_model_guide_archive(
-            catalog=_edge_catalog([destination]),
+            catalog=catalog,
             exported_at=EXPORTED_AT,
         )
         with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
-            models = list(csv.DictReader(io.StringIO(bundle.read("models.csv").decode("utf-8-sig"))))
-            costs = list(
-                csv.DictReader(io.StringIO(bundle.read("inference-costs.csv").decode("utf-8-sig")))
-            )
+            models = list(csv.DictReader(io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))))
+        costs = _raw_cost_rows(catalog)
 
         self.assertEqual({row["location_country"] for row in costs}, {"Australia"})
         self.assertEqual({row["location_evidence"] for row in costs}, {"price_only"})
-        self.assertEqual(models[0]["australia_inference_options"], "")
-        self.assertEqual(models[0]["australia_current_pricing"], "No known Australian inference route.")
+        summary = models[0]["Australian inference and pricing"]
+        self.assertIn("price only; availability unconfirmed", summary)
+        self.assertNotIn("confirmed route", summary)
 
     def test_misnested_offer_cannot_cross_attach_to_another_destination(self) -> None:
         destination = {
@@ -625,24 +734,20 @@ class ReviewModelGuideExportTests(unittest.TestCase):
                 )
             ],
         }
+        catalog = _edge_catalog([destination])
         archive = review_export.build_model_guide_archive(
-            catalog=_edge_catalog([destination]),
+            catalog=catalog,
             exported_at=EXPORTED_AT,
         )
         with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
-            models = list(csv.DictReader(io.StringIO(bundle.read("models.csv").decode("utf-8-sig"))))
-            costs = list(
-                csv.DictReader(io.StringIO(bundle.read("inference-costs.csv").decode("utf-8-sig")))
-            )
+            models = list(csv.DictReader(io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))))
+        costs = _raw_cost_rows(catalog)
 
         self.assertEqual(len(costs), 1)
         self.assertEqual(costs[0]["destination_id"], "aws-bedrock")
         self.assertEqual(costs[0]["location_evidence"], "availability_only")
         self.assertEqual(costs[0]["offer_id"], "")
-        self.assertEqual(
-            models[0]["australia_current_pricing"],
-            "AU route available; no current AU-specific standard text input/output pricing.",
-        )
+        self.assertIn("Price not available [confirmed route", models[0]["Australian inference and pricing"])
 
     def test_regionless_provider_scopes_keep_availability_separate_from_unknown_price(self) -> None:
         destinations = []
@@ -671,15 +776,14 @@ class ReviewModelGuideExportTests(unittest.TestCase):
                     ],
                 }
             )
+        catalog = _edge_catalog(destinations)
         archive = review_export.build_model_guide_archive(
-            catalog=_edge_catalog(destinations),
+            catalog=catalog,
             exported_at=EXPORTED_AT,
         )
         with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
-            models = list(csv.DictReader(io.StringIO(bundle.read("models.csv").decode("utf-8-sig"))))
-            costs = list(
-                csv.DictReader(io.StringIO(bundle.read("inference-costs.csv").decode("utf-8-sig")))
-            )
+            models = list(csv.DictReader(io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))))
+        costs = _raw_cost_rows(catalog)
 
         for country, destination_id, offer_id in (
             ("Provider managed", "provider-direct", "60"),
@@ -694,11 +798,13 @@ class ReviewModelGuideExportTests(unittest.TestCase):
             self.assertEqual(len(availability), 1)
             self.assertEqual(availability[0]["location_evidence"], "availability_only")
             self.assertEqual(availability[0]["offer_id"], "")
-            price_rows = [row for row in costs if row["offer_id"] == offer_id]
+            price_rows = [row for row in costs if str(row["offer_id"]) == offer_id]
             self.assertEqual({row["location_country"] for row in price_rows}, {"Unknown"})
             self.assertEqual({row["location_evidence"] for row in price_rows}, {"price_only"})
-        self.assertIn("Provider Direct (Provider managed)", models[0]["other_inference_options"])
-        self.assertIn("Provider Router (Provider routed)", models[0]["other_inference_options"])
+        overseas = models[0]["Overseas inference and pricing"]
+        self.assertIn("Provider Direct - Provider managed - Price not available", overseas)
+        self.assertIn("Provider Router - Provider routed - Price not available", overseas)
+        self.assertIn("price only; availability unconfirmed", overseas)
 
     def test_fresh_free_au_standard_pair_has_an_honest_free_summary(self) -> None:
         destination = {
@@ -728,19 +834,18 @@ class ReviewModelGuideExportTests(unittest.TestCase):
             exported_at=EXPORTED_AT,
         )
         with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
-            model = next(csv.DictReader(io.StringIO(bundle.read("models.csv").decode("utf-8-sig"))))
+            model = next(csv.DictReader(io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))))
 
-        summary = model["australia_current_pricing"]
+        summary = model["Australian inference and pricing"]
         self.assertIn("Free", summary)
         self.assertIn("AUD 0 input", summary)
-        self.assertIn("AUD 0 output", summary)
+        self.assertIn("/ 0 output", summary)
         self.assertNotIn("no current", summary.casefold())
 
     def test_model_id_scope_limits_source_records_and_groups(self) -> None:
         _, models, costs, _ = _archive_rows(model_ids=["beta-only"])
 
-        self.assertEqual([row["model_group_id"] for row in models], ["beta-group"])
-        self.assertEqual(models[0]["source_record_ids"], "beta-only")
+        self.assertEqual([row["Model ID"] for row in models], ["beta-group"])
         self.assertEqual(len(costs), 1)
         self.assertEqual(costs[0]["price_evidence_state"], "no_known_route")
 
@@ -761,15 +866,15 @@ class ReviewModelGuideExportTests(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(first.content)) as bundle:
             self.assertEqual(
                 [item.date_time for item in bundle.infolist()],
-                [(2026, 7, 15, 5, 30, 0)] * 3,
+                [(2026, 7, 15, 5, 30, 0)] * 2,
             )
-            rows = list(csv.DictReader(io.StringIO(bundle.read("models.csv").decode("utf-8-sig"))))
-        alpha = next(row for row in rows if row["model_group_id"] == "alpha-group")
-        self.assertTrue(alpha["model_name"].lstrip().startswith("'="))
-        self.assertTrue(alpha["provider"].startswith("'+"))
-        self.assertIn("'@cmd", alpha["general_approval_notes"])
-        self.assertIn("\u202e'=HIDDEN_FORMULA", alpha["general_recommendation_notes"])
-        self.assertIn("'-Danger", alpha["suggested_use_cases"])
+            rows = list(csv.DictReader(io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))))
+        alpha = next(row for row in rows if row["Model ID"] == "alpha-group")
+        self.assertTrue(alpha["Model"].lstrip().startswith("'="))
+        self.assertTrue(alpha["Provider"].startswith("'+"))
+        self.assertIn("Approval: @cmd", alpha["Review notes and caveats"])
+        self.assertIn("Recommendation: \u202e=HIDDEN_FORMULA", alpha["Review notes and caveats"])
+        self.assertIn("'-Danger", alpha["Suggested uses"])
 
     def test_au_route_without_fresh_au_specific_pair_is_explicit(self) -> None:
         catalog = {
@@ -810,12 +915,10 @@ class ReviewModelGuideExportTests(unittest.TestCase):
         }
         archive = review_export.build_model_guide_archive(catalog=catalog, exported_at=EXPORTED_AT)
         with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
-            row = next(csv.DictReader(io.StringIO(bundle.read("models.csv").decode("utf-8-sig"))))
+            row = next(csv.DictReader(io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))))
 
-        self.assertEqual(
-            row["australia_current_pricing"],
-            "AU route available; no current AU-specific standard text input/output pricing.",
-        )
+        self.assertIn("Azure AI Foundry", row["Australian inference and pricing"])
+        self.assertIn("Price not available [confirmed route", row["Australian inference and pricing"])
 
     def test_curated_au_fallback_is_described_as_possible_not_available(self) -> None:
         destination = {
@@ -836,13 +939,12 @@ class ReviewModelGuideExportTests(unittest.TestCase):
             exported_at=EXPORTED_AT,
         )
         with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
-            row = next(csv.DictReader(io.StringIO(bundle.read("models.csv").decode("utf-8-sig"))))
+            row = next(csv.DictReader(io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))))
 
-        self.assertIn("[curated fallback]", row["australia_inference_options"])
-        self.assertEqual(
-            row["australia_current_pricing"],
-            "Possible AU route (curated fallback); availability is not confirmed and no current AU-specific pricing is available.",
-        )
+        summary = row["Australian inference and pricing"]
+        self.assertIn("Azure AI Foundry", summary)
+        self.assertIn("Price not available", summary)
+        self.assertIn("possible route; availability unconfirmed", summary)
 
     def test_api_export_is_read_only_zip_without_admin_requirement(self) -> None:
         original_token = os.environ.pop(main.ADMIN_TOKEN_ENV_VAR, None)
@@ -867,8 +969,8 @@ class ReviewModelGuideExportTests(unittest.TestCase):
             r'^attachment; filename="llm-model-guide-\d{8}T\d{6}Z\.zip"$',
         )
         with zipfile.ZipFile(io.BytesIO(response.content)) as bundle:
-            rows = list(csv.DictReader(io.StringIO(bundle.read("models.csv").decode("utf-8-sig"))))
-        self.assertEqual([row["source_record_ids"] for row in rows], ["beta-only"])
+            rows = list(csv.DictReader(io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))))
+        self.assertEqual([row["Model ID"] for row in rows], ["beta-group"])
         build_catalog.assert_called_once_with()
         mutate_decisions.assert_not_called()
 
@@ -888,8 +990,8 @@ class ReviewModelGuideExportTests(unittest.TestCase):
             self.assertTrue(output.is_file())
             self.assertIn("Exported 1 model group", stdout.getvalue())
             with zipfile.ZipFile(output) as bundle:
-                rows = list(csv.DictReader(io.StringIO(bundle.read("models.csv").decode("utf-8-sig"))))
-            self.assertEqual([row["source_record_ids"] for row in rows], ["beta-only"])
+                rows = list(csv.DictReader(io.StringIO(bundle.read("model-guide.csv").decode("utf-8-sig"))))
+            self.assertEqual([row["Model ID"] for row in rows], ["beta-group"])
 
     def test_cli_review_export_uses_timestamped_output_directory_default(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.0 - 2026-07-20
+
+- Replaced the two user-facing model-guide CSVs with one `model-guide.csv` containing one human-readable row per server-owned review entity, plus the portable `README.txt` legend.
+- Consolidated approval, recommendation, usage classification, latest review update, suggested uses, and notes while retaining the stable model ID and rendering decision values as human labels.
+- Combined Australian and overseas route and pricing evidence by destination, currency, billing unit, evidence kind, and location scope; paired standard text input/output prices, collapsed equivalent regional offers into ranges, retained native currencies, and kept price-only evidence explicitly unconfirmed.
+- Added the advisory Codex Governance project contract, canonical Obsidian Backlog and Delivery Log, repository route instructions, fleet registration, and a standalone Proxmox live verifier as the first supervised adoption stage.
+
 ## 0.13.0 - 2026-07-17
 
 - Added model-level `Acceptable` as a completed general recommendation for models that are okay for normal use but are not preferred.

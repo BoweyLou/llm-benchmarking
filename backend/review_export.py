@@ -1,4 +1,4 @@
-"""Readable AU-first model review and inference-cost exports."""
+"""Readable, one-row-per-model AU-first review exports."""
 
 from __future__ import annotations
 
@@ -17,29 +17,18 @@ from .review_workbench import build_review_catalog
 
 
 MODEL_FIELDS = [
-    "model_group_id",
-    "model_name",
-    "provider",
-    "model_roles",
-    "source_record_count",
-    "source_record_ids",
-    "general_approval_status",
-    "general_approval_notes",
-    "general_approval_updated_at",
-    "general_recommendation_status",
-    "general_recommendation_notes",
-    "general_recommendation_updated_at",
-    "usage_classification",
-    "usage_classification_notes",
-    "usage_classification_updated_at",
-    "suggested_use_cases_read_only",
-    "suggested_use_case_count",
-    "suggested_use_cases",
-    "suggested_use_case_evidence",
-    "australia_inference_options",
-    "australia_current_pricing",
-    "other_inference_options",
-    "pricing_freshness_warning",
+    "Model",
+    "Provider",
+    "Roles",
+    "Approval",
+    "Recommendation",
+    "Classification",
+    "Last review update",
+    "Suggested uses",
+    "Australian inference and pricing",
+    "Overseas inference and pricing",
+    "Review notes and caveats",
+    "Model ID",
 ]
 
 INFERENCE_COST_FIELDS = [
@@ -80,8 +69,24 @@ INFERENCE_COST_FIELDS = [
     "verified_at",
 ]
 
-_ARCHIVE_MEMBERS = ("models.csv", "inference-costs.csv", "README.txt")
+_ARCHIVE_MEMBERS = ("model-guide.csv", "README.txt")
 _DANGEROUS_CELL_PREFIXES = frozenset("=+-@")
+
+_STATUS_LABELS = {
+    "approved": "Approved",
+    "not_approved": "Not Approved",
+    "unreviewed": "Not Reviewed",
+    "recommended": "Recommended",
+    "acceptable": "Acceptable",
+    "legacy_supported": "Legacy Supported",
+    "not_recommended": "Not Recommended",
+    "unrated": "Not Assessed",
+    "standard": "Standard",
+    "restricted": "Restricted",
+    "prohibited": "Prohibited",
+    "unclassified": "Unclassified",
+    "mixed": "Mixed",
+}
 
 
 @dataclass(frozen=True)
@@ -135,8 +140,7 @@ def build_model_guide_archive(
     ]
 
     members = {
-        "models.csv": _render_csv(MODEL_FIELDS, model_rows),
-        "inference-costs.csv": _render_csv(INFERENCE_COST_FIELDS, cost_rows),
+        "model-guide.csv": _render_csv(MODEL_FIELDS, model_rows),
         "README.txt": _render_readme(timestamp),
     }
     content = _render_zip(members, timestamp)
@@ -212,62 +216,104 @@ def _model_row(group: Mapping[str, Any], cost_rows: Sequence[dict[str, Any]]) ->
         key=str.casefold,
     )
     suggestions = _group_suggestions(members)
-    australian_routes = _route_labels(cost_rows, country="Australia")
-    other_routes = _route_labels(cost_rows, exclude_country="Australia")
+    approval = _unanimous_status(members, _approval_status, "unreviewed")
+    recommendation = _unanimous_status(
+        members,
+        _recommendation_status,
+        "unrated",
+    )
+    classification = _unanimous_status(
+        members,
+        _usage_classification,
+        "unclassified",
+    )
     return {
-        "model_group_id": group["id"],
-        "model_name": representative.get("name") or representative.get("canonical_model_name"),
-        "provider": providers[0] if len(providers) == 1 else "Multiple providers",
-        "model_roles": _join_values(
+        "Model": representative.get("name") or representative.get("canonical_model_name"),
+        "Provider": providers[0] if len(providers) == 1 else "Multiple providers",
+        "Roles": _join_values(
             sorted(
                 {
-                    str(role)
+                    _human_label(role)
                     for member in members
                     for role in member.get("model_roles") or []
                     if str(role).strip()
                 }
             )
         ),
-        "source_record_count": len(members),
-        "source_record_ids": _join_values(sorted(str(member.get("id") or "") for member in members)),
-        "general_approval_status": _unanimous_status(members, _approval_status, "unreviewed"),
-        "general_approval_notes": _join_values(member.get("general_approval_notes") for member in members),
-        "general_approval_updated_at": _latest_text(
-            member.get("general_approval_updated_at") for member in members
+        "Approval": _status_label(approval),
+        "Recommendation": _status_label(recommendation),
+        "Classification": _status_label(classification),
+        "Last review update": _latest_review_update(members),
+        "Suggested uses": _join_values(item.get("label") for item in suggestions),
+        "Australian inference and pricing": _inference_and_pricing_summary(
+            cost_rows,
+            australia=True,
         ),
-        "general_recommendation_status": _unanimous_status(
-            members,
-            _recommendation_status,
-            "unrated",
+        "Overseas inference and pricing": _inference_and_pricing_summary(
+            cost_rows,
+            australia=False,
         ),
-        "general_recommendation_notes": _join_values(
-            member.get("general_recommendation_notes") for member in members
-        ),
-        "general_recommendation_updated_at": _latest_text(
-            member.get("general_recommendation_updated_at") for member in members
-        ),
-        "usage_classification": _unanimous_status(
-            members,
-            _usage_classification,
-            "unclassified",
-        ),
-        "usage_classification_notes": _join_values(
-            member.get("usage_classification_notes") for member in members
-        ),
-        "usage_classification_updated_at": _latest_text(
-            member.get("usage_classification_updated_at") for member in members
-        ),
-        "suggested_use_cases_read_only": "yes - metric evidence only",
-        "suggested_use_case_count": len(suggestions),
-        "suggested_use_cases": _join_values(item.get("label") for item in suggestions),
-        "suggested_use_case_evidence": _join_values(
-            _suggestion_evidence(item) for item in suggestions
-        ),
-        "australia_inference_options": _join_values(australian_routes),
-        "australia_current_pricing": _australia_pricing_summary(cost_rows),
-        "other_inference_options": _join_values(other_routes),
-        "pricing_freshness_warning": _pricing_warning(cost_rows),
+        "Review notes and caveats": _review_notes_and_caveats(members, cost_rows),
+        "Model ID": group["id"],
     }
+
+
+def _status_label(value: str) -> str:
+    normalized = str(value or "").strip().casefold()
+    return _STATUS_LABELS.get(normalized, _human_label(normalized))
+
+
+def _human_label(value: Any) -> str:
+    text = str(value or "").strip().replace("_", " ")
+    if not text:
+        return ""
+    words: list[str] = []
+    for index, word in enumerate(text.split()):
+        normalized = word.casefold()
+        if normalized in {"api", "ocr"}:
+            words.append(normalized.upper())
+        elif index and normalized in {"and", "of", "to"}:
+            words.append(normalized)
+        else:
+            words.append(word.title())
+    return " ".join(words)
+
+
+def _latest_review_update(models: Sequence[Mapping[str, Any]]) -> str:
+    updates: list[tuple[str, str]] = []
+    for model in models:
+        for field, label in (
+            ("general_approval_updated_at", "Approval"),
+            ("general_recommendation_updated_at", "Recommendation"),
+            ("usage_classification_updated_at", "Classification"),
+        ):
+            value = str(model.get(field) or "").strip()
+            if value:
+                updates.append((value, label))
+    if not updates:
+        return "Not reviewed"
+    latest = max(value for value, _ in updates)
+    labels = sorted({label for value, label in updates if value == latest})
+    return f"{latest} ({', '.join(labels)})"
+
+
+def _review_notes_and_caveats(
+    models: Sequence[Mapping[str, Any]],
+    cost_rows: Sequence[Mapping[str, Any]],
+) -> str:
+    parts: list[str] = []
+    for field, label in (
+        ("general_approval_notes", "Approval"),
+        ("general_recommendation_notes", "Recommendation"),
+        ("usage_classification_notes", "Classification"),
+    ):
+        notes = _join_values(model.get(field) for model in models)
+        if notes:
+            parts.append(f"{label}: {notes}")
+    warning = _pricing_warning(cost_rows)
+    if warning:
+        parts.append(warning)
+    return _join_values(parts)
 
 
 def _approval_status(model: Mapping[str, Any]) -> str:
@@ -642,33 +688,38 @@ def _sortable_identifier(value: Any) -> tuple[int, Any]:
         return (1, str(value or ""))
 
 
-def _route_labels(
+def _inference_and_pricing_summary(
     rows: Sequence[Mapping[str, Any]],
     *,
-    country: str | None = None,
-    exclude_country: str | None = None,
-) -> list[str]:
-    labels: set[str] = set()
-    for row in rows:
-        row_country = str(row.get("location_country") or "Unknown")
-        if country is not None and row_country != country:
-            continue
-        if exclude_country is not None and row_country == exclude_country:
-            continue
-        if row.get("location_evidence") in {"price_only", "no_known_route"}:
-            continue
-        destination = str(row.get("destination_name") or row.get("destination_id") or "Route")
-        region = str(row.get("location_region") or "").strip()
-        evidence = _evidence_label(row.get("availability_evidence_kind"))
-        labels.add(f"{destination} ({region or row_country}){evidence}")
-    return sorted(labels, key=str.casefold)
+    australia: bool,
+) -> str:
+    scoped_rows = [
+        row
+        for row in rows
+        if (str(row.get("location_country") or "Unknown") == "Australia") == australia
+        and row.get("location_evidence") != "no_known_route"
+    ]
+    scope_label = "Australian" if australia else "overseas"
+    if not scoped_rows:
+        return f"No known {scope_label} inference route or price."
 
+    availability: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in scoped_rows:
+        if row.get("location_evidence") not in {"availability_only", "availability_and_price"}:
+            continue
+        destination_id = str(row.get("destination_id") or "")
+        destination = str(row.get("destination_name") or destination_id or "Route")
+        evidence_kind = str(row.get("availability_evidence_kind") or "").casefold()
+        key = (destination_id, destination, evidence_kind)
+        entry = availability.setdefault(key, {"locations": set(), "checked": set()})
+        entry["locations"].add(_location_label(row, australia=australia))
+        checked = str(row.get("availability_synced_at") or "").strip()
+        if checked:
+            entry["checked"].add(checked)
 
-def _australia_pricing_summary(rows: Sequence[Mapping[str, Any]]) -> str:
-    australian_rows = [row for row in rows if row.get("location_country") == "Australia"]
-    pairs: dict[tuple[str, ...], dict[str, Mapping[str, Any]]] = {}
-    for row in australian_rows:
-        if row.get("location_evidence") != "availability_and_price":
+    component_pairs: dict[tuple[str, ...], dict[str, Mapping[str, Any]]] = {}
+    for row in scoped_rows:
+        if row.get("location_evidence") not in {"availability_and_price", "price_only"}:
             continue
         if bool(row.get("pricing_is_stale")):
             continue
@@ -686,75 +737,205 @@ def _australia_pricing_summary(rows: Sequence[Mapping[str, Any]]) -> str:
             for field in (
                 "source_record_id",
                 "destination_id",
+                "location_country",
                 "location_region",
                 "offer_id",
                 "currency",
                 "billing_unit",
                 "unit_quantity",
+                "location_evidence",
+                "availability_evidence_kind",
+                "price_evidence_state",
             )
         )
-        pairs.setdefault(key, {})[charge_type] = row
+        component_pairs.setdefault(key, {})[charge_type] = row
 
-    summaries: list[str] = []
-    for pair in pairs.values():
+    price_groups: dict[tuple[str, ...], dict[str, Any]] = {}
+    for pair in component_pairs.values():
         if set(pair) != {"input", "output"}:
             continue
         input_row = pair["input"]
         output_row = pair["output"]
-        destination = input_row.get("destination_name") or input_row.get("destination_id")
-        region = input_row.get("location_region")
-        evidence = _evidence_label(input_row.get("availability_evidence_kind"))
+        destination_id = str(input_row.get("destination_id") or "")
+        destination = str(input_row.get("destination_name") or destination_id or "Route")
+        evidence_kind = str(input_row.get("availability_evidence_kind") or "").casefold()
+        location_evidence = str(input_row.get("location_evidence") or "")
+        key = (
+            destination_id,
+            destination,
+            str(input_row.get("currency") or ""),
+            str(input_row.get("billing_unit") or ""),
+            str(input_row.get("unit_quantity") or ""),
+            location_evidence,
+            evidence_kind,
+            str(input_row.get("price_evidence_state") or ""),
+        )
+        entry = price_groups.setdefault(
+            key,
+            {
+                "locations": set(),
+                "inputs": [],
+                "outputs": [],
+                "checked": set(),
+                "quantity": input_row.get("unit_quantity"),
+            },
+        )
+        entry["locations"].add(_location_label(input_row, australia=australia))
+        entry["inputs"].append(input_row.get("amount"))
+        entry["outputs"].append(output_row.get("amount"))
+        for row in (input_row, output_row):
+            checked = str(row.get("verified_at") or "").strip()
+            if checked:
+                entry["checked"].add(checked)
+
+    summaries: list[str] = []
+    priced_routes: set[tuple[str, str]] = set()
+    for key, entry in price_groups.items():
+        (
+            destination_id,
+            destination,
+            currency,
+            billing_unit,
+            _quantity_key,
+            location_evidence,
+            evidence_kind,
+            price_state,
+        ) = key
+        if location_evidence != "price_only":
+            route = availability.get((destination_id, destination, evidence_kind))
+            if route:
+                entry["locations"].update(route["locations"])
+                entry["checked"].update(route["checked"])
+            priced_routes.add((destination_id, evidence_kind))
         prices = (
-            f"{input_row.get('currency')} {_number_text(input_row.get('amount'))} input; "
-            f"{output_row.get('currency')} {_number_text(output_row.get('amount'))} output "
-            f"per {_quantity_text(input_row.get('unit_quantity'))} "
-            f"{input_row.get('billing_unit')}"
+            f"{currency} {_number_range_text(entry['inputs'])} input / "
+            f"{_number_range_text(entry['outputs'])} output per "
+            f"{_quantity_text(entry['quantity'])} {_billing_unit_label(billing_unit, entry['quantity'])}"
         )
-        if input_row.get("price_evidence_state") == "free":
+        if price_state == "free":
             prices = f"Free ({prices})"
+        evidence = _readable_evidence(
+            location_evidence=location_evidence,
+            availability_evidence_kind=evidence_kind,
+            checked_values=entry["checked"],
+        )
         summaries.append(
-            f"{destination} ({region}){evidence}: "
-            f"{prices}"
+            f"{destination} - {_summarize_locations(entry['locations'])} - {prices} [{evidence}]"
         )
-    if summaries:
-        return "; ".join(sorted(summaries, key=str.casefold))
-    available_rows = [
-        row
-        for row in australian_rows
-        if row.get("location_evidence") in {"availability_only", "availability_and_price"}
-    ]
-    if any(
-        str(row.get("availability_evidence_kind") or "").casefold() == "synced"
-        for row in available_rows
-    ):
-        return "AU route available; no current AU-specific standard text input/output pricing."
-    if any(
-        str(row.get("availability_evidence_kind") or "").casefold()
-        == "curated_fallback"
-        for row in available_rows
-    ):
-        return (
-            "Possible AU route (curated fallback); availability is not confirmed "
-            "and no current AU-specific pricing is available."
+
+    for (destination_id, destination, evidence_kind), entry in availability.items():
+        if (destination_id, evidence_kind) in priced_routes:
+            continue
+        evidence = _readable_evidence(
+            location_evidence="availability_only",
+            availability_evidence_kind=evidence_kind,
+            checked_values=entry["checked"],
         )
-    if any(
-        row.get("location_evidence") in {"availability_only", "availability_and_price"}
-        for row in australian_rows
-    ):
-        return "Possible AU route; availability is not confirmed and no current AU-specific pricing is available."
-    return "No known Australian inference route."
+        summaries.append(
+            f"{destination} - {_summarize_locations(entry['locations'])} - "
+            f"Price not available [{evidence}]"
+        )
+
+    paired_destinations = {
+        (key[0], key[2], key[5])
+        for key in price_groups
+    }
+    generic_price_only: dict[tuple[str, str, str], set[str]] = {}
+    for row in scoped_rows:
+        if row.get("location_evidence") != "price_only":
+            continue
+        destination_id = str(row.get("destination_id") or "")
+        currency = str(row.get("currency") or "")
+        if (destination_id, currency, "price_only") in paired_destinations:
+            continue
+        destination = str(row.get("destination_name") or destination_id or "Route")
+        generic_price_only.setdefault((destination_id, destination, currency), set()).add(
+            _location_label(row, australia=australia)
+        )
+    for _destination_id, destination, currency in sorted(generic_price_only, key=lambda item: item[1].casefold()):
+        locations = generic_price_only[(_destination_id, destination, currency)]
+        currency_note = f" ({currency})" if currency else ""
+        summaries.append(
+            f"{destination} - {_summarize_locations(locations)} - Price details in catalog{currency_note} "
+            "[price only; availability unconfirmed]"
+        )
+
+    if not summaries:
+        return f"No known {scope_label} inference route or price."
+    return " | ".join(sorted(set(summaries), key=str.casefold))
 
 
-def _evidence_label(value: Any) -> str:
-    normalized = str(value or "").strip().replace("_", " ")
-    return f" [{normalized}]" if normalized else ""
+def _location_label(row: Mapping[str, Any], *, australia: bool) -> str:
+    country = str(row.get("location_country") or "Unknown")
+    region = str(row.get("location_region") or "").strip()
+    if australia:
+        return region or "Australia"
+    return country if country != "Unknown" or not region else f"Unknown ({region})"
+
+
+def _summarize_locations(values: Iterable[Any]) -> str:
+    locations = sorted({str(value).strip() for value in values if str(value).strip()}, key=str.casefold)
+    if not locations:
+        return "Location unknown"
+    if len(locations) <= 6:
+        return ", ".join(locations)
+    return ", ".join(locations[:5]) + f", +{len(locations) - 5} more"
+
+
+def _readable_evidence(
+    *,
+    location_evidence: str,
+    availability_evidence_kind: str,
+    checked_values: Iterable[Any],
+) -> str:
+    if location_evidence == "price_only":
+        label = "price only; availability unconfirmed"
+    elif availability_evidence_kind == "synced":
+        label = "confirmed route"
+    elif availability_evidence_kind == "curated_fallback":
+        label = "possible route; availability unconfirmed"
+    else:
+        label = "possible route; verify availability"
+    checked = max((str(value) for value in checked_values if str(value)), default="")
+    if checked:
+        label += f"; checked {checked.split('T', 1)[0]}"
+    return label
+
+
+def _number_range_text(values: Iterable[Any]) -> str:
+    numbers = sorted({float(value) for value in values})
+    if not numbers:
+        return ""
+    if len(numbers) == 1:
+        return _number_text(numbers[0])
+    return f"{_number_text(numbers[0])}-{_number_text(numbers[-1])}"
+
+
+def _billing_unit_label(value: Any, quantity: Any) -> str:
+    label = str(value or "unit")
+    try:
+        plural = float(quantity) != 1
+    except (TypeError, ValueError):
+        plural = False
+    if plural and not label.endswith("s"):
+        label += "s"
+    return label
 
 
 def _pricing_warning(rows: Sequence[Mapping[str, Any]]) -> str:
-    count = sum(1 for row in rows if bool(row.get("pricing_is_stale")))
+    stale_offers = {
+        (
+            str(row.get("source_record_id") or ""),
+            str(row.get("destination_id") or ""),
+            str(row.get("offer_id") or ""),
+        )
+        for row in rows
+        if bool(row.get("pricing_is_stale"))
+    }
+    count = len(stale_offers)
     if not count:
         return ""
-    return f"{count} stale pricing row{'s' if count != 1 else ''} retained as historical evidence."
+    return f"{count} stale pricing offer{'s' if count != 1 else ''} excluded from current summaries."
 
 
 def _join_values(values: Iterable[Any]) -> str:
@@ -857,38 +1038,32 @@ def _render_readme(timestamp: str) -> bytes:
     text = f"""LLM Model Guide export
 Exported at: {timestamp}
 
-models.csv contains one readable row per review entity, including approval,
-general recommendation, usage classification, suggested use cases, and an
-AU-first inference summary. Recommendation and usage classification are
-independent: recommendation records preference or suitability, while usage
-classification records governance permissions. A status of mixed means the
-grouped source records disagree.
+model-guide.csv contains one readable row per server-owned review entity.
+Approval, Recommendation, and Classification remain independent. Mixed means
+the grouped source records disagree. Not Assessed means no recommendation
+decision has been recorded; Acceptable means suitable for normal use but not
+preferred.
 
-General recommendation values are recommended, acceptable, legacy_supported,
-not_recommended, and unrated. acceptable means okay for normal use but not the
-preferred option. The raw value unrated is displayed in the review UI as
-Not Assessed and means no recommendation decision has been recorded.
+Last review update is the newest approval, recommendation, or classification
+timestamp and names the decision axis updated at that time. Suggested uses are
+read-only metric evidence, not approval decisions. Legacy per-use-case decisions
+are not included.
 
-Suggested use cases are read-only metric evidence. They are not approval
-decisions and do not include legacy per-use-case approval records.
+Australian and overseas inference columns combine route and price evidence.
+Fresh standard-tier text input/output components are paired, duplicate source
+records and equivalent regional offers are consolidated, and regional price
+differences appear as ranges. Prices remain in provider-native currencies and
+billing units. The export does not convert currencies or claim a globally
+cheapest provider. Additional tiers, modalities, constraints, component-level
+provenance, and historical evidence remain available in the review catalog/API.
 
-inference-costs.csv preserves one row per source record, destination, location,
-offer, and price component. Australia sorts first. Regionless price evidence is
-labelled Unknown and is never treated as Australian pricing. Native currencies,
-billing units, lifecycle evidence state, provenance, and an independent
-pricing_is_stale flag are retained. Lifecycle states are current, free,
-unavailable, custom, availability_only, price_only, and no_known_route.
-Availability-only rows explicitly show routes without matched prices; price-only
-rows have price evidence without matched availability and never create a readable
-AU route or current AU pricing summary. Fresh standard AU free pairs are labelled
-Free. Provider-managed or provider-routed availability remains a separate row
-when its regionless price is labelled Unknown.
-
-availability_evidence_kind distinguishes synced cloud-catalog evidence from
-curated_fallback and pricing_only evidence. curated_fallback means a possible route, not confirmed model availability
-in the named account or region. Always
-verify account access, quota, data-residency controls, and the cited source before
-procurement or deployment.
+Evidence labels are material. Confirmed route means synced availability evidence
+exists. Possible route means curated fallback evidence and still requires account
+and regional verification. Price only means a published price exists without
+matched availability; it must never be read as confirmed access or data
+residency. Stale prices are excluded from current summaries and reported in the
+caveats column. Always verify account access, quota, residency controls, and
+provider terms before procurement or deployment.
 """
     return text.encode("utf-8")
 
@@ -920,7 +1095,6 @@ def _render_zip(members: Mapping[str, bytes], timestamp: str) -> bytes:
 
 
 __all__ = [
-    "INFERENCE_COST_FIELDS",
     "MODEL_FIELDS",
     "ModelGuideArchive",
     "build_model_guide_archive",

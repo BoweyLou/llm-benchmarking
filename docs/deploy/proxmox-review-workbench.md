@@ -179,8 +179,7 @@ until at least one group is selected.
 
 The download is a read-only projection of the current persistent SQLite
 catalog. It does not refresh providers, change review decisions, or require the
-admin token. The ZIP contains `models.csv`, `inference-costs.csv`, and
-`README.txt`.
+admin token. The ZIP contains `model-guide.csv` and `README.txt`.
 
 The same all-model export can be requested directly from any tailnet client:
 
@@ -278,11 +277,12 @@ Verify the following before treating the rollout as complete:
   positive weights and required benchmarks before falling back to role defaults.
   Check populated and empty states on both desktop and a narrow mobile viewport.
 - A model-guide POST returns `application/zip` with a timestamped attachment
-  filename and exactly `models.csv`, `inference-costs.csv`, and `README.txt`.
-  Spot-check one AWS, Azure, or Vertex model with an Australian route: AU rows
-  must sort first, while a US-only or regionless price must not appear as
-  Australian pricing. Check at least one availability-only route and one stale
-  or unavailable price state.
+  filename and exactly `model-guide.csv` and `README.txt`. The CSV has one row
+  per unique `Model ID`. Spot-check one AWS, Azure, or Vertex model with an
+  Australian route: current standard text input/output prices are paired in the
+  Australian column, while price-only evidence is labelled availability
+  unconfirmed. Check one possible route, one overseas price range, and one stale
+  pricing caveat.
 
 ## Operate
 

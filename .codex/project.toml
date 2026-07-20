@@ -1,0 +1,81 @@
+schema_version = 1
+id = "llm-benchmarking"
+name = "LLM Benchmarking"
+lifecycle = "maintained"
+governance = "advisory"
+
+[knowledge]
+overview = "02 Projects/LLM-benchmarking/Overview.md"
+backlog = "02 Projects/LLM-benchmarking/Backlog.md"
+decisions = "02 Projects/LLM-benchmarking/Decisions"
+delivery_log = "02 Projects/LLM-benchmarking/Delivery Log.md"
+
+[stack]
+profile = "automation-python"
+
+[git]
+provider = "forgejo"
+repository = "bowey/llm-benchmarking"
+default_branch = "main"
+owner_identity = "yannick"
+canonical_remote = "upstream"
+integration_mode = "fork"
+contribution_repository = "codex/llm-benchmarking"
+contribution_remote = "origin"
+remote_policy = "private-forgejo"
+
+[[validation.commands]]
+name = "test"
+argv = ["uv", "run", "--isolated", "--no-project", "--with-requirements", "backend/requirements.txt", "python", "-m", "unittest", "backend.test_review_export"]
+phases = ["commit", "merge"]
+timeout_seconds = 600
+
+[[validation.commands]]
+name = "backend-tests"
+argv = ["uv", "run", "--isolated", "--no-project", "--with-requirements", "backend/requirements.txt", "python", "-m", "unittest", "discover", "-s", "backend", "-t", "."]
+phases = ["merge"]
+timeout_seconds = 1800
+
+[[validation.commands]]
+name = "compile"
+argv = ["python3", "-m", "compileall", "-q", "backend"]
+phases = ["commit", "merge"]
+timeout_seconds = 300
+
+[delivery]
+type = "proxmox-web"
+deploy_argv = ["./scripts/deploy_proxmox_review_workbench.sh"]
+verify_argv = ["./scripts/verify_proxmox_review_workbench.sh"]
+trusted_paths = [
+  "backend/requirements.txt",
+  "deploy/systemd/llm-benchmarking.service",
+  "scripts/deploy_proxmox_review_workbench.sh",
+  "scripts/verify_proxmox_review_workbench.sh",
+]
+runtime_affecting_paths = [
+  "backend/**",
+  "deploy/**",
+  "scripts/**",
+  "VERSION",
+]
+release_exempt_paths = ["docs/**", "README.md", "design-qa.md"]
+
+[delivery.executables]
+deploy = "scripts/deploy_proxmox_review_workbench.sh"
+verify = "scripts/verify_proxmox_review_workbench.sh"
+
+[version]
+source = "VERSION"
+release_policy = "semver"
+tag_prefix = "v"
+changelog = "CHANGELOG.md"
+
+[ui]
+design_system = "custom"
+acceptance = "computer-use"
+
+[evidence]
+receipt = ".codex/runtime/closeout-evidence.json"
+require_tdd = true
+require_computer_use = true
+require_obsidian = true

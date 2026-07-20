@@ -141,18 +141,14 @@ python -m backend review-export \
   --output output/shortlist-model-guide.zip
 ```
 
-The ZIP contains three files:
+The ZIP contains two files:
 
-- `models.csv` has one readable row per server-owned `review_entity_id` group.
-  It preserves the stable group ID, source-record count and IDs, general
-  approval, general recommendation, usage classification, read-only suggested-use evidence, and an
-  AU-first inference summary. `mixed` appears only when the grouped source
-  records disagree on the corresponding model-level decision.
-- `inference-costs.csv` is the normalized evidence table: one row per source
-  record, route, location, offer, and price component. It retains native
-  currency, amount, billing unit and quantity, modality, charge type, service
-  tier, constraints, conditions, source URL and label, verification time, and
-  stale state.
+- `model-guide.csv` has one readable row per server-owned `review_entity_id`
+  group. It combines provider, roles, general approval, general recommendation,
+  usage classification, the latest review update, suggested uses, Australian
+  inference and pricing, overseas inference and pricing, caveats, and the stable
+  model ID. Human labels such as `Not Assessed` are used instead of storage
+  slugs. `Mixed` appears only when grouped source records disagree.
 - `README.txt` is a portable legend for the decision and pricing fields and
   their caveats.
 
@@ -160,34 +156,28 @@ Suggested use cases come only from the current metric-derived
 `suggested_use_cases` contract. They are positive fit evidence, may include a
 candidate that still requires restrictions or controls, and are never a human
 approval or general recommendation. The guide does not roll legacy
-per-use-case approval rows into this list. Fit, confidence, policy version, and
-computed time are retained where the review catalog provides them.
+per-use-case approval rows into this list. Detailed fit, confidence, policy,
+and computation evidence remains in the review catalog/API.
 
 Inference locations sort as Australia, other named countries alphabetically,
 Global, provider-managed or provider-routed routes, then unknown location.
 Published region identifiers are kept as identifiers; the export does not
 invent city names. A price is matched to a listed location only when its region
-matches. Non-Australian or regionless price evidence is retained honestly as
-price-only evidence and never attached to an Australian route. A price-only
-Australian row likewise cannot become a confirmed Australian inference option
-or model-summary price. Availability-only and no-known-route rows remain
-visible.
+matches. Fresh standard-tier text input/output components are paired, duplicate
+source and equivalent regional offers are consolidated, and regional price
+differences are shown as ranges. Non-Australian or regionless price evidence is
+never attached to an Australian route.
 
-The `availability_evidence_kind` field and the bracketed labels in the readable
-summary distinguish synced account/project catalog evidence,
-`curated_fallback` possibilities, `pricing_only` observations, and
-provider-managed or provider-routed paths. A curated fallback is not confirmed
-model availability in a named account or region; verify account entitlement,
-quota, residency controls, and the cited source before deployment.
+Bracketed labels distinguish confirmed synced routes, possible curated routes,
+and price-only observations. Price-only Australian evidence may be shown for
+commercial context, but is explicitly labelled `availability unconfirmed` and
+must not be interpreted as account access or Australian data residency. Verify
+entitlement, quota, residency controls, and provider terms before deployment.
 
-Price evidence keeps lifecycle status (`current`, `free`, `unavailable`, or
-`custom`) separate from the `pricing_is_stale` freshness flag. No currency
-conversion or global cheapest-price calculation is performed. The model-level
-Australian price summary includes only fresh, matched, standard-tier text
-input/output pairs in their native unit, reports a genuinely free pair as free,
-and explicitly distinguishes a confirmed synced Australian route without a
-current price from a possible, unconfirmed curated fallback. Use
-`inference-costs.csv`, not the summary, for conditional, multimodal, batch,
+No currency conversion or global cheapest-price calculation is performed.
+Genuinely free standard text pairs are labelled `Free`; stale offers are
+excluded from current summaries and counted in the caveats column. Use the
+review catalog/API for component provenance, conditional, multimodal, batch,
 cached, provisioned, or other non-comparable charges.
 
 The matching read-only API accepts an omitted or `null` `model_ids` field for
