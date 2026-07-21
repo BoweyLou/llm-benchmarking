@@ -165,6 +165,7 @@ class ReviewWorkbenchTests(unittest.TestCase):
             "Stale prices are excluded from current summaries and called out in the field guide.",
             app_response.text,
         )
+        self.assertIn('<option value="mixed">Mixed</option>', app_response.text)
         self.assertIn('value="all"', app_response.text)
         self.assertIn('value="filtered"', app_response.text)
         self.assertIn('value="selected" disabled', app_response.text)
